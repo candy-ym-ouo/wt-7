@@ -130,6 +130,27 @@ export interface CustomerPreference {
   preferenceStrength: number
 }
 
+export type CustomerIdentityTag = 'newbie' | 'collector' | 'connoisseur' | 'enthusiast' | 'pragmatist' | 'adventurer'
+
+export interface CustomerIdentityConfig {
+  tag: CustomerIdentityTag
+  name: string
+  icon: string
+  description: string
+  baseWeight: number
+  preferenceStrength: [number, number]
+  priceRangeMultiplier: [number, number]
+  budgetMultiplier: [number, number]
+  rarityBias: number[]
+  genreFocusCount: [number, number]
+  satisfactionOnMatch: number
+  satisfactionOnMismatch: number
+  collectionChanceBonus: number
+  bargainModifier: number
+  patienceModifier: number
+  unlockedByAlbumIds?: string[]
+}
+
 export interface Customer {
   id: string
   name: string
@@ -150,6 +171,7 @@ export interface Customer {
   willBargain: boolean
   isImpatient: boolean
   hasLeftAngrily: boolean
+  identityTag: CustomerIdentityTag | null
 }
 
 export type PatienceLevel = 'calm' | 'waiting' | 'restless' | 'impatient' | 'furious'

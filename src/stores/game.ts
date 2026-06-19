@@ -25,7 +25,10 @@ import {
   getPatienceLevelColor,
   calculatePatienceDecay,
   applyPatienceDecay,
-  sortCustomerQueue
+  sortCustomerQueue,
+  calculateIdentitySatisfactionModifier,
+  getIdentityCollectionChanceBonus,
+  getIdentityTagInfo
 } from '@/data/customers'
 import type { Genre } from '@/types'
 import {
@@ -894,19 +897,33 @@ export const useGameStore = defineStore('game', () => {
     }))
   }
 
+  const getActivatedAlbumIds = (): string[] => {
+    const ids: string[] = []
+    for (const category of albumState.value.categories) {
+      for (const entry of category.entries) {
+        if (entry.isActivated) {
+          ids.push(entry.id)
+        }
+      }
+    }
+    return ids
+  }
+
   const generateCustomersWithSpecial = (
     count: number,
     day: number,
     timeSlot: TimeSlot
   ): Customer[] => {
     const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
+    const activatedAlbumIds = getActivatedAlbumIds()
     const result = generateDailyCustomers(
       count,
       day,
       members.value,
       shopReputation.value,
       inventoryGenres,
-      timeSlot
+      timeSlot,
+      activatedAlbumIds
     )
 
     let customers = applyCustomerBonuses(result.customers)
@@ -1607,13 +1624,22 @@ export const useGameStore = defineStore('game', () => {
 
       const fastServiceBonus = customer.patience >= customer.maxPatience * 0.8 ? 5 : 0
 
+      const isGenreMatch = customer.preference.favoriteGenres.includes(record.genre)
+      const isRarityMatch = customer.preference.preferredRarity.includes(record.rarity)
+      const identitySatisfactionMod = calculateIdentitySatisfactionModifier(
+        customer,
+        isGenreMatch,
+        isRarityMatch,
+        slotConditionScore
+      )
+
       const satisfaction = Math.max(
         20,
         Math.min(
           100,
           baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier +
           bargainSatisfactionBonus + eventSatisfactionModifier.value +
-          patienceSatisfactionMod + fastServiceBonus
+          patienceSatisfactionMod + fastServiceBonus + identitySatisfactionMod
         )
       )
 
@@ -1696,7 +1722,11 @@ export const useGameStore = defineStore('game', () => {
       slot.inventoryId = null
       slot.conditionScore = null
 
-      if (satisfaction >= 80 && Math.random() < 0.3) {
+      const identityCollectionBonus = getIdentityCollectionChanceBonus(customer)
+      const baseCollectionChance = 0.3
+      const finalCollectionChance = Math.max(0, Math.min(1, baseCollectionChance + identityCollectionBonus))
+
+      if (satisfaction >= 80 && Math.random() < finalCollectionChance) {
         addToCollection(record, invItem.actualCostPrice, slotConditionScore)
       }
 
@@ -2608,7 +2638,8 @@ export const useGameStore = defineStore('game', () => {
       bargainToughness: 0.2 + Math.random() * 0.3,
       willBargain: Math.random() < 0.2,
       isImpatient: false,
-      hasLeftAngrily: false
+      hasLeftAngrily: false,
+      identityTag: 'collector' as const
     }
   }
 
@@ -2793,6 +2824,7 @@ export const useGameStore = defineStore('game', () => {
     effectiveProfit,
     applyDailyOverstockPenalty,
     sellAtDiscount,
-    checkPurchaseOverstockRisk
+    checkPurchaseOverstockRisk,
+    getIdentityTagInfo
   }
 })

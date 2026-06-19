@@ -1,4 +1,4 @@
-import type { Customer, Genre, MemberProfile, TimeSlot, PatienceLevel, PatienceConfig, CustomerQueueSortStrategy } from '@/types'
+import type { Customer, Genre, MemberProfile, TimeSlot, PatienceLevel, PatienceConfig, CustomerQueueSortStrategy, CustomerIdentityTag, CustomerIdentityConfig } from '@/types'
 import {
   createMemberProfile,
   updateMemberOnVisit,
@@ -38,7 +38,156 @@ const genreBundles: { genres: Genre[], name: string }[] = [
   { genres: ['Blues', 'Rock', 'Folk'], name: '根源音乐党' }
 ]
 
-const generatePreference = () => {
+export const customerIdentityConfigs: CustomerIdentityConfig[] = [
+  {
+    tag: 'newbie',
+    name: '音乐新手',
+    icon: '🌱',
+    description: '初次接触黑胶唱片，对各种音乐风格都充满好奇',
+    baseWeight: 25,
+    preferenceStrength: [0.2, 0.4],
+    priceRangeMultiplier: [0.7, 0.9],
+    budgetMultiplier: [0.7, 1.0],
+    rarityBias: [1, 1, 1, 0.3, 0.1],
+    genreFocusCount: [3, 5],
+    satisfactionOnMatch: 8,
+    satisfactionOnMismatch: -3,
+    collectionChanceBonus: -0.1,
+    bargainModifier: 0.15,
+    patienceModifier: 1.1
+  },
+  {
+    tag: 'collector',
+    name: '资深收藏家',
+    icon: '💎',
+    description: '追求稀有珍品，只收精品，愿意为心头好一掷千金',
+    baseWeight: 10,
+    preferenceStrength: [0.8, 1.0],
+    priceRangeMultiplier: [1.5, 2.5],
+    budgetMultiplier: [1.8, 3.0],
+    rarityBias: [0.1, 0.3, 0.6, 1.0, 1.5],
+    genreFocusCount: [1, 2],
+    satisfactionOnMatch: 15,
+    satisfactionOnMismatch: -10,
+    collectionChanceBonus: 0.4,
+    bargainModifier: -0.15,
+    patienceModifier: 0.9,
+    unlockedByAlbumIds: ['album-rare-1']
+  },
+  {
+    tag: 'connoisseur',
+    name: '鉴赏行家',
+    icon: '🎓',
+    description: '对品相要求极高，注重唱片的收藏价值和保存状态',
+    baseWeight: 12,
+    preferenceStrength: [0.6, 0.85],
+    priceRangeMultiplier: [1.2, 1.8],
+    budgetMultiplier: [1.3, 2.0],
+    rarityBias: [0.2, 0.5, 0.8, 1.0, 0.8],
+    genreFocusCount: [2, 3],
+    satisfactionOnMatch: 12,
+    satisfactionOnMismatch: -8,
+    collectionChanceBonus: 0.25,
+    bargainModifier: -0.05,
+    patienceModifier: 1.0,
+    unlockedByAlbumIds: ['album-rare-2']
+  },
+  {
+    tag: 'enthusiast',
+    name: '音乐发烧友',
+    icon: '🔥',
+    description: '对特定风格极度热爱，深入挖掘该流派的每一张唱片',
+    baseWeight: 18,
+    preferenceStrength: [0.7, 0.95],
+    priceRangeMultiplier: [1.0, 1.5],
+    budgetMultiplier: [1.1, 1.8],
+    rarityBias: [0.3, 0.6, 0.9, 1.0, 0.7],
+    genreFocusCount: [1, 2],
+    satisfactionOnMatch: 18,
+    satisfactionOnMismatch: -12,
+    collectionChanceBonus: 0.15,
+    bargainModifier: 0.05,
+    patienceModifier: 0.85
+  },
+  {
+    tag: 'pragmatist',
+    name: '实用主义者',
+    icon: '💰',
+    description: '注重性价比，只买合适的不买贵的',
+    baseWeight: 20,
+    preferenceStrength: [0.3, 0.6],
+    priceRangeMultiplier: [0.6, 0.9],
+    budgetMultiplier: [0.6, 0.95],
+    rarityBias: [1.0, 1.0, 0.7, 0.4, 0.2],
+    genreFocusCount: [2, 4],
+    satisfactionOnMatch: 6,
+    satisfactionOnMismatch: -5,
+    collectionChanceBonus: -0.05,
+    bargainModifier: 0.2,
+    patienceModifier: 1.05
+  },
+  {
+    tag: 'adventurer',
+    name: '猎奇探索家',
+    icon: '🗺️',
+    description: '喜欢尝试各种小众音乐风格，乐于发现新声音',
+    baseWeight: 15,
+    preferenceStrength: [0.4, 0.7],
+    priceRangeMultiplier: [0.8, 1.2],
+    budgetMultiplier: [0.9, 1.4],
+    rarityBias: [0.5, 0.8, 1.0, 0.9, 0.6],
+    genreFocusCount: [4, 6],
+    satisfactionOnMatch: 10,
+    satisfactionOnMismatch: 2,
+    collectionChanceBonus: 0.1,
+    bargainModifier: 0.0,
+    patienceModifier: 1.15
+  }
+]
+
+const getIdentityConfig = (tag: CustomerIdentityTag): CustomerIdentityConfig => {
+  return customerIdentityConfigs.find(c => c.tag === tag) || customerIdentityConfigs[0]
+}
+
+export const generateIdentityTag = (
+  unlockedAlbumIds: string[] = [],
+  reputation: number = 50
+): CustomerIdentityTag | null => {
+  const availableConfigs = customerIdentityConfigs.filter(config => {
+    if (config.unlockedByAlbumIds && config.unlockedByAlbumIds.length > 0) {
+      return config.unlockedByAlbumIds.every(id => unlockedAlbumIds.includes(id))
+    }
+    return true
+  })
+
+  if (availableConfigs.length === 0) return null
+
+  const reputationBoost = Math.min(0.5, reputation / 200)
+  const weights = availableConfigs.map(config => {
+    let weight = config.baseWeight
+    if (config.tag === 'collector' || config.tag === 'connoisseur') {
+      weight *= (1 + reputationBoost)
+    }
+    if (config.tag === 'newbie') {
+      weight *= (1 - reputationBoost * 0.5)
+    }
+    return weight
+  })
+
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0)
+  let random = Math.random() * totalWeight
+
+  for (let i = 0; i < availableConfigs.length; i++) {
+    random -= weights[i]
+    if (random <= 0) {
+      return availableConfigs[i].tag
+    }
+  }
+
+  return availableConfigs[0].tag
+}
+
+const generatePreference = (identityTag: CustomerIdentityTag | null = null) => {
   const bundle = genreBundles[Math.floor(Math.random() * genreBundles.length)]
   const priceRanges: [number, number][] = [
     [100, 250],
@@ -46,8 +195,8 @@ const generatePreference = () => {
     [300, 500],
     [400, 600]
   ]
-  const priceRange = priceRanges[Math.floor(Math.random() * priceRanges.length)]
-  const preferredRarity = [
+  let priceRange = priceRanges[Math.floor(Math.random() * priceRanges.length)]
+  let preferredRarity = [
     [1, 2],
     [2, 3],
     [3, 4],
@@ -56,11 +205,62 @@ const generatePreference = () => {
     [3, 4, 5]
   ][Math.floor(Math.random() * 6)] as number[]
 
+  let preferenceStrength = 0.4 + Math.random() * 0.6
+  let favoriteGenres = [...bundle.genres]
+
+  if (identityTag) {
+    const identityConfig = getIdentityConfig(identityTag)
+
+    const strengthMin = identityConfig.preferenceStrength[0]
+    const strengthMax = identityConfig.preferenceStrength[1]
+    preferenceStrength = strengthMin + Math.random() * (strengthMax - strengthMin)
+
+    const priceMultMin = identityConfig.priceRangeMultiplier[0]
+    const priceMultMax = identityConfig.priceRangeMultiplier[1]
+    const priceMultiplier = priceMultMin + Math.random() * (priceMultMax - priceMultMin)
+    priceRange = [
+      Math.floor(priceRange[0] * priceMultiplier),
+      Math.floor(priceRange[1] * priceMultiplier)
+    ]
+
+    const genreCountMin = identityConfig.genreFocusCount[0]
+    const genreCountMax = identityConfig.genreFocusCount[1]
+    const targetGenreCount = Math.floor(genreCountMin + Math.random() * (genreCountMax - genreCountMin + 1))
+
+    if (targetGenreCount > favoriteGenres.length) {
+      const allGenres: Genre[] = ['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk']
+      const availableGenres = allGenres.filter(g => !favoriteGenres.includes(g))
+      const shuffled = availableGenres.sort(() => Math.random() - 0.5)
+      const additionalGenres = shuffled.slice(0, targetGenreCount - favoriteGenres.length)
+      favoriteGenres = [...favoriteGenres, ...additionalGenres]
+    } else if (targetGenreCount < favoriteGenres.length) {
+      favoriteGenres = favoriteGenres.slice(0, targetGenreCount)
+    }
+
+    const rarityBias = identityConfig.rarityBias
+    const weightedRarities: number[] = []
+    for (let rarity = 1; rarity <= 5; rarity++) {
+      const count = Math.ceil(rarityBias[rarity - 1] * 10)
+      for (let i = 0; i < count; i++) {
+        weightedRarities.push(rarity)
+      }
+    }
+    if (weightedRarities.length > 0) {
+      const selectedRarities = new Set<number>()
+      while (selectedRarities.size < 2 && weightedRarities.length > 0) {
+        const idx = Math.floor(Math.random() * weightedRarities.length)
+        selectedRarities.add(weightedRarities[idx])
+        weightedRarities.splice(idx, 1)
+      }
+      preferredRarity = Array.from(selectedRarities).sort((a, b) => a - b)
+    }
+  }
+
   return {
-    favoriteGenres: bundle.genres,
+    favoriteGenres,
     priceRange,
     preferredRarity,
-    preferenceStrength: 0.4 + Math.random() * 0.6
+    preferenceStrength
   }
 }
 
@@ -217,7 +417,8 @@ export const generateCustomer = (
   reputation: number = 50,
   inventoryGenres: Genre[] = [],
   timeSlot: TimeSlot = 'afternoon',
-  arrivalOrder: number = 0
+  arrivalOrder: number = 0,
+  identityTag: CustomerIdentityTag | null = null
 ): Customer => {
   let preference
   let name
@@ -284,7 +485,8 @@ export const generateCustomer = (
       bargainToughness: Math.max(0.2, Math.min(0.9, 0.4 + Math.random() * 0.4 + memberBargainBias * 0.5)),
       willBargain: Math.random() < (0.35 + memberBargainBias + updatedMember.visitCount * 0.01),
       isImpatient: false,
-      hasLeftAngrily: false
+      hasLeftAngrily: false,
+      identityTag
     }
 
     customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, arrivalOrder)
@@ -292,7 +494,7 @@ export const generateCustomer = (
   } else {
     const nameIndex = Math.floor(Math.random() * customerNames.length)
     const avatarIndex = Math.floor(Math.random() * avatars.length)
-    preference = generatePreference()
+    preference = generatePreference(identityTag)
     name = customerNames[nameIndex]
     avatar = avatars[avatarIndex]
     const slotConfig = getTimeSlotConfig(timeSlot)
@@ -302,9 +504,25 @@ export const generateCustomer = (
     if (slotRarity.length > 0 && Math.random() < 0.4) {
       preference.preferredRarity = slotRarity
     }
-    const baseBudget = preference.priceRange[1] * (1.5 + Math.random())
+
+    let baseBudget = preference.priceRange[1] * (1.5 + Math.random())
+
+    let bargainModifier = 0
+    let patienceModifier = 1.0
+
+    if (identityTag) {
+      const identityConfig = getIdentityConfig(identityTag)
+      const budgetMultMin = identityConfig.budgetMultiplier[0]
+      const budgetMultMax = identityConfig.budgetMultiplier[1]
+      const budgetMultiplier = budgetMultMin + Math.random() * (budgetMultMax - budgetMultMin)
+      baseBudget *= budgetMultiplier
+
+      bargainModifier = identityConfig.bargainModifier
+      patienceModifier = identityConfig.patienceModifier
+    }
+
     budget = getBudgetWithReputation(Math.floor(baseBudget), reputation)
-    basePatience = 30 + Math.floor(Math.random() * 40)
+    basePatience = Math.floor((30 + Math.floor(Math.random() * 40)) * patienceModifier)
 
     if (timeSlot === 'night') {
       patienceDecayRate *= 1.15
@@ -333,11 +551,12 @@ export const generateCustomer = (
       memberProfile: null,
       isReturningCustomer: false,
       memberDiscount: 0,
-      bargainAggressiveness: 0.2 + Math.random() * 0.6,
-      bargainToughness: 0.3 + Math.random() * 0.5,
-      willBargain: Math.random() < 0.45,
+      bargainAggressiveness: Math.max(0.1, Math.min(0.8, 0.2 + Math.random() * 0.6 + bargainModifier)),
+      bargainToughness: Math.max(0.2, Math.min(0.9, 0.3 + Math.random() * 0.5 + bargainModifier * 0.5)),
+      willBargain: Math.random() < (0.45 + bargainModifier),
       isImpatient: false,
-      hasLeftAngrily: false
+      hasLeftAngrily: false,
+      identityTag
     }
 
     customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, arrivalOrder)
@@ -351,7 +570,8 @@ export const generateDailyCustomers = (
   existingMembers: MemberProfile[] = [],
   reputation: number = 50,
   inventoryGenres: Genre[] = [],
-  timeSlot: TimeSlot = 'afternoon'
+  timeSlot: TimeSlot = 'afternoon',
+  unlockedAlbumIds: string[] = []
 ): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
   const newMemberProfiles: MemberProfile[] = []
@@ -366,13 +586,15 @@ export const generateDailyCustomers = (
 
   for (let i = 0; i < selectedReturningMembers.length; i++) {
     const member = selectedReturningMembers[i]
+    const memberIdentityTag = generateIdentityTag(unlockedAlbumIds, reputation)
     const customer = generateCustomer(
       `cust-${day}-return-${i}-${Date.now()}`,
       member,
       reputation,
       inventoryGenres,
       timeSlot,
-      arrivalCounter++
+      arrivalCounter++,
+      memberIdentityTag
     )
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customers.push(customer)
@@ -380,13 +602,15 @@ export const generateDailyCustomers = (
 
   const newCustomerCount = count - selectedReturningMembers.length
   for (let i = 0; i < newCustomerCount; i++) {
+    const identityTag = generateIdentityTag(unlockedAlbumIds, reputation)
     const customer = generateCustomer(
       `cust-${day}-new-${i}-${Date.now()}`,
       null,
       reputation,
       inventoryGenres,
       timeSlot,
-      arrivalCounter++
+      arrivalCounter++,
+      identityTag
     )
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     const dayPatienceMod = Math.max(0.7, 1 - day * 0.02)
@@ -610,6 +834,70 @@ export const calculateBargainSatisfactionBonus = (
     return Math.floor(baseBonus + toughnessBonus)
   } else {
     return -15
+  }
+}
+
+export const calculateIdentitySatisfactionModifier = (
+  customer: Customer,
+  isGenreMatch: boolean,
+  isRarityMatch: boolean,
+  conditionScore: number
+): number => {
+  if (!customer.identityTag) return 0
+
+  const config = getIdentityConfig(customer.identityTag)
+  let modifier = 0
+
+  if (isGenreMatch) {
+    modifier += config.satisfactionOnMatch
+  } else {
+    modifier += config.satisfactionOnMismatch
+  }
+
+  if (isRarityMatch && customer.identityTag === 'collector') {
+    modifier += 8
+  }
+
+  if (customer.identityTag === 'connoisseur' && conditionScore >= 85) {
+    modifier += 10
+  } else if (customer.identityTag === 'connoisseur' && conditionScore < 60) {
+    modifier -= 10
+  }
+
+  if (customer.identityTag === 'newbie' && !isGenreMatch && !isRarityMatch) {
+    modifier += 5
+  }
+
+  return modifier
+}
+
+export const getIdentityCollectionChanceBonus = (
+  customer: Customer
+): number => {
+  if (!customer.identityTag) return 0
+
+  const config = getIdentityConfig(customer.identityTag)
+  return config.collectionChanceBonus
+}
+
+export const getIdentityTagInfo = (tag: CustomerIdentityTag | null): {
+  name: string
+  icon: string
+  description: string
+} => {
+  if (!tag) {
+    return {
+      name: '普通顾客',
+      icon: '👤',
+      description: '一位普通的音乐爱好者'
+    }
+  }
+
+  const config = getIdentityConfig(tag)
+  return {
+    name: config.name,
+    icon: config.icon,
+    description: config.description
   }
 }
 
