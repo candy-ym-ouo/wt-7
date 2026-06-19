@@ -97,13 +97,27 @@ import {
   getPlaybackThemeBonus,
   themes
 } from '@/data/themeDisplay'
+import {
+  createEmptyAtmosphereMap,
+  applyPlaybackAtmosphere,
+  decayAtmosphere,
+  getGenrePatienceSlowdown,
+  getGenreRecommendationBoost,
+  getGenreBuyChanceBoost,
+  calculateDailyAtmosphereReputationBonus,
+  getAverageAtmosphereValue,
+  getTopAtmosphereGenres,
+  getAllGenreAtmospheres,
+  getGenreAtmosphere
+} from '@/data/atmosphere'
 import type {
   AlbumState,
   SpecialCustomerConfig,
   CollectionBonus,
   AlbumBonusType,
   ThemeMatchResult,
-  ThemeConfig
+  ThemeConfig,
+  GenreAtmosphere
 } from '@/types'
 
 export const useGameStore = defineStore('game', () => {
@@ -121,6 +135,7 @@ export const useGameStore = defineStore('game', () => {
   const shopReputation = ref(50)
   const isPlaying = ref(false)
   const currentPlayingRecord = ref<Record | null>(null)
+  const genreAtmosphere = ref<Map<Genre, number>>(createEmptyAtmosphereMap())
   const currentLevelProfit = ref(0)
   const currentLevelSales = ref(0)
   const completedLevels = ref<number[]>([])
@@ -614,6 +629,7 @@ export const useGameStore = defineStore('game', () => {
     overstockPenalties.value = new Map()
     dailyOverstockPenalty.value = null
     totalOverstockPenaltyAccumulated.value = 0
+    genreAtmosphere.value = createEmptyAtmosphereMap()
     
     checkAndActivateAlbums()
     updateCollectionBonuses()
@@ -652,6 +668,7 @@ export const useGameStore = defineStore('game', () => {
     customersLeftAngrily.value = 0
     dailyLostSales.value = new Map()
     dailyOverstockPenalty.value = null
+    genreAtmosphere.value = createEmptyAtmosphereMap()
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -1045,11 +1062,47 @@ export const useGameStore = defineStore('game', () => {
   const playRecord = (record: Record) => {
     isPlaying.value = true
     currentPlayingRecord.value = record
+    genreAtmosphere.value = applyPlaybackAtmosphere(genreAtmosphere.value, record)
   }
 
   const stopPlaying = () => {
     isPlaying.value = false
     currentPlayingRecord.value = null
+  }
+
+  const getAtmosphereForGenre = (genre: Genre): GenreAtmosphere => {
+    return getGenreAtmosphere(genreAtmosphere.value, genre)
+  }
+
+  const allGenreAtmospheres = computed<GenreAtmosphere[]>(() => {
+    return getAllGenreAtmospheres(genreAtmosphere.value)
+  })
+
+  const topAtmosphereGenres = computed<GenreAtmosphere[]>(() => {
+    return getTopAtmosphereGenres(genreAtmosphere.value, 3)
+  })
+
+  const averageAtmosphere = computed<number>(() => {
+    return getAverageAtmosphereValue(genreAtmosphere.value)
+  })
+
+  const getAtmospherePatienceSlowdown = (genres: Genre[]): number => {
+    let maxSlowdown = 0
+    for (const genre of genres) {
+      const slowdown = getGenrePatienceSlowdown(genreAtmosphere.value, genre)
+      if (slowdown > maxSlowdown) {
+        maxSlowdown = slowdown
+      }
+    }
+    return maxSlowdown
+  }
+
+  const getAtmosphereRecommendationBoost = (genre: Genre): number => {
+    return getGenreRecommendationBoost(genreAtmosphere.value, genre)
+  }
+
+  const getAtmosphereBuyChanceBoost = (genre: Genre): number => {
+    return getGenreBuyChanceBoost(genreAtmosphere.value, genre)
   }
 
   const getPlayingGenres = (): Genre[] => {
@@ -1073,6 +1126,11 @@ export const useGameStore = defineStore('game', () => {
         defaultPatienceConfig
       )
 
+      const atmosphereSlowdown = getAtmospherePatienceSlowdown(cust.preference.favoriteGenres)
+      if (atmosphereSlowdown > 0) {
+        decay *= (1 - atmosphereSlowdown)
+      }
+
       if (idx === currentCustomerIndex.value) {
         decay *= 0.3
       }
@@ -1093,6 +1151,8 @@ export const useGameStore = defineStore('game', () => {
       customersLeftAngrily.value += leftAngrilyCount
       shopReputation.value = Math.max(0, shopReputation.value - leftAngrilyCount * 3)
     }
+
+    genreAtmosphere.value = decayAtmosphere(genreAtmosphere.value, 1.5)
 
     resortCustomerQueueIfNeeded()
   }
@@ -1174,7 +1234,7 @@ export const useGameStore = defineStore('game', () => {
     const urgencyMultiplier = customer.isImpatient ? 1.8 : (patienceRatio < 0.5 ? 1.0 + (0.5 - patienceRatio) : 1.0)
     const genreWeightBoost = patienceRatio < 0.5 ? (1 - patienceRatio) * 15 : 0
 
-    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; urgencyHint: string | null; overstockStatus: OverstockStatus | null }
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; atmosphereBoost: number; urgencyHint: string | null; overstockStatus: OverstockStatus | null }
     const overstockMap = new Map(overstockInfos.value.map(i => [i.recordId, i]))
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
@@ -1185,6 +1245,13 @@ export const useGameStore = defineStore('game', () => {
         finalScore += genreWeightBoost
       } else if (isGenreMatch) {
         finalScore += genreWeightBoost * 0.5
+      }
+
+      const atmosphereBoost = getAtmosphereRecommendationBoost(d.item.record.genre)
+      if (isGenreMatch) {
+        finalScore += atmosphereBoost
+      } else {
+        finalScore += atmosphereBoost * 0.3
       }
 
       finalScore *= urgencyMultiplier
@@ -1223,6 +1290,7 @@ export const useGameStore = defineStore('game', () => {
         conditionScore: d.conditionScore, 
         score: Math.min(100, finalScore),
         themeBonus,
+        atmosphereBoost,
         urgencyHint,
         overstockStatus
       } as ScoredRecord
@@ -1483,6 +1551,7 @@ export const useGameStore = defineStore('game', () => {
     buyChance += buyChanceBonusFromCollection.value
     buyChance += themeBuyBonus
     buyChance += eventBuyChanceModifier.value
+    buyChance += getAtmosphereBuyChanceBoost(record.genre)
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (salePrice > customer.budget) {
@@ -2294,7 +2363,13 @@ export const useGameStore = defineStore('game', () => {
 
   const endDay = () => {
     stopPatienceTick()
+    stopPlaying()
     degradeAllRecords()
+
+    const atmosphereRepBonus = calculateDailyAtmosphereReputationBonus(genreAtmosphere.value)
+    if (atmosphereRepBonus > 0) {
+      shopReputation.value = Math.min(100, shopReputation.value + atmosphereRepBonus)
+    }
 
     applyDailyOverstockPenalty()
 
@@ -2647,6 +2722,14 @@ export const useGameStore = defineStore('game', () => {
     nextCustomer,
     playRecord,
     stopPlaying,
+    genreAtmosphere,
+    allGenreAtmospheres,
+    topAtmosphereGenres,
+    averageAtmosphere,
+    getAtmosphereForGenre,
+    getAtmospherePatienceSlowdown,
+    getAtmosphereRecommendationBoost,
+    getAtmosphereBuyChanceBoost,
     getCustomerRecommendations,
     advancePhase,
     switchToNightSlot,

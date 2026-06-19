@@ -26,6 +26,26 @@ export interface LevelEvaluation {
 
 export type Genre = 'Jazz' | 'Rock' | 'Soul' | 'Funk' | 'Disco' | 'Classical' | 'Blues' | 'Pop' | 'Electronic' | 'Folk'
 
+export type AtmosphereTier = 'faint' | 'mild' | 'strong' | 'intense'
+
+export interface AtmosphereConfig {
+  tier: AtmosphereTier
+  tierName: string
+  minValue: number
+  maxValue: number
+  patienceSlowdown: number
+  recommendationBoost: number
+  buyChanceBoost: number
+  reputationBonus: number
+  icon: string
+}
+
+export interface GenreAtmosphere {
+  genre: Genre
+  value: number
+  tier: AtmosphereTier
+}
+
 export type MemberLevel = 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond'
 
 export interface MemberProfile {
