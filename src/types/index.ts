@@ -191,6 +191,40 @@ export interface SaleRecord {
   wasBargained: boolean
 }
 
+export type OverstockStatus = 'normal' | 'slow' | 'overstocked' | 'deadstock'
+
+export interface OverstockConfig {
+  slowThresholdDays: number
+  overstockedThresholdDays: number
+  deadstockThresholdDays: number
+  slowDailyPenaltyRate: number
+  overstockedDailyPenaltyRate: number
+  deadstockDailyPenaltyRate: number
+  slowSellThroughThreshold: number
+  overstockedSellThroughThreshold: number
+  maxDiscountRate: number
+  discountStep: number
+}
+
+export interface OverstockInfo {
+  recordId: string
+  status: OverstockStatus
+  daysInStock: number
+  sellThroughRate: number
+  dailyPenalty: number
+  totalPenaltyAccumulated: number
+  suggestedDiscount: number
+  discountedSellPrice: number
+  isInDisplay: boolean
+  displayPriorityBoost: number
+}
+
+export interface DailyOverstockPenalty {
+  day: number
+  totalPenalty: number
+  items: { recordId: string; recordTitle: string; status: OverstockStatus; penalty: number }[]
+}
+
 export interface LevelConfig {
   id: number
   name: string
@@ -204,6 +238,7 @@ export interface LevelConfig {
   initialBudget: number
   days: number
   memberTargets: LevelMemberTarget
+  overstockConfig: OverstockConfig
 }
 
 export interface CollectionItem {
@@ -421,6 +456,7 @@ export type LostSaleReason =
   | 'patience_exhausted'
   | 'bargain_failed'
   | 'customer_skipped'
+  | 'overstock_penalty'
   | 'other'
 
 export interface LostSaleStat {

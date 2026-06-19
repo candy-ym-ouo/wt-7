@@ -1,6 +1,19 @@
 import type { LevelConfig, Genre } from '@/types'
 import { getDifficultyScale } from './wordOfMouth'
 
+export const defaultOverstockConfig = {
+  slowThresholdDays: 2,
+  overstockedThresholdDays: 4,
+  deadstockThresholdDays: 6,
+  slowDailyPenaltyRate: 0.02,
+  overstockedDailyPenaltyRate: 0.05,
+  deadstockDailyPenaltyRate: 0.1,
+  slowSellThroughThreshold: 0.5,
+  overstockedSellThroughThreshold: 0.2,
+  maxDiscountRate: 0.5,
+  discountStep: 0.1
+}
+
 export const levels: LevelConfig[] = [
   {
     id: 1,
@@ -18,6 +31,15 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 2,
       targetReturningVisits: 0,
       targetMemberSalesRatio: 0.2
+    },
+    overstockConfig: {
+      ...defaultOverstockConfig,
+      slowThresholdDays: 3,
+      overstockedThresholdDays: 5,
+      deadstockThresholdDays: 7,
+      slowDailyPenaltyRate: 0.01,
+      overstockedDailyPenaltyRate: 0.03,
+      deadstockDailyPenaltyRate: 0.06
     }
   },
   {
@@ -36,6 +58,15 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 5,
       targetReturningVisits: 3,
       targetMemberSalesRatio: 0.35
+    },
+    overstockConfig: {
+      ...defaultOverstockConfig,
+      slowThresholdDays: 3,
+      overstockedThresholdDays: 5,
+      deadstockThresholdDays: 7,
+      slowDailyPenaltyRate: 0.015,
+      overstockedDailyPenaltyRate: 0.04,
+      deadstockDailyPenaltyRate: 0.08
     }
   },
   {
@@ -54,6 +85,12 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 8,
       targetReturningVisits: 8,
       targetMemberSalesRatio: 0.45
+    },
+    overstockConfig: {
+      ...defaultOverstockConfig,
+      slowDailyPenaltyRate: 0.02,
+      overstockedDailyPenaltyRate: 0.05,
+      deadstockDailyPenaltyRate: 0.1
     }
   },
   {
@@ -72,6 +109,15 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 12,
       targetReturningVisits: 15,
       targetMemberSalesRatio: 0.55
+    },
+    overstockConfig: {
+      ...defaultOverstockConfig,
+      slowThresholdDays: 2,
+      overstockedThresholdDays: 3,
+      deadstockThresholdDays: 5,
+      slowDailyPenaltyRate: 0.025,
+      overstockedDailyPenaltyRate: 0.06,
+      deadstockDailyPenaltyRate: 0.12
     }
   },
   {
@@ -90,6 +136,15 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 18,
       targetReturningVisits: 25,
       targetMemberSalesRatio: 0.65
+    },
+    overstockConfig: {
+      ...defaultOverstockConfig,
+      slowThresholdDays: 2,
+      overstockedThresholdDays: 3,
+      deadstockThresholdDays: 4,
+      slowDailyPenaltyRate: 0.03,
+      overstockedDailyPenaltyRate: 0.07,
+      deadstockDailyPenaltyRate: 0.15
     }
   }
 ]

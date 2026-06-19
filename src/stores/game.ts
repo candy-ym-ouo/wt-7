@@ -7,7 +7,8 @@ import type {
   LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
   TimeSlot, TimeSlotStats, BargainState, BargainRound,
   ActiveBusinessEvent, LostSaleReason, HotGenre,
-  CustomerProfileSnapshot, CustomerProfileShift, DailySuggestion, DailyBusinessReview
+  CustomerProfileSnapshot, CustomerProfileShift, DailySuggestion, DailyBusinessReview,
+  OverstockInfo, OverstockStatus, DailyOverstockPenalty
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -61,7 +62,13 @@ import {
   updateSellThroughRates,
   createEmptyPerformance,
   calculateInventoryRiskScore,
-  generatePurchaseRecommendation
+  generatePurchaseRecommendation,
+  calculateOverstockInfo,
+  calculateTotalDailyPenalty,
+  generateOverstockWarnings,
+  generatePurchaseRiskWarning,
+  calculateDisplayPriorityBoost,
+  getOverstockStatus
 } from '@/data/performance'
 import {
   getTimeSlotConfig,
@@ -172,6 +179,10 @@ export const useGameStore = defineStore('game', () => {
   const customersLeftAngrily = ref(0)
   const dailyLostSales = ref<Map<LostSaleReason, number>>(new Map())
 
+  const overstockPenalties = ref<Map<string, number>>(new Map())
+  const dailyOverstockPenalty = ref<DailyOverstockPenalty | null>(null)
+  const totalOverstockPenaltyAccumulated = ref(0)
+
   const dailyEvent = ref<ActiveBusinessEvent | null>(null)
   const levelEvents = ref<ActiveBusinessEvent[]>([])
   const eventCustomerCountModifier = ref(0)
@@ -225,19 +236,6 @@ export const useGameStore = defineStore('game', () => {
   const wordOfMouthConfig = computed(() => getWordOfMouthTier(shopReputation.value))
   const difficultyScale = computed(() => wordOfMouthConfig.value.difficultyScale)
   const currentTimeSlotConfig = computed(() => getTimeSlotConfig(currentTimeSlot.value))
-  const levelEvaluation = computed<LevelEvaluation | null>(() => {
-    const config = currentLevelConfig.value
-    if (!config) return null
-    return calculateLevelEvaluation(
-      currentLevelProfit.value,
-      config.targetProfit,
-      currentLevelSales.value,
-      config.targetSales,
-      shopReputation.value,
-      config.targetSatisfaction,
-      levelStartReputation.value
-    )
-  })
   const availableRecords = computed(() => {
     const unlocked = getUnlockedGenres(currentLevel.value)
     return allRecords.filter(r => unlocked.includes(r.genre))
@@ -260,6 +258,57 @@ export const useGameStore = defineStore('game', () => {
 
   const inventoryRiskScore = computed(() => {
     return calculateInventoryRiskScore(inventory.value, recordPerformances.value, currentDay.value)
+  })
+
+  const overstockConfig = computed(() => {
+    return currentLevelConfig.value?.overstockConfig || null
+  })
+
+  const overstockInfos = computed<OverstockInfo[]>(() => {
+    if (!overstockConfig.value) return []
+    const displayedRecordIds = new Set(
+      displaySlots.value.filter(s => s.inventoryId).map(s => s.inventoryId!)
+    )
+    return inventory.value
+      .filter(item => item.quantity > 0)
+      .map(item => calculateOverstockInfo(
+        item,
+        recordPerformances.value,
+        currentDay.value,
+        displayedRecordIds,
+        overstockConfig.value!,
+        overstockPenalties.value
+      ))
+  })
+
+  const overstockWarnings = computed(() => {
+    return generateOverstockWarnings(overstockInfos.value)
+  })
+
+  const problemInventoryCount = computed(() => {
+    return overstockInfos.value.filter(i => i.status !== 'normal').length
+  })
+
+  const totalDailyOverstockPenalty = computed(() => {
+    return overstockInfos.value.reduce((sum, i) => sum + i.dailyPenalty, 0)
+  })
+
+  const effectiveProfit = computed(() => {
+    return currentLevelProfit.value - totalOverstockPenaltyAccumulated.value
+  })
+
+  const levelEvaluation = computed<LevelEvaluation | null>(() => {
+    const config = currentLevelConfig.value
+    if (!config) return null
+    return calculateLevelEvaluation(
+      effectiveProfit.value,
+      config.targetProfit,
+      currentLevelSales.value,
+      config.targetSales,
+      shopReputation.value,
+      config.targetSatisfaction,
+      levelStartReputation.value
+    )
   })
 
   const purchaseRecommendations = computed(() => {
@@ -390,7 +439,7 @@ export const useGameStore = defineStore('game', () => {
     const config = currentLevelConfig.value
     if (!config) return { profit: 0, sales: 0, satisfaction: 0 }
     return {
-      profit: Math.min(100, (currentLevelProfit.value / config.targetProfit) * 100),
+      profit: Math.min(100, (effectiveProfit.value / config.targetProfit) * 100),
       sales: Math.min(100, (currentLevelSales.value / config.targetSales) * 100),
       satisfaction: Math.min(100, (shopReputation.value / config.targetSatisfaction) * 100)
     }
@@ -399,7 +448,7 @@ export const useGameStore = defineStore('game', () => {
     const config = currentLevelConfig.value
     if (!config) return false
 
-    const baseComplete = currentLevelProfit.value >= config.targetProfit &&
+    const baseComplete = effectiveProfit.value >= config.targetProfit &&
            currentLevelSales.value >= config.targetSales &&
            shopReputation.value >= config.targetSatisfaction
 
@@ -562,6 +611,9 @@ export const useGameStore = defineStore('game', () => {
     recordPerformances.value = []
     totalInventoryPurchased.value = new Map()
     supplierPurchaseHistory.value = new Map()
+    overstockPenalties.value = new Map()
+    dailyOverstockPenalty.value = null
+    totalOverstockPenaltyAccumulated.value = 0
     
     checkAndActivateAlbums()
     updateCollectionBonuses()
@@ -599,6 +651,7 @@ export const useGameStore = defineStore('game', () => {
     consecutiveSkips.value = 0
     customersLeftAngrily.value = 0
     dailyLostSales.value = new Map()
+    dailyOverstockPenalty.value = null
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -1121,7 +1174,8 @@ export const useGameStore = defineStore('game', () => {
     const urgencyMultiplier = customer.isImpatient ? 1.8 : (patienceRatio < 0.5 ? 1.0 + (0.5 - patienceRatio) : 1.0)
     const genreWeightBoost = patienceRatio < 0.5 ? (1 - patienceRatio) * 15 : 0
 
-    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; urgencyHint: string | null }
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; urgencyHint: string | null; overstockStatus: OverstockStatus | null }
+    const overstockMap = new Map(overstockInfos.value.map(i => [i.recordId, i]))
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
       let finalScore = score + collectionMatchBonus + themeBonus
@@ -1144,9 +1198,21 @@ export const useGameStore = defineStore('game', () => {
       const conditionImpact = getConditionImpactOnSales(d.conditionScore)
       finalScore += conditionImpact.buyChanceModifier * 100
 
+      const overstockInfo = overstockMap.get(d.item.record.id)
+      const overstockStatus: OverstockStatus | null = overstockInfo?.status || null
+      if (overstockInfo && overstockInfo.status !== 'normal') {
+        finalScore += calculateDisplayPriorityBoost(overstockInfo.status)
+      }
+
       let urgencyHint: string | null = null
-      if (customer.isImpatient && isGenreMatch) {
+      if (overstockStatus === 'deadstock') {
+        urgencyHint = '🔥 严重积压！'
+      } else if (overstockStatus === 'overstocked') {
+        urgencyHint = '⚠️ 积压品'
+      } else if (customer.isImpatient && isGenreMatch) {
         urgencyHint = '急需匹配！'
+      } else if (overstockStatus === 'slow') {
+        urgencyHint = '📦 周转慢'
       } else if (patienceRatio < 0.4 && isGenreMatch) {
         urgencyHint = '建议优先'
       }
@@ -1157,7 +1223,8 @@ export const useGameStore = defineStore('game', () => {
         conditionScore: d.conditionScore, 
         score: Math.min(100, finalScore),
         themeBonus,
-        urgencyHint
+        urgencyHint,
+        overstockStatus
       } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
@@ -1782,6 +1849,7 @@ export const useGameStore = defineStore('game', () => {
       patience_exhausted: { label: '等待过久', description: '顾客等待时间过长，耐心耗尽离开' },
       bargain_failed: { label: '砍价失败', description: '价格谈判未能达成一致' },
       customer_skipped: { label: '跳过服务', description: '主动跳过接待该顾客' },
+      overstock_penalty: { label: '库存积压', description: '滞销唱片产生每日库存积压惩罚扣款' },
       other: { label: '其他原因', description: '未能成交的其他综合因素' }
     }
     return labels[reason]
@@ -2037,6 +2105,43 @@ export const useGameStore = defineStore('game', () => {
       })
     }
 
+    const overstockProblemItems = overstockInfos.value.filter(i => i.status !== 'normal')
+    if (overstockProblemItems.length > 0) {
+      const deadstockCount = overstockProblemItems.filter(i => i.status === 'deadstock').length
+      const overstockedCount = overstockProblemItems.filter(i => i.status === 'overstocked').length
+      const slowCount = overstockProblemItems.filter(i => i.status === 'slow').length
+      const totalPenalty = totalDailyOverstockPenalty.value
+
+      if (deadstockCount > 0) {
+        suggestions.push({
+          id: 'sug-overstock-deadstock',
+          category: 'inventory',
+          priority: 'high',
+          title: '严重库存积压！',
+          description: `${deadstockCount} 张唱片严重积压，每日扣罚 ¥${totalPenalty}，建议立即折价清仓！`,
+          action: '使用折价出售功能快速清仓'
+        })
+      } else if (overstockedCount > 0) {
+        suggestions.push({
+          id: 'sug-overstock',
+          category: 'inventory',
+          priority: 'high',
+          title: '库存积压警告',
+          description: `${overstockedCount} 张积压 + ${slowCount} 张周转缓慢，每日扣罚 ¥${totalPenalty}`,
+          action: '优先陈列或折价出售滞销品'
+        })
+      } else if (slowCount > 0) {
+        suggestions.push({
+          id: 'sug-overstock-slow',
+          category: 'inventory',
+          priority: 'medium',
+          title: '周转缓慢提醒',
+          description: `${slowCount} 张唱片周转缓慢，建议优先陈列以增加曝光`,
+          action: '将滞销品放到陈列架'
+        })
+      }
+    }
+
     if (suggestions.length === 0) {
       suggestions.push({
         id: 'sug-default',
@@ -2082,9 +2187,116 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  const applyDailyOverstockPenalty = () => {
+    if (!overstockConfig.value) return
+
+    const penaltyResult = calculateTotalDailyPenalty(
+      inventory.value,
+      recordPerformances.value,
+      currentDay.value,
+      overstockConfig.value
+    )
+
+    if (penaltyResult.totalPenalty > 0) {
+      budget.value -= penaltyResult.totalPenalty
+      dailyCost.value += penaltyResult.totalPenalty
+      currentLevelProfit.value -= penaltyResult.totalPenalty
+      totalOverstockPenaltyAccumulated.value += penaltyResult.totalPenalty
+
+      for (const item of penaltyResult.items) {
+        const currentAccumulated = overstockPenalties.value.get(item.recordId) || 0
+        overstockPenalties.value.set(item.recordId, currentAccumulated + item.penalty)
+      }
+
+      const penaltyItems = penaltyResult.items.map(i => {
+        const invItem = inventory.value.find(inv => inv.record.id === i.recordId)
+        return {
+          recordId: i.recordId,
+          recordTitle: invItem?.record.title || i.recordId,
+          status: i.status,
+          penalty: i.penalty
+        }
+      })
+
+      dailyOverstockPenalty.value = {
+        day: currentDay.value,
+        totalPenalty: penaltyResult.totalPenalty,
+        items: penaltyItems
+      }
+
+      recordLostSale('overstock_penalty')
+    } else {
+      dailyOverstockPenalty.value = null
+    }
+  }
+
+  const sellAtDiscount = (recordId: string): { success: boolean; message: string; salePrice: number; profit: number } => {
+    const invItem = inventory.value.find(i => i.record.id === recordId)
+    if (!invItem || invItem.quantity <= 0) {
+      return { success: false, message: '该唱片库存不存在', salePrice: 0, profit: 0 }
+    }
+
+    const info = overstockInfos.value.find(i => i.recordId === recordId)
+    if (!info || info.status === 'normal') {
+      return { success: false, message: '该唱片非滞销品，无需折价出售', salePrice: 0, profit: 0 }
+    }
+
+    if (info.suggestedDiscount <= 0) {
+      return { success: false, message: '无法折价出售', salePrice: 0, profit: 0 }
+    }
+
+    const salePrice = info.discountedSellPrice
+    const profit = salePrice - invItem.actualCostPrice
+
+    budget.value += salePrice
+    dailyRevenue.value += salePrice
+    currentLevelProfit.value += profit
+    currentLevelSales.value += 1
+    totalProfit.value += profit
+
+    invItem.quantity -= 1
+    if (invItem.quantity <= 0) {
+      inventory.value = inventory.value.filter(i => i.record.id !== recordId)
+      const slotIndex = displaySlots.value.findIndex(s => s.inventoryId === recordId)
+      if (slotIndex >= 0) {
+        displaySlots.value[slotIndex].inventoryId = null
+        displaySlots.value[slotIndex].conditionScore = null
+      }
+    }
+
+    const discountPercent = Math.round(info.suggestedDiscount * 100)
+    const statusLabel = info.status === 'deadstock' ? '死库存' : info.status === 'overstocked' ? '积压品' : '滞销品'
+
+    return {
+      success: true,
+      message: `折价出售《${invItem.record.title}》！${statusLabel}以${discountPercent}%折扣价 ¥${salePrice} 清仓（原价 ¥${invItem.record.marketPrice}，利润 ¥${profit}）`,
+      salePrice,
+      profit
+    }
+  }
+
+  const checkPurchaseOverstockRisk = (recordId: string): { shouldWarn: boolean; message: string } => {
+    const existingItem = inventory.value.find(i => i.record.id === recordId)
+    const currentStock = existingItem ? existingItem.quantity : 0
+
+    let existingStatus: OverstockStatus | null = null
+    if (existingItem && overstockConfig.value) {
+      const daysInStock = currentDay.value - existingItem.purchaseDate
+      const perf = recordPerformances.value.find(p => p.recordId === recordId)
+      existingStatus = getOverstockStatus(daysInStock, perf?.sellThroughRate ?? 0, overstockConfig.value)
+    }
+
+    const perf = recordPerformances.value.find(p => p.recordId === recordId)
+    const sellThroughRate = perf?.sellThroughRate ?? 0
+
+    return generatePurchaseRiskWarning(recordId, currentStock, sellThroughRate, existingStatus)
+  }
+
   const endDay = () => {
     stopPatienceTick()
     degradeAllRecords()
+
+    applyDailyOverstockPenalty()
 
     const currentSlotStats = getCurrentSlotStats()
     if (currentTimeSlot.value === 'afternoon') {
@@ -2486,6 +2698,18 @@ export const useGameStore = defineStore('game', () => {
     getQueueCustomers,
     tickAllCustomerPatience,
     resortCustomerQueueIfNeeded,
-    checkCurrentCustomerValid
+    checkCurrentCustomerValid,
+    overstockPenalties,
+    dailyOverstockPenalty,
+    totalOverstockPenaltyAccumulated,
+    overstockConfig,
+    overstockInfos,
+    overstockWarnings,
+    problemInventoryCount,
+    totalDailyOverstockPenalty,
+    effectiveProfit,
+    applyDailyOverstockPenalty,
+    sellAtDiscount,
+    checkPurchaseOverstockRisk
   }
 })

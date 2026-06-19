@@ -1,4 +1,4 @@
-import type { RecordPerformance, SaleRecord, InventoryItem } from '@/types'
+import type { RecordPerformance, SaleRecord, InventoryItem, OverstockStatus, OverstockInfo, OverstockConfig } from '@/types'
 
 export const createEmptyPerformance = (recordId: string): RecordPerformance => ({
   recordId,
@@ -184,6 +184,219 @@ export const calculateInventoryRiskScore = (
   })
   
   return totalValue > 0 ? totalRisk / totalValue : 0
+}
+
+export const getOverstockStatus = (
+  daysInStock: number,
+  sellThroughRate: number,
+  config: OverstockConfig
+): OverstockStatus => {
+  if (daysInStock >= config.deadstockThresholdDays && sellThroughRate < config.overstockedSellThroughThreshold) {
+    return 'deadstock'
+  }
+  if (daysInStock >= config.overstockedThresholdDays && sellThroughRate < config.slowSellThroughThreshold) {
+    return 'overstocked'
+  }
+  if (daysInStock >= config.slowThresholdDays && sellThroughRate < config.slowSellThroughThreshold) {
+    return 'slow'
+  }
+  return 'normal'
+}
+
+export const calculateOverstockDailyPenalty = (
+  item: InventoryItem,
+  daysInStock: number,
+  sellThroughRate: number,
+  config: OverstockConfig
+): number => {
+  const status = getOverstockStatus(daysInStock, sellThroughRate, config)
+  const inventoryValue = item.actualCostPrice * item.quantity
+
+  switch (status) {
+    case 'deadstock':
+      return Math.floor(inventoryValue * config.deadstockDailyPenaltyRate)
+    case 'overstocked':
+      return Math.floor(inventoryValue * config.overstockedDailyPenaltyRate)
+    case 'slow':
+      return Math.floor(inventoryValue * config.slowDailyPenaltyRate)
+    default:
+      return 0
+  }
+}
+
+export const calculateSuggestedDiscount = (
+  status: OverstockStatus,
+  marketPrice: number,
+  costPrice: number,
+  config: OverstockConfig
+): { discountRate: number; discountedPrice: number } => {
+  if (status === 'normal') {
+    return { discountRate: 0, discountedPrice: marketPrice }
+  }
+
+  let discountRate = 0
+  switch (status) {
+    case 'slow':
+      discountRate = config.discountStep
+      break
+    case 'overstocked':
+      discountRate = config.discountStep * 2
+      break
+    case 'deadstock':
+      discountRate = config.discountStep * 3
+      break
+  }
+
+  discountRate = Math.min(discountRate, config.maxDiscountRate)
+  const discountedPrice = Math.max(costPrice, Math.floor(marketPrice * (1 - discountRate)))
+
+  return { discountRate, discountedPrice }
+}
+
+export const calculateDisplayPriorityBoost = (status: OverstockStatus): number => {
+  switch (status) {
+    case 'deadstock':
+      return 25
+    case 'overstocked':
+      return 15
+    case 'slow':
+      return 8
+    default:
+      return 0
+  }
+}
+
+export const calculateOverstockInfo = (
+  item: InventoryItem,
+  performances: RecordPerformance[],
+  currentDay: number,
+  displayedRecordIds: Set<string>,
+  config: OverstockConfig,
+  accumulatedPenalties: Map<string, number>
+): OverstockInfo => {
+  const daysInStock = currentDay - item.purchaseDate
+  const perf = performances.find(p => p.recordId === item.record.id)
+  const sellThroughRate = perf?.sellThroughRate ?? 0
+
+  const status = getOverstockStatus(daysInStock, sellThroughRate, config)
+  const dailyPenalty = calculateOverstockDailyPenalty(item, daysInStock, sellThroughRate, config)
+  const totalPenaltyAccumulated = accumulatedPenalties.get(item.record.id) || 0
+  const { discountRate, discountedPrice } = calculateSuggestedDiscount(
+    status,
+    item.record.marketPrice,
+    item.actualCostPrice,
+    config
+  )
+  const isInDisplay = displayedRecordIds.has(item.record.id)
+  const displayPriorityBoost = isInDisplay ? 0 : calculateDisplayPriorityBoost(status)
+
+  return {
+    recordId: item.record.id,
+    status,
+    daysInStock,
+    sellThroughRate,
+    dailyPenalty,
+    totalPenaltyAccumulated,
+    suggestedDiscount: discountRate,
+    discountedSellPrice: discountedPrice,
+    isInDisplay,
+    displayPriorityBoost
+  }
+}
+
+export const calculateTotalDailyPenalty = (
+  inventory: InventoryItem[],
+  performances: RecordPerformance[],
+  currentDay: number,
+  config: OverstockConfig
+): { totalPenalty: number; items: { recordId: string; penalty: number; status: OverstockStatus }[] } => {
+  let totalPenalty = 0
+  const items: { recordId: string; penalty: number; status: OverstockStatus }[] = []
+
+  for (const item of inventory) {
+    if (item.quantity <= 0) continue
+
+    const daysInStock = currentDay - item.purchaseDate
+    const perf = performances.find(p => p.recordId === item.record.id)
+    const sellThroughRate = perf?.sellThroughRate ?? 0
+    const status = getOverstockStatus(daysInStock, sellThroughRate, config)
+
+    if (status !== 'normal') {
+      const penalty = calculateOverstockDailyPenalty(item, daysInStock, sellThroughRate, config)
+      if (penalty > 0) {
+        totalPenalty += penalty
+        items.push({ recordId: item.record.id, penalty, status })
+      }
+    }
+  }
+
+  return { totalPenalty, items }
+}
+
+export const generateOverstockWarnings = (
+  overstockInfos: OverstockInfo[]
+): { recordId: string; message: string; priority: 'high' | 'medium' | 'low' }[] => {
+  const warnings: { recordId: string; message: string; priority: 'high' | 'medium' | 'low' }[] = []
+
+  for (const info of overstockInfos) {
+    if (info.status === 'deadstock') {
+      warnings.push({
+        recordId: info.recordId,
+        message: `严重积压！已滞销${info.daysInStock}天，每日扣罚¥${info.dailyPenalty}，建议立即折价出售（折扣${Math.round(info.suggestedDiscount * 100)}%）`,
+        priority: 'high'
+      })
+    } else if (info.status === 'overstocked') {
+      warnings.push({
+        recordId: info.recordId,
+        message: `库存积压，已滞销${info.daysInStock}天，每日扣罚¥${info.dailyPenalty}，建议折价清仓或优先陈列`,
+        priority: 'high'
+      })
+    } else if (info.status === 'slow') {
+      warnings.push({
+        recordId: info.recordId,
+        message: `周转缓慢，已入库${info.daysInStock}天，建议优先陈列提升曝光`,
+        priority: 'medium'
+      })
+    }
+  }
+
+  return warnings.sort((a, b) => {
+    const order = { high: 0, medium: 1, low: 2 }
+    return order[a.priority] - order[b.priority]
+  })
+}
+
+export const generatePurchaseRiskWarning = (
+  _recordId: string,
+  currentStock: number,
+  sellThroughRate: number,
+  existingOverstockStatus: OverstockStatus | null
+): { shouldWarn: boolean; message: string } => {
+  if (existingOverstockStatus === 'deadstock') {
+    return {
+      shouldWarn: true,
+      message: '⚠️ 该唱片已严重积压，继续进货将加重每日惩罚！'
+    }
+  }
+  if (existingOverstockStatus === 'overstocked') {
+    return {
+      shouldWarn: true,
+      message: '⚠️ 该唱片库存积压中，继续进货可能增加滞销风险！'
+    }
+  }
+  if (existingOverstockStatus === 'slow' && currentStock >= 3) {
+    return {
+      shouldWarn: true,
+      message: '⚠️ 该唱片周转缓慢且库存充足，建议谨慎进货！'
+    }
+  }
+  if (sellThroughRate > 0 && sellThroughRate < 0.3 && currentStock >= 2) {
+    return {
+      shouldWarn: true,
+      message: '⚠️ 该唱片售罄率较低，库存已有一定积压风险！'
+    }
+  }
+  return { shouldWarn: false, message: '' }
 }
 
 export const generatePurchaseRecommendation = (
