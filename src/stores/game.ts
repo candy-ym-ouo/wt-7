@@ -5,11 +5,18 @@ import type {
   Customer, SaleRecord, DailyStats, CollectionItem,
   MemberProfile, MemberLevel, MemberStats, LevelReward,
   LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
-  TimeSlot, TimeSlotStats
+  TimeSlot, TimeSlotStats, BargainState, BargainRound
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
-import { generateDailyCustomers, calculateMatchScore, createMemberProfile } from '@/data/customers'
+import {
+  generateDailyCustomers,
+  calculateMatchScore,
+  createMemberProfile,
+  generateCustomerBargainOffer,
+  generateCustomerCounterOffer,
+  calculateBargainSatisfactionBonus
+} from '@/data/customers'
 import {
   updateMemberAfterPurchase,
   calculateGrowthPoints,
@@ -119,6 +126,7 @@ export const useGameStore = defineStore('game', () => {
     avgSatisfaction: 0
   })
   const slotSatisfactionSum = ref(0)
+  const currentBargain = ref<BargainState | null>(null)
 
   const baseLevelConfig = computed(() => getLevelById(currentLevel.value))
   const currentLevelConfig = computed(() => getScaledLevelConfig(currentLevel.value, shopReputation.value))
@@ -437,6 +445,7 @@ export const useGameStore = defineStore('game', () => {
     afternoonStats.value = { slot: 'afternoon', revenue: 0, cost: 0, salesCount: 0, customersServed: 0, avgSatisfaction: 0 }
     nightStats.value = { slot: 'night', revenue: 0, cost: 0, salesCount: 0, customersServed: 0, avgSatisfaction: 0 }
     slotSatisfactionSum.value = 0
+    currentBargain.value = null
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -774,7 +783,168 @@ export const useGameStore = defineStore('game', () => {
     return null
   }
 
-  const trySellToCustomer = (inventoryId: string, customPrice?: number) => {
+  const startBargain = (recordId: string, askPrice: number, costPrice: number, marketPrice: number) => {
+    const customer = currentCustomer.value
+    if (!customer) return { success: false, message: '没有顾客' }
+
+    if (!customer.willBargain) {
+      return { success: false, message: '这位顾客对价格没什么意见，直接按出价试试吧' }
+    }
+
+    const bargainResult = generateCustomerBargainOffer(customer, askPrice, costPrice, marketPrice)
+
+    const initialRound: BargainRound = {
+      round: 1,
+      side: 'seller',
+      price: askPrice,
+      timestamp: Date.now()
+    }
+
+    const customerRound: BargainRound = {
+      round: 2,
+      side: 'customer',
+      price: bargainResult.offerPrice,
+      timestamp: Date.now(),
+      reaction: bargainResult.reaction
+    }
+
+    currentBargain.value = {
+      active: true,
+      phase: 'customer_offer',
+      initialAskPrice: askPrice,
+      currentSellerPrice: askPrice,
+      currentCustomerOffer: bargainResult.offerPrice,
+      customerMinPrice: bargainResult.minAcceptable,
+      customerMaxPrice: askPrice,
+      rounds: [initialRound, customerRound],
+      maxRounds: 5,
+      patienceLeft: customer.patience,
+      recordId
+    }
+
+    return {
+      success: true,
+      message: bargainResult.reaction,
+      offerPrice: bargainResult.offerPrice,
+      minAcceptable: bargainResult.minAcceptable
+    }
+  }
+
+  const makeCounterOffer = (counterPrice: number, costPrice: number, marketPrice: number) => {
+    const bargain = currentBargain.value
+    const customer = currentCustomer.value
+    if (!bargain || !customer) return { success: false, message: '没有进行中的砍价' }
+
+    if (counterPrice < costPrice) {
+      return { success: false, message: '不能低于进价！' }
+    }
+
+    const sellerRound: BargainRound = {
+      round: bargain.rounds.length + 1,
+      side: 'seller',
+      price: counterPrice,
+      timestamp: Date.now()
+    }
+    bargain.rounds.push(sellerRound)
+    bargain.currentSellerPrice = counterPrice
+    bargain.patienceLeft = Math.max(0, bargain.patienceLeft - 10)
+
+    const lastCustomerOffer = bargain.currentCustomerOffer || bargain.customerMinPrice
+    const counterResult = generateCustomerCounterOffer(
+      customer,
+      lastCustomerOffer,
+      counterPrice,
+      costPrice,
+      marketPrice,
+      Math.floor(bargain.rounds.length / 2)
+    )
+
+    if (counterResult.accepted && counterResult.offerPrice !== null) {
+      const customerRound: BargainRound = {
+        round: bargain.rounds.length + 1,
+        side: 'customer',
+        price: counterResult.offerPrice,
+        timestamp: Date.now(),
+        reaction: counterResult.reaction
+      }
+      bargain.rounds.push(customerRound)
+      bargain.phase = 'agreed'
+      bargain.currentCustomerOffer = counterResult.offerPrice
+      bargain.active = false
+
+      return {
+        success: true,
+        accepted: true,
+        finalPrice: counterResult.offerPrice,
+        message: counterResult.reaction
+      }
+    }
+
+    if (counterResult.offerPrice === null) {
+      bargain.phase = 'failed'
+      bargain.active = false
+
+      return {
+        success: true,
+        accepted: false,
+        message: counterResult.reaction,
+        failed: true
+      }
+    }
+
+    const customerRound: BargainRound = {
+      round: bargain.rounds.length + 1,
+      side: 'customer',
+      price: counterResult.offerPrice,
+      timestamp: Date.now(),
+      reaction: counterResult.reaction
+    }
+    bargain.rounds.push(customerRound)
+    bargain.currentCustomerOffer = counterResult.offerPrice
+    bargain.phase = 'customer_offer'
+
+    return {
+      success: true,
+      accepted: false,
+      offerPrice: counterResult.offerPrice,
+      message: counterResult.reaction
+    }
+  }
+
+  const acceptCustomerOffer = () => {
+    const bargain = currentBargain.value
+    if (!bargain || bargain.currentCustomerOffer === null) {
+      return { success: false, message: '没有可接受的报价' }
+    }
+
+    bargain.phase = 'agreed'
+    bargain.active = false
+
+    return {
+      success: true,
+      finalPrice: bargain.currentCustomerOffer,
+      message: '好的，就按这个价成交！'
+    }
+  }
+
+  const rejectBargain = () => {
+    const bargain = currentBargain.value
+    if (!bargain) return { success: false, message: '没有进行中的砍价' }
+
+    bargain.phase = 'failed'
+    bargain.active = false
+
+    return {
+      success: true,
+      message: '交易谈崩了，顾客有些不满...'
+    }
+  }
+
+  const cancelBargain = () => {
+    currentBargain.value = null
+  }
+
+  const trySellToCustomer = (inventoryId: string, customPrice?: number, bargainFinalPrice?: number) => {
     const customer = currentCustomer.value
     if (!customer) return { success: false, message: '没有顾客' }
 
@@ -785,7 +955,10 @@ export const useGameStore = defineStore('game', () => {
     const record = invItem.record
     const slotConditionScore = slot.conditionScore!
     const conditionImpact = getConditionImpactOnSales(slotConditionScore)
-    let salePrice = customPrice || record.marketPrice
+    
+    const wasBargained = currentBargain.value !== null && bargainFinalPrice !== undefined
+    let salePrice = bargainFinalPrice || customPrice || record.marketPrice
+    const initialAskPrice = currentBargain.value?.initialAskPrice || (customPrice || record.marketPrice)
 
     salePrice = Math.floor(salePrice * conditionImpact.priceModifier)
 
@@ -820,13 +993,24 @@ export const useGameStore = defineStore('game', () => {
       buyChance = Math.min(1.0, buyChance * 1.3)
     }
 
-    const success = Math.random() < buyChance
+    if (wasBargained) {
+      buyChance = Math.min(1.0, buyChance * 1.6)
+    }
+
+    const success = wasBargained ? (currentBargain.value?.phase === 'agreed') : (Math.random() < buyChance)
 
     if (success) {
       const profit = salePrice - invItem.actualCostPrice
       const baseSatisfaction = 50 + finalScore * 0.5 - (salePrice > record.marketPrice ? 20 : 0)
       const memberBonus = customer.isReturningCustomer ? 5 : 0
-      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier))
+      const bargainSatisfactionBonus = calculateBargainSatisfactionBonus(
+        wasBargained,
+        true,
+        salePrice,
+        initialAskPrice,
+        customer
+      )
+      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier + bargainSatisfactionBonus))
 
       budget.value += salePrice
       dailyRevenue.value += salePrice
@@ -882,7 +1066,10 @@ export const useGameStore = defineStore('game', () => {
         memberLevel: memberProfile?.level || null,
         growthPointsEarned,
         isMemberPurchase,
-        timeSlot: currentTimeSlot.value
+        timeSlot: currentTimeSlot.value,
+        bargainHistory: currentBargain.value?.rounds,
+        initialAskPrice,
+        wasBargained
       }
       
       salesHistory.value.push(saleRecord)
@@ -912,10 +1099,13 @@ export const useGameStore = defineStore('game', () => {
 
       const conditionLabel = getConditionLabel(slotConditionScore)
       const slotLabel = currentTimeSlot.value === 'afternoon' ? '午后' : '夜场'
+      const bargainNote = wasBargained ? `（砍价成交，初始报价¥${initialAskPrice}）` : ''
+
+      currentBargain.value = null
 
       return {
         success: true,
-        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}【${slotLabel}】`,
+        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}${bargainNote}【${slotLabel}】`,
         satisfaction,
         profit,
         growthPoints: growthPointsEarned,
@@ -924,12 +1114,17 @@ export const useGameStore = defineStore('game', () => {
       }
     } else {
       dailyServedCustomers.value += 1
-      dailySatisfactionSum.value += 30
-      slotSatisfactionSum.value += 30
-      shopReputation.value = Math.max(0, shopReputation.value - 1)
+      const bargainFailurePenalty = wasBargained ? -10 : 0
+      const finalDissatisfaction = Math.max(20, 30 + bargainFailurePenalty)
+      dailySatisfactionSum.value += finalDissatisfaction
+      slotSatisfactionSum.value += finalDissatisfaction
+      shopReputation.value = Math.max(0, shopReputation.value - (wasBargained ? 2 : 1))
+      
+      const bargainMsg = wasBargained ? '砍价没谈拢，' : ''
+      currentBargain.value = null
       return {
         success: false,
-        message: `${customer.name} 考虑了一下，还是没有买...`
+        message: `${bargainMsg}${customer.name} 考虑了一下，还是没有买...`
       }
     }
   }
@@ -1270,6 +1465,12 @@ export const useGameStore = defineStore('game', () => {
     afternoonStats,
     nightStats,
     currentTimeSlotConfig,
+    currentBargain,
+    startBargain,
+    makeCounterOffer,
+    acceptCustomerOffer,
+    rejectBargain,
+    cancelBargain,
     startLevel,
     selectSupplier,
     refreshSupplierInventory,

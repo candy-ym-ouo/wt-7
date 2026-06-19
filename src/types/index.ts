@@ -121,6 +121,33 @@ export interface Customer {
   memberProfile: MemberProfile | null
   isReturningCustomer: boolean
   memberDiscount: number
+  bargainAggressiveness: number
+  bargainToughness: number
+  willBargain: boolean
+}
+
+export type BargainPhase = 'initial' | 'customer_offer' | 'seller_counter' | 'agreed' | 'failed'
+
+export interface BargainRound {
+  round: number
+  side: 'seller' | 'customer'
+  price: number
+  timestamp: number
+  reaction?: string
+}
+
+export interface BargainState {
+  active: boolean
+  phase: BargainPhase
+  initialAskPrice: number
+  currentSellerPrice: number
+  currentCustomerOffer: number | null
+  customerMinPrice: number
+  customerMaxPrice: number
+  rounds: BargainRound[]
+  maxRounds: number
+  patienceLeft: number
+  recordId: string | null
 }
 
 export interface SaleRecord {
@@ -135,6 +162,9 @@ export interface SaleRecord {
   growthPointsEarned: number
   isMemberPurchase: boolean
   timeSlot: TimeSlot
+  bargainHistory?: BargainRound[]
+  initialAskPrice?: number
+  wasBargained: boolean
 }
 
 export interface DailyStats {
@@ -294,4 +324,5 @@ export interface GameState {
   afternoonCompleted: boolean
   afternoonStats: TimeSlotStats
   nightStats: TimeSlotStats
+  currentBargain: BargainState | null
 }

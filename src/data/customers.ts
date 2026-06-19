@@ -102,6 +102,8 @@ export const generateCustomer = (
     patience = 40 + Math.floor(Math.random() * 40) + updatedMember.visitCount
     memberDiscount = calculateMemberDiscount(updatedMember.level)
 
+    const memberBargainBias = updatedMember.level === 'Diamond' || updatedMember.level === 'Platinum' ? -0.2 :
+                              updatedMember.level === 'Gold' ? -0.1 : 0
     return {
       id,
       name,
@@ -112,7 +114,10 @@ export const generateCustomer = (
       satisfaction: 50 + Math.floor(updatedMember.visitCount * 2),
       memberProfile: updatedMember,
       isReturningCustomer: true,
-      memberDiscount
+      memberDiscount,
+      bargainAggressiveness: Math.max(0.1, Math.min(0.8, 0.3 + Math.random() * 0.4 + memberBargainBias)),
+      bargainToughness: Math.max(0.2, Math.min(0.9, 0.4 + Math.random() * 0.4 + memberBargainBias * 0.5)),
+      willBargain: Math.random() < (0.35 + memberBargainBias + updatedMember.visitCount * 0.01)
     }
   } else {
     const nameIndex = Math.floor(Math.random() * customerNames.length)
@@ -149,7 +154,10 @@ export const generateCustomer = (
       satisfaction: 50,
       memberProfile: null,
       isReturningCustomer: false,
-      memberDiscount: 0
+      memberDiscount: 0,
+      bargainAggressiveness: 0.2 + Math.random() * 0.6,
+      bargainToughness: 0.3 + Math.random() * 0.5,
+      willBargain: Math.random() < 0.45
     }
   }
 }
@@ -235,6 +243,165 @@ export const calculateMatchScore = (customer: Customer, record: any, reputation:
   score += getMatchScoreBonus(reputation)
 
   return Math.max(0, Math.min(100, score))
+}
+
+const bargainReactions = {
+  aggressive: [
+    '这个价格太贵了！',
+    '你这是狮子大开口吧？',
+    '再便宜点！不行我走了！',
+    '这价格我能买两张了！'
+  ],
+  moderate: [
+    '价格能不能再商量一下？',
+    '有点超出我的预算了...',
+    '给个优惠价呗？',
+    '再少一点我就要了'
+  ],
+  friendly: [
+    '老板，给个友情价嘛~',
+    '第一次来，便宜点呗',
+    '这个价格有点小贵呢',
+    '能打个折就更好了'
+  ],
+  accept: [
+    '行，这个价格我要了！',
+    '成交！就这个价',
+    '好吧，看你也不容易',
+    '行吧，下次给我优惠点'
+  ],
+  reject: [
+    '算了，太贵了',
+    '这价格我接受不了',
+    '我再去别家看看',
+    '算了，不买了'
+  ]
+}
+
+const getRandomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+
+export const generateCustomerBargainOffer = (
+  customer: Customer,
+  askPrice: number,
+  costPrice: number,
+  marketPrice: number
+): { offerPrice: number; reaction: string; minAcceptable: number } => {
+  const aggressiveness = customer.bargainAggressiveness
+  const toughness = customer.bargainToughness
+
+  const priceFloor = Math.max(costPrice, Math.floor(marketPrice * (0.55 + aggressiveness * 0.15)))
+  const targetDiscount = 0.1 + aggressiveness * 0.25
+  const offerPrice = Math.max(priceFloor, Math.floor(askPrice * (1 - targetDiscount)))
+
+  const minAcceptable = Math.max(
+    costPrice,
+    Math.floor(askPrice * (1 - targetDiscount * (0.4 + toughness * 0.5)))
+  )
+
+  let reactionCategory: 'aggressive' | 'moderate' | 'friendly'
+  if (aggressiveness >= 0.65) {
+    reactionCategory = 'aggressive'
+  } else if (aggressiveness >= 0.4) {
+    reactionCategory = 'moderate'
+  } else {
+    reactionCategory = 'friendly'
+  }
+
+  return {
+    offerPrice,
+    reaction: getRandomItem(bargainReactions[reactionCategory]),
+    minAcceptable
+  }
+}
+
+export const generateCustomerCounterOffer = (
+  customer: Customer,
+  lastOffer: number,
+  sellerCounter: number,
+  costPrice: number,
+  marketPrice: number,
+  round: number
+): { offerPrice: number | null; reaction: string; accepted: boolean } => {
+  const toughness = customer.bargainToughness
+  const gap = sellerCounter - lastOffer
+  const concessionRatio = 0.3 + (1 - toughness) * 0.4 - round * 0.08
+
+  if (round >= 3) {
+    if (sellerCounter <= lastOffer * 1.08) {
+      return {
+        offerPrice: sellerCounter,
+        reaction: getRandomItem(bargainReactions.accept),
+        accepted: true
+      }
+    } else {
+      return {
+        offerPrice: null,
+        reaction: getRandomItem(bargainReactions.reject),
+        accepted: false
+      }
+    }
+  }
+
+  const acceptableTop = Math.max(
+    costPrice,
+    Math.floor(marketPrice * (0.75 + (1 - toughness) * 0.2))
+  )
+
+  if (sellerCounter <= acceptableTop) {
+    return {
+      offerPrice: sellerCounter,
+      reaction: getRandomItem(bargainReactions.accept),
+      accepted: true
+    }
+  }
+
+  const newOffer = Math.min(
+    acceptableTop,
+    Math.floor(lastOffer + gap * concessionRatio)
+  )
+
+  if (newOffer <= lastOffer) {
+    return {
+      offerPrice: null,
+      reaction: getRandomItem(bargainReactions.reject),
+      accepted: false
+    }
+  }
+
+  let reactionCategory: 'aggressive' | 'moderate' | 'friendly'
+  if (toughness >= 0.7) {
+    reactionCategory = 'aggressive'
+  } else if (toughness >= 0.45) {
+    reactionCategory = 'moderate'
+  } else {
+    reactionCategory = 'friendly'
+  }
+
+  return {
+    offerPrice: newOffer,
+    reaction: getRandomItem(bargainReactions[reactionCategory]),
+    accepted: false
+  }
+}
+
+export const calculateBargainSatisfactionBonus = (
+  wasBargained: boolean,
+  bargainSuccess: boolean,
+  agreedPrice: number,
+  initialAsk: number,
+  customer: Customer
+): number => {
+  if (!wasBargained) return 0
+
+  const discountRatio = 1 - agreedPrice / initialAsk
+
+  if (bargainSuccess) {
+    const baseBonus = 5 + discountRatio * 30
+    const toughnessBonus = (1 - customer.bargainToughness) * 10
+    return Math.floor(baseBonus + toughnessBonus)
+  } else {
+    return -15
+  }
 }
 
 export { createMemberProfile }

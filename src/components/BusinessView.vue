@@ -11,9 +11,11 @@ import { getWordOfMouthTier } from '@/data/wordOfMouth'
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
 const customPrice = ref<number>(0)
+const counterPrice = ref<number>(0)
 const showSellModal = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
+const bargainMessage = ref('')
 
 const recommendations = computed(() => {
   if (!gameStore.currentCustomer) return []
@@ -95,7 +97,10 @@ const isAfternoonFinished = computed(() => {
 const openSellModal = (record: Record) => {
   selectedRecord.value = record
   customPrice.value = record.marketPrice
+  counterPrice.value = record.marketPrice
   message.value = ''
+  bargainMessage.value = ''
+  gameStore.cancelBargain()
   showSellModal.value = true
 }
 
@@ -105,16 +110,112 @@ const selectedRecordCostPrice = computed(() => {
   return invItem ? invItem.actualCostPrice : selectedRecord.value.costPrice
 })
 
+const bargainRounds = computed(() => {
+  return gameStore.currentBargain?.rounds || []
+})
+
+const isBargainPhase = computed(() => {
+  return gameStore.currentBargain?.active || false
+})
+
+const bargainPhaseText = computed(() => {
+  const bargain = gameStore.currentBargain
+  if (!bargain) return ''
+  switch (bargain.phase) {
+    case 'customer_offer': return '顾客还价中'
+    case 'seller_counter': return '我方还价中'
+    case 'agreed': return '已达成协议'
+    case 'failed': return '砍价失败'
+    default: return ''
+  }
+})
+
+const suggestedCounterPrice = computed(() => {
+  const bargain = gameStore.currentBargain
+  if (!bargain || !bargain.currentCustomerOffer) return customPrice.value
+  const midPrice = Math.floor((bargain.currentCustomerOffer + bargain.currentSellerPrice) / 2)
+  return Math.max(selectedRecordCostPrice.value, midPrice)
+})
+
 const closeSellModal = () => {
   showSellModal.value = false
   selectedRecord.value = null
   message.value = ''
+  bargainMessage.value = ''
+  gameStore.cancelBargain()
 }
 
-const handleSell = () => {
+const handleBargain = () => {
+  if (!selectedRecord.value) return
+  const result = gameStore.startBargain(
+    selectedRecord.value.id,
+    customPrice.value,
+    selectedRecordCostPrice.value,
+    selectedRecord.value.marketPrice
+  )
+  bargainMessage.value = result.message
+  message.value = ''
+  if (result.success && result.offerPrice) {
+    counterPrice.value = suggestedCounterPrice.value
+  } else {
+    message.value = result.message
+    messageType.value = 'error'
+  }
+}
+
+const handleCounterOffer = () => {
+  if (!selectedRecord.value) return
+  const result = gameStore.makeCounterOffer(
+    counterPrice.value,
+    selectedRecordCostPrice.value,
+    selectedRecord.value.marketPrice
+  )
+  bargainMessage.value = result.message
+  if (!result.success) {
+    message.value = result.message
+    messageType.value = 'error'
+    return
+  }
+  if ('accepted' in result && result.accepted && result.finalPrice !== undefined) {
+    setTimeout(() => {
+      handleSell(result.finalPrice)
+    }, 1000)
+  } else if ('failed' in result && result.failed) {
+    message.value = result.message
+    messageType.value = 'error'
+  } else if (result.offerPrice) {
+    counterPrice.value = suggestedCounterPrice.value
+  }
+}
+
+const handleAcceptOffer = () => {
+  const result = gameStore.acceptCustomerOffer()
+  if (result.success && result.finalPrice !== undefined) {
+    bargainMessage.value = result.message
+    setTimeout(() => {
+      handleSell(result.finalPrice)
+    }, 800)
+  } else {
+    message.value = result.message
+    messageType.value = 'error'
+  }
+}
+
+const handleRejectBargain = () => {
+  const result = gameStore.rejectBargain()
+  bargainMessage.value = result.message
+  message.value = '砍价失败，顾客有些不满...'
+  messageType.value = 'error'
+  setTimeout(() => {
+    closeSellModal()
+    gameStore.nextCustomer()
+  }, 2000)
+}
+
+const handleSell = (bargainPrice?: number) => {
   if (!selectedRecord.value) return
 
-  const result = gameStore.trySellToCustomer(selectedRecord.value.id, customPrice.value)
+  const result = gameStore.trySellToCustomer(selectedRecord.value.id, customPrice.value, bargainPrice)
   message.value = result.message
   messageType.value = result.success ? 'success' : 'error'
 
@@ -430,6 +531,9 @@ onUnmounted(() => {
         <div class="modal-content animate-slide-up">
           <div class="modal-header">
             <h3>向顾客推销</h3>
+            <div v-if="isBargainPhase" class="bargain-phase-badge">
+              💬 {{ bargainPhaseText }}
+            </div>
             <button class="close-btn" @click="closeSellModal">✕</button>
           </div>
 
@@ -447,39 +551,91 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <div class="price-editor">
-              <span class="pe-label">出价</span>
-              <div class="pe-controls">
-                <button class="pe-btn" @click="customPrice = Math.max(selectedRecordCostPrice, customPrice - 10)">-10</button>
-                <input 
-                  type="number" 
-                  v-model.number="customPrice"
-                  class="pe-input"
-                  :min="selectedRecordCostPrice"
-                />
-                <button class="pe-btn" @click="customPrice = customPrice + 10">+10</button>
+            <template v-if="!isBargainPhase">
+              <div class="price-editor">
+                <span class="pe-label">出价</span>
+                <div class="pe-controls">
+                  <button class="pe-btn" @click="customPrice = Math.max(selectedRecordCostPrice, customPrice - 10)">-10</button>
+                  <input 
+                    type="number" 
+                    v-model.number="customPrice"
+                    class="pe-input"
+                    :min="selectedRecordCostPrice"
+                  />
+                  <button class="pe-btn" @click="customPrice = customPrice + 10">+10</button>
+                </div>
               </div>
-            </div>
 
-            <div class="price-hint">
-              <span>建议售价: ¥{{ selectedRecord.marketPrice }}</span>
-              <span>进价: ¥{{ selectedRecordCostPrice }}</span>
-            </div>
+              <div class="price-hint">
+                <span>建议售价: ¥{{ selectedRecord.marketPrice }}</span>
+                <span>进价: ¥{{ selectedRecordCostPrice }}</span>
+              </div>
 
-            <div v-if="customerMemberInfo && customerMemberInfo.discount > 0" class="member-price-preview">
-              <span class="mpp-label">{{ customerMemberInfo.icon }} 会员实付</span>
-              <span class="mpp-value">
-                ¥{{ Math.floor(customPrice * (1 - customerMemberInfo.discount)) }}
-                <span class="mpp-save">省 ¥{{ Math.floor(customPrice * customerMemberInfo.discount) }}</span>
-              </span>
-            </div>
+              <div v-if="customerMemberInfo && customerMemberInfo.discount > 0" class="member-price-preview">
+                <span class="mpp-label">{{ customerMemberInfo.icon }} 会员实付</span>
+                <span class="mpp-value">
+                  ¥{{ Math.floor(customPrice * (1 - customerMemberInfo.discount)) }}
+                  <span class="mpp-save">省 ¥{{ Math.floor(customPrice * customerMemberInfo.discount) }}</span>
+                </span>
+              </div>
 
-            <div class="profit-preview">
-              <span class="pp-label">预计利润</span>
-              <span class="pp-value" :class="{ positive: customPrice > selectedRecordCostPrice }">
-                {{ customPrice > selectedRecordCostPrice ? '+' : '' }}¥{{ customPrice - selectedRecordCostPrice }}
-              </span>
-            </div>
+              <div class="profit-preview">
+                <span class="pp-label">预计利润</span>
+                <span class="pp-value" :class="{ positive: customPrice > selectedRecordCostPrice }">
+                  {{ customPrice > selectedRecordCostPrice ? '+' : '' }}¥{{ customPrice - selectedRecordCostPrice }}
+                </span>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="bargain-container">
+                <div class="bargain-rounds">
+                  <div 
+                    v-for="(round, index) in bargainRounds" 
+                    :key="index"
+                    class="bargain-round"
+                    :class="round.side"
+                  >
+                    <div class="round-avatar">
+                      {{ round.side === 'seller' ? '🏪' : gameStore.currentCustomer?.avatar }}
+                    </div>
+                    <div class="round-content">
+                      <div class="round-header">
+                        <span class="round-name">{{ round.side === 'seller' ? '我方报价' : gameStore.currentCustomer?.name }}</span>
+                        <span class="round-price">¥{{ round.price }}</span>
+                      </div>
+                      <p v-if="round.reaction" class="round-reaction">「{{ round.reaction }}」</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="bargainMessage && gameStore.currentBargain?.phase === 'customer_offer'" class="bargain-latest-message">
+                  <span class="blm-icon">💬</span>
+                  <span class="blm-text">{{ bargainMessage }}</span>
+                </div>
+
+                <div v-if="gameStore.currentBargain?.phase === 'customer_offer'" class="counter-offer-section">
+                  <div class="price-editor">
+                    <span class="pe-label">我方还价</span>
+                    <div class="pe-controls">
+                      <button class="pe-btn" @click="counterPrice = Math.max(selectedRecordCostPrice, counterPrice - 10)">-10</button>
+                      <input 
+                        type="number" 
+                        v-model.number="counterPrice"
+                        class="pe-input"
+                        :min="selectedRecordCostPrice"
+                      />
+                      <button class="pe-btn" @click="counterPrice = counterPrice + 10">+10</button>
+                    </div>
+                  </div>
+
+                  <div class="bargain-hint-row">
+                    <span class="bh-hint">建议还价: ¥{{ suggestedCounterPrice }}</span>
+                    <span class="bh-profit">预计利润: ¥{{ counterPrice - selectedRecordCostPrice }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
 
             <p v-if="message" class="message" :class="messageType">
               {{ message }}
@@ -487,14 +643,44 @@ onUnmounted(() => {
           </div>
 
           <div class="modal-footer">
-            <button class="btn-secondary" @click="closeSellModal">取消</button>
-            <button 
-              class="btn-primary"
-              :disabled="customPrice < selectedRecordCostPrice"
-              @click="handleSell"
-            >
-              确认出价
-            </button>
+            <template v-if="!isBargainPhase">
+              <button class="btn-secondary" @click="closeSellModal">取消</button>
+              <button 
+                class="btn-secondary bargain-btn"
+                :disabled="customPrice < selectedRecordCostPrice || !gameStore.currentCustomer?.willBargain"
+                @click="handleBargain"
+              >
+                💬 开始议价
+              </button>
+              <button 
+                class="btn-primary"
+                :disabled="customPrice < selectedRecordCostPrice"
+                @click="handleSell()"
+              >
+                确认出价
+              </button>
+            </template>
+            <template v-else-if="gameStore.currentBargain?.phase === 'customer_offer'">
+              <button class="btn-secondary" @click="handleRejectBargain">
+                结束议价
+              </button>
+              <button 
+                class="btn-secondary accept-btn"
+                @click="handleAcceptOffer"
+              >
+                ✓ 接受¥{{ gameStore.currentBargain?.currentCustomerOffer }}
+              </button>
+              <button 
+                class="btn-primary"
+                :disabled="counterPrice < selectedRecordCostPrice"
+                @click="handleCounterOffer"
+              >
+                还价¥{{ counterPrice }}
+              </button>
+            </template>
+            <template v-else>
+              <button class="btn-secondary" @click="closeSellModal">关闭</button>
+            </template>
           </div>
         </div>
       </div>
@@ -1277,5 +1463,169 @@ onUnmounted(() => {
 
 .modal-footer button {
   flex: 1;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+}
+
+.bargain-phase-badge {
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+  color: #667eea;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bargain-btn {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%) !important;
+  color: #667eea !important;
+  border: 1px solid rgba(102, 126, 234, 0.3) !important;
+}
+
+.bargain-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.accept-btn {
+  background: linear-gradient(135deg, rgba(72, 187, 120, 0.15) 0%, rgba(56, 178, 172, 0.15) 100%) !important;
+  color: var(--success) !important;
+  border: 1px solid rgba(72, 187, 120, 0.3) !important;
+}
+
+.bargain-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bargain-rounds {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.bargain-round {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.bargain-round.seller {
+  flex-direction: row;
+}
+
+.bargain-round.customer {
+  flex-direction: row-reverse;
+}
+
+.round-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+}
+
+.bargain-round.customer .round-avatar {
+  background: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-orange) 100%);
+}
+
+.round-content {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.bargain-round.customer .round-content {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.round-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.round-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.round-price {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent-orange);
+}
+
+.bargain-round.customer .round-price {
+  color: #667eea;
+}
+
+.round-reaction {
+  font-size: 12px;
+  color: var(--text-primary);
+  margin: 0;
+  font-style: italic;
+}
+
+.bargain-latest-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.blm-icon {
+  font-size: 14px;
+}
+
+.blm-text {
+  font-size: 13px;
+  color: #667eea;
+  font-weight: 500;
+  flex: 1;
+}
+
+.counter-offer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+}
+
+.bargain-hint-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.bh-profit {
+  color: var(--success);
+  font-weight: 600;
 }
 </style>
