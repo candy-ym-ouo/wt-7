@@ -600,6 +600,58 @@ export interface DailyStats {
   review?: DailyBusinessReview
 }
 
+export type PromotionType = 'discount' | 'buy_gift'
+export type PromotionScope = 'all' | 'genre' | 'rarity' | 'specific'
+
+export interface PromotionDiscountConfig {
+  discountRate: number
+}
+
+export interface PromotionBuyGiftConfig {
+  buyQuantity: number
+  giftQuantity: number
+  giftRecordIds?: string[]
+  giftGenre?: Genre
+  giftRarity?: number
+}
+
+export interface PromotionConfig {
+  id: string
+  type: PromotionType
+  name: string
+  icon: string
+  description: string
+  scope: PromotionScope
+  targetGenres?: Genre[]
+  targetRarities?: number[]
+  targetRecordIds?: string[]
+  startDay: number
+  endDay: number
+  minLevel: number
+  discountConfig?: PromotionDiscountConfig
+  buyGiftConfig?: PromotionBuyGiftConfig
+  customerReactionBonus: number
+  reputationBonus: number
+  buyChanceBoost: number
+}
+
+export interface ActivePromotion {
+  config: PromotionConfig
+  activationDay: number
+  totalSalesCount: number
+  totalRevenue: number
+  giftGivenCount: number
+}
+
+export interface PromotionApplicationResult {
+  finalPrice: number
+  originalPrice: number
+  discountApplied: number
+  isGiftItem: boolean
+  giftsEligible: number
+  appliedPromotionId: string | null
+}
+
 export interface GameState {
   currentLevel: number
   currentDay: number

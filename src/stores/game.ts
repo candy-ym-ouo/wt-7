@@ -8,7 +8,8 @@ import type {
   TimeSlot, TimeSlotStats, BargainState, BargainRound,
   ActiveBusinessEvent, LostSaleReason, HotGenre,
   CustomerProfileSnapshot, CustomerProfileShift, DailySuggestion, DailyBusinessReview,
-  OverstockInfo, OverstockStatus, DailyOverstockPenalty
+  OverstockInfo, OverstockStatus, DailyOverstockPenalty,
+  ActivePromotion, PromotionApplicationResult
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -122,6 +123,16 @@ import type {
   ThemeConfig,
   GenreAtmosphere
 } from '@/types'
+import {
+  getPromotionsForDay,
+  isRecordEligibleForPromotion,
+  findBestPromotionForRecord,
+  applyPromotionToPrice,
+  getPromotionReputationImpact,
+  getPromotionSatisfactionBonus,
+  getPromotionBuyChanceBoost,
+  getAvailablePromotionsForLevel
+} from '@/data/promotions'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -222,6 +233,13 @@ export const useGameStore = defineStore('game', () => {
   const specialCustomersState = ref<SpecialCustomerConfig[]>(JSON.parse(JSON.stringify(specialCustomers)))
   const collectionBonuses = ref<CollectionBonus[]>([])
   const recentlyActivatedAlbums = ref<string[]>([])
+
+  const activePromotions = ref<ActivePromotion[]>([])
+  const dailyPromotionSales = ref(0)
+  const dailyPromotionGiftsGiven = ref(0)
+  const dailyPromotionDiscountGiven = ref(0)
+  const promotionHistory = ref<Map<string, ActivePromotion>>(new Map())
+  const pendingBuyGiftPurchases = ref<Map<string, number>>(new Map())
 
   const totalCollectionValue = computed(() => {
     return collection.value.reduce((sum, item) => sum + item.collectionValue, 0)
@@ -386,6 +404,122 @@ export const useGameStore = defineStore('game', () => {
   })
 
   const hasActiveEvent = computed(() => dailyEvent.value !== null)
+
+  const availablePromotionsForCurrentLevel = computed(() => {
+    return getAvailablePromotionsForLevel(currentLevel.value)
+  })
+
+  const todayPromotions = computed(() => {
+    return getPromotionsForDay(currentLevel.value, currentDay.value)
+  })
+
+  const hasActivePromotions = computed(() => activePromotions.value.length > 0)
+
+  const totalPromotionDiscountToday = computed(() => dailyPromotionDiscountGiven.value)
+
+  const getActivePromotionForRecord = (record: Record): ActivePromotion | null => {
+    return findBestPromotionForRecord(record, activePromotions.value)
+  }
+
+  const isRecordOnPromotion = (record: Record): boolean => {
+    return findBestPromotionForRecord(record, activePromotions.value) !== null
+  }
+
+  const getRecordPromotionPrice = (basePrice: number, record: Record): PromotionApplicationResult => {
+    return applyPromotionToPrice(basePrice, record, activePromotions.value)
+  }
+
+  const getPromotionBuyChanceForRecord = (record: Record): number => {
+    return getPromotionBuyChanceBoost(activePromotions.value, record)
+  }
+
+  const getPromotionSatisfactionForRecord = (record: Record): number => {
+    return getPromotionSatisfactionBonus(activePromotions.value, record)
+  }
+
+  const refreshActivePromotions = () => {
+    const todayConfigs = getPromotionsForDay(currentLevel.value, currentDay.value)
+    const existingIds = new Set(activePromotions.value.map(ap => ap.config.id))
+
+    for (const config of todayConfigs) {
+      if (!existingIds.has(config.id)) {
+        const newPromotion: ActivePromotion = {
+          config,
+          activationDay: currentDay.value,
+          totalSalesCount: 0,
+          totalRevenue: 0,
+          giftGivenCount: 0
+        }
+        activePromotions.value.push(newPromotion)
+        promotionHistory.value.set(config.id, newPromotion)
+      }
+    }
+
+    activePromotions.value = activePromotions.value.filter(ap =>
+      currentDay.value >= ap.config.startDay && currentDay.value <= ap.config.endDay
+    )
+  }
+
+  const recordPromotionSale = (promotionId: string, revenue: number, isGift: boolean = false) => {
+    const promotion = activePromotions.value.find(ap => ap.config.id === promotionId)
+    if (!promotion) return
+
+    if (isGift) {
+      promotion.giftGivenCount += 1
+      dailyPromotionGiftsGiven.value += 1
+    } else {
+      promotion.totalSalesCount += 1
+      promotion.totalRevenue += revenue
+      dailyPromotionSales.value += 1
+    }
+
+    const historyEntry = promotionHistory.value.get(promotionId)
+    if (historyEntry) {
+      if (isGift) {
+        historyEntry.giftGivenCount += 1
+      } else {
+        historyEntry.totalSalesCount += 1
+        historyEntry.totalRevenue += revenue
+      }
+    }
+  }
+
+  const resetDailyPromotionStats = () => {
+    dailyPromotionSales.value = 0
+    dailyPromotionGiftsGiven.value = 0
+    dailyPromotionDiscountGiven.value = 0
+    pendingBuyGiftPurchases.value.clear()
+  }
+
+  const trackBuyGiftPurchase = (record: Record) => {
+    for (const ap of activePromotions.value) {
+      if (ap.config.type !== 'buy_gift' || !ap.config.buyGiftConfig) continue
+      if (!isRecordEligibleForPromotion(record, ap.config)) continue
+
+      const currentCount = pendingBuyGiftPurchases.value.get(ap.config.id) || 0
+      pendingBuyGiftPurchases.value.set(ap.config.id, currentCount + 1)
+    }
+  }
+
+  const checkAndConsumeBuyGift = (record: Record): { eligible: boolean; promotionId: string | null } => {
+    for (const ap of activePromotions.value) {
+      if (ap.config.type !== 'buy_gift' || !ap.config.buyGiftConfig) continue
+      if (!isRecordEligibleForPromotion(record, ap.config)) continue
+
+      const { buyQuantity, giftQuantity } = ap.config.buyGiftConfig
+      const currentCount = pendingBuyGiftPurchases.value.get(ap.config.id) || 0
+
+      if (currentCount >= buyQuantity) {
+        pendingBuyGiftPurchases.value.set(ap.config.id, currentCount - buyQuantity + giftQuantity)
+        return { eligible: true, promotionId: ap.config.id }
+      }
+    }
+    return { eligible: false, promotionId: null }
+  }
+
+  const getPromotionReputationBonus = (): number => {
+    return getPromotionReputationImpact(activePromotions.value, dailyPromotionSales.value)
+  }
 
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
   const isLastDay = computed(() => baseLevelConfig.value ? currentDay.value >= baseLevelConfig.value.days : false)
@@ -707,6 +841,9 @@ export const useGameStore = defineStore('game', () => {
     eventSatisfactionModifier.value = 0
     eventConditionPenalty.value = 0
     
+    activePromotions.value = []
+    promotionHistory.value.clear()
+    
     availableSuppliers.value = getAvailableSuppliersForLevel(levelId, shopReputation.value)
     currentSupplierId.value = availableSuppliers.value.length > 0 ? availableSuppliers.value[0].id : null
     recordPerformances.value = []
@@ -723,6 +860,8 @@ export const useGameStore = defineStore('game', () => {
     if (currentSupplierId.value) {
       refreshSupplierInventory()
     }
+    
+    refreshActivePromotions()
   }
 
   const resetDailyStats = () => {
@@ -755,6 +894,7 @@ export const useGameStore = defineStore('game', () => {
     dailyLostSales.value = new Map()
     dailyOverstockPenalty.value = null
     genreAtmosphere.value = createEmptyAtmosphereMap()
+    resetDailyPromotionStats()
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -1697,17 +1837,32 @@ export const useGameStore = defineStore('game', () => {
     const conditionImpact = getConditionImpactOnSales(slotConditionScore)
     
     const wasBargained = currentBargain.value !== null && bargainFinalPrice !== undefined
-    let salePrice = bargainFinalPrice || customPrice || record.marketPrice
+    let baseSalePrice = bargainFinalPrice || customPrice || record.marketPrice
     const initialAskPrice = currentBargain.value?.initialAskPrice || (customPrice || record.marketPrice)
 
-    salePrice = Math.floor(salePrice * conditionImpact.priceModifier)
+    baseSalePrice = Math.floor(baseSalePrice * conditionImpact.priceModifier)
 
     if (customer.memberDiscount > 0) {
-      salePrice = Math.floor(salePrice * (1 - customer.memberDiscount))
+      baseSalePrice = Math.floor(baseSalePrice * (1 - customer.memberDiscount))
     }
 
     if (priceBonusFromCollection.value > 0) {
-      salePrice = Math.floor(salePrice * (1 + priceBonusFromCollection.value))
+      baseSalePrice = Math.floor(baseSalePrice * (1 + priceBonusFromCollection.value))
+    }
+
+    const promotionResult = getRecordPromotionPrice(baseSalePrice, record)
+    let salePrice = promotionResult.finalPrice
+    const wasPromotionApplied = promotionResult.appliedPromotionId !== null
+    const promotionDiscountAmount = promotionResult.discountApplied
+
+    if (wasPromotionApplied) {
+      dailyPromotionDiscountGiven.value += promotionDiscountAmount
+    }
+
+    const buyGiftResult = checkAndConsumeBuyGift(record)
+    const isGiftItem = buyGiftResult.eligible
+    if (isGiftItem) {
+      salePrice = 0
     }
 
     const score = calculateMatchScore(customer, record, shopReputation.value)
@@ -1730,16 +1885,20 @@ export const useGameStore = defineStore('game', () => {
     buyChance += themeBuyBonus
     buyChance += eventBuyChanceModifier.value
     buyChance += getAtmosphereBuyChanceBoost(record.genre)
+    buyChance += getPromotionBuyChanceForRecord(record)
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
-    if (salePrice > customer.budget) {
+    if (!isGiftItem && salePrice > customer.budget) {
       buyChance *= Math.max(0.1, 0.3 / priceSensitivity)
     }
-    if (salePrice > record.marketPrice * 1.3) {
+    if (!isGiftItem && salePrice > record.marketPrice * 1.3) {
       buyChance *= Math.max(0.1, 0.5 / priceSensitivity)
     }
-    if (salePrice < record.marketPrice * 0.7) {
+    if (!isGiftItem && salePrice < record.marketPrice * 0.7) {
       buyChance *= Math.min(2.0, 1.2 * priceSensitivity)
+    }
+    if (isGiftItem) {
+      buyChance = Math.min(1.0, buyChance + 0.5)
     }
     if (customer.isReturningCustomer) {
       buyChance *= 1.15
@@ -1761,7 +1920,7 @@ export const useGameStore = defineStore('game', () => {
 
     if (success) {
       const profit = salePrice - invItem.actualCostPrice
-      const baseSatisfaction = 50 + finalScore * 0.5 - (salePrice > record.marketPrice ? 20 : 0)
+      const baseSatisfaction = 50 + finalScore * 0.5 - (!isGiftItem && salePrice > record.marketPrice ? 20 : 0)
       const memberBonus = customer.isReturningCustomer ? 5 : 0
       const bargainSatisfactionBonus = calculateBargainSatisfactionBonus(
         wasBargained,
@@ -1770,6 +1929,7 @@ export const useGameStore = defineStore('game', () => {
         initialAskPrice,
         customer
       )
+      const promotionSatisfactionBonus = isGiftItem ? 15 : getPromotionSatisfactionForRecord(record)
 
       const patienceRatio = customer.patience / customer.maxPatience
       let patienceSatisfactionMod = 0
@@ -1800,12 +1960,15 @@ export const useGameStore = defineStore('game', () => {
           100,
           baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier +
           bargainSatisfactionBonus + eventSatisfactionModifier.value +
-          patienceSatisfactionMod + fastServiceBonus + identitySatisfactionMod
+          patienceSatisfactionMod + fastServiceBonus + identitySatisfactionMod +
+          promotionSatisfactionBonus
         )
       )
 
-      budget.value += salePrice
-      dailyRevenue.value += salePrice
+      if (!isGiftItem) {
+        budget.value += salePrice
+        dailyRevenue.value += salePrice
+      }
       dailySalesCount.value += 1
       dailyServedCustomers.value += 1
       dailySatisfactionSum.value += satisfaction
@@ -1814,17 +1977,27 @@ export const useGameStore = defineStore('game', () => {
       currentLevelSales.value += 1
       totalProfit.value += profit
 
+      if (wasPromotionApplied && promotionResult.appliedPromotionId) {
+        recordPromotionSale(promotionResult.appliedPromotionId, salePrice, isGiftItem)
+      }
+      if (isGiftItem && buyGiftResult.promotionId) {
+        recordPromotionSale(buyGiftResult.promotionId, 0, true)
+      }
+      if (!isGiftItem) {
+        trackBuyGiftPurchase(record)
+      }
+
       const currentGenreCount = currentLevelGenreSales.value.get(record.genre) || 0
       currentLevelGenreSales.value.set(record.genre, currentGenreCount + 1)
       currentLevelSatisfactionSum.value += satisfaction
       currentLevelSatisfactionCount.value += 1
 
-      const memberProfile = customer.memberProfile || findOrCreateMember(customer, salePrice, satisfaction)
+      const memberProfile = customer.memberProfile || findOrCreateMember(customer, Math.max(salePrice, record.marketPrice * 0.5), satisfaction)
       let growthPointsEarned = 0
       let isMemberPurchase = false
 
       if (memberProfile) {
-        const updatedMember = updateMemberAfterPurchase(memberProfile, salePrice, satisfaction)
+        const updatedMember = updateMemberAfterPurchase(memberProfile, Math.max(salePrice, record.marketPrice * 0.5), satisfaction)
         const memberIndex = members.value.findIndex(m => m.id === updatedMember.id)
         if (memberIndex >= 0) {
           const wasNewLevel = members.value[memberIndex].level !== updatedMember.level
@@ -1840,14 +2013,14 @@ export const useGameStore = defineStore('game', () => {
         }
 
         growthPointsEarned = calculateGrowthPoints(
-          salePrice,
+          Math.max(salePrice, record.marketPrice * 0.5),
           satisfaction,
           memberProfile.level,
           customer.isReturningCustomer
         )
         isMemberPurchase = true
         dailyMemberSalesCount.value += 1
-        dailyMemberRevenue.value += salePrice
+        dailyMemberRevenue.value += Math.max(salePrice, record.marketPrice * 0.5)
         dailyGrowthPointsEarned.value += growthPointsEarned
         currentLevelMemberSales.value += 1
       }
@@ -1896,22 +2069,34 @@ export const useGameStore = defineStore('game', () => {
         addToCollection(record, invItem.actualCostPrice, slotConditionScore)
       }
 
-      shopReputation.value = Math.min(100, shopReputation.value + (satisfaction > 60 ? 1 : -1))
+      let reputationDelta = satisfaction > 60 ? 1 : -1
+      if (wasPromotionApplied) {
+        reputationDelta += 1
+      }
+      if (isGiftItem) {
+        reputationDelta += 2
+      }
+      shopReputation.value = Math.min(100, Math.max(0, shopReputation.value + reputationDelta))
 
       const conditionLabel = getConditionLabel(slotConditionScore)
       const slotLabel = currentTimeSlot.value === 'afternoon' ? '午后' : '夜场'
       const bargainNote = wasBargained ? `（砍价成交，初始报价¥${initialAskPrice}）` : ''
+      const promotionNote = wasPromotionApplied ? `【促销立减¥${promotionDiscountAmount}】` : ''
+      const giftNote = isGiftItem ? `🎁【赠品】` : ''
 
       currentBargain.value = null
 
       return {
         success: true,
-        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}${bargainNote}【${slotLabel}】`,
+        message: `${giftNote}${customer.name} ${isGiftItem ? '获赠' : `以 ¥${salePrice} 购买了`}《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}${bargainNote}${promotionNote}【${slotLabel}】`,
         satisfaction,
         profit,
         growthPoints: growthPointsEarned,
         isMemberPurchase,
-        memberLevel: memberProfile?.level || null
+        memberLevel: memberProfile?.level || null,
+        wasPromotion: wasPromotionApplied || isGiftItem,
+        promotionDiscount: promotionDiscountAmount,
+        isGift: isGiftItem
       }
     } else {
       dailyServedCustomers.value += 1
@@ -1930,7 +2115,7 @@ export const useGameStore = defineStore('game', () => {
 
       if (wasBargained) {
         recordLostSale('bargain_failed')
-      } else if (salePrice > customer.budget || salePrice > record.marketPrice * 1.3) {
+      } else if (!isGiftItem && (salePrice > customer.budget || salePrice > record.marketPrice * 1.3)) {
         recordLostSale('price_too_high')
       } else if (slotConditionScore < 50) {
         recordLostSale('poor_condition')
@@ -2573,6 +2758,11 @@ export const useGameStore = defineStore('game', () => {
       shopReputation.value = Math.min(100, shopReputation.value + atmosphereRepBonus)
     }
 
+    const promotionRepBonus = getPromotionReputationBonus()
+    if (promotionRepBonus > 0) {
+      shopReputation.value = Math.min(100, shopReputation.value + promotionRepBonus)
+    }
+
     applyDailyOverstockPenalty()
 
     const currentSlotStats = getCurrentSlotStats()
@@ -2665,6 +2855,8 @@ export const useGameStore = defineStore('game', () => {
           if (currentSupplierId.value) {
             refreshSupplierInventory()
           }
+          
+          refreshActivePromotions()
         }
         break
     }
@@ -2997,6 +3189,25 @@ export const useGameStore = defineStore('game', () => {
     applyDailyOverstockPenalty,
     sellAtDiscount,
     checkPurchaseOverstockRisk,
-    getIdentityTagInfo
+    getIdentityTagInfo,
+    activePromotions,
+    availablePromotionsForCurrentLevel,
+    todayPromotions,
+    hasActivePromotions,
+    totalPromotionDiscountToday,
+    dailyPromotionSales,
+    dailyPromotionGiftsGiven,
+    promotionHistory,
+    getActivePromotionForRecord,
+    isRecordOnPromotion,
+    getRecordPromotionPrice,
+    getPromotionBuyChanceForRecord,
+    getPromotionSatisfactionForRecord,
+    refreshActivePromotions,
+    recordPromotionSale,
+    resetDailyPromotionStats,
+    trackBuyGiftPurchase,
+    checkAndConsumeBuyGift,
+    getPromotionReputationBonus
   }
 })
