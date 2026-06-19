@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
 import { computed } from 'vue'
-import type { MemberLevel } from '@/types'
+import type { MemberLevel, Genre } from '@/types'
 import { memberBenefits, getLevelIcon, getLevelColor } from '@/data/members'
 import { getGradeColor, getGradeIcon, getTrendIcon, getTrendLabel, getWordOfMouthTier } from '@/data/wordOfMouth'
 import { getTimeSlotConfig } from '@/data/timeSlots'
@@ -16,6 +16,49 @@ const gameStore = useGameStore()
 const todayStats = computed(() => {
   return gameStore.dailyStats[gameStore.dailyStats.length - 1]
 })
+
+const todayReview = computed(() => {
+  return todayStats.value?.review
+})
+
+const genreEmoji: Record<Genre, string> = {
+  Jazz: '🎷',
+  Rock: '🎸',
+  Soul: '🎤',
+  Funk: '🕺',
+  Disco: '💃',
+  Classical: '🎻',
+  Blues: '🎹',
+  Pop: '🎵',
+  Electronic: '🎧',
+  Folk: '🪕'
+}
+
+const priorityConfig = {
+  high: { label: '高优先级', color: '#f56565', bg: 'rgba(245, 101, 101, 0.1)', border: 'rgba(245, 101, 101, 0.25)' },
+  medium: { label: '中优先级', color: '#ed8936', bg: 'rgba(237, 137, 54, 0.1)', border: 'rgba(237, 137, 54, 0.25)' },
+  low: { label: '低优先级', color: '#48bb78', bg: 'rgba(72, 187, 120, 0.1)', border: 'rgba(72, 187, 120, 0.25)' }
+}
+
+const categoryConfig: Record<string, { icon: string; label: string }> = {
+  inventory: { icon: '📦', label: '库存' },
+  pricing: { icon: '💰', label: '定价' },
+  display: { icon: '🖼️', label: '陈列' },
+  service: { icon: '🤝', label: '服务' },
+  member: { icon: '👑', label: '会员' }
+}
+
+const trendIcon = (trend: 'up' | 'down' | 'stable') => {
+  if (trend === 'up') return '📈'
+  if (trend === 'down') return '📉'
+  return '➡️'
+}
+
+const trendColor = (trend: 'up' | 'down' | 'stable') => {
+  if (trend === 'up') return 'var(--success)'
+  if (trend === 'down') return 'var(--danger)'
+  return 'var(--text-muted)'
+}
 
 const afternoonSlotStats = computed(() => {
   if (!todayStats.value?.timeSlotStats) return null
@@ -422,6 +465,136 @@ const backToMenu = () => {
                 :style="{ width: Math.min(100, gameStore.memberLevelProgress.memberSalesRatio) + '%' }"
               ></div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="todayReview && todayReview.hotGenres.length > 0" class="review-card card hot-genres-card">
+        <h3 class="rc-title">🔥 热销品类排行</h3>
+        <div class="hg-list">
+          <div v-for="(hg, idx) in todayReview.hotGenres" :key="hg.genre" class="hg-item">
+            <span class="hg-rank" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</span>
+            <span class="hg-genre-icon">{{ genreEmoji[hg.genre] }}</span>
+            <span class="hg-genre-name">{{ hg.genre }}</span>
+            <div class="hg-stats">
+              <span class="hg-sales">{{ hg.salesCount }}张</span>
+              <span class="hg-revenue">¥{{ hg.revenue }}</span>
+            </div>
+            <div class="hg-bar">
+              <div 
+                class="hg-bar-fill" 
+                :style="{ width: Math.min(100, (hg.salesCount / Math.max(1, todayReview.hotGenres[0].salesCount)) * 100) + '%' }"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="todayReview && todayReview.totalLostSales > 0" class="review-card card lost-sales-card">
+        <h3 class="rc-title">❌ 失单原因分析</h3>
+        <div class="ls-summary">
+          <span class="ls-total-label">今日总计流失</span>
+          <span class="ls-total-value">{{ todayReview.totalLostSales }} 单</span>
+        </div>
+        <div class="ls-list">
+          <div v-for="ls in todayReview.lostSales" :key="ls.reason" class="ls-item">
+            <div class="ls-header">
+              <span class="ls-label">{{ ls.label }}</span>
+              <span class="ls-count">{{ ls.count }} 单</span>
+            </div>
+            <div class="ls-bar">
+              <div 
+                class="ls-bar-fill"
+                :style="{ width: Math.min(100, (ls.count / todayReview.totalLostSales) * 100) + '%' }"
+              ></div>
+            </div>
+            <p class="ls-desc">{{ ls.description }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="todayReview" class="review-card card customer-profile-card">
+        <h3 class="rc-title">👥 顾客画像变化</h3>
+        <div class="cp-current">
+          <div class="cp-section">
+            <span class="cp-section-label">热门偏好品类</span>
+            <div class="cp-genres">
+              <span v-for="g in todayReview.customerProfileShift.current.topGenres" :key="g" class="cp-genre-tag">
+                {{ genreEmoji[g] }} {{ g }}
+              </span>
+              <span v-if="todayReview.customerProfileShift.current.topGenres.length === 0" class="cp-empty">暂无数据</span>
+            </div>
+          </div>
+          <div class="cp-grid">
+            <div class="cp-stat">
+              <span class="cp-stat-label">平均预算</span>
+              <span class="cp-stat-value">
+                ¥{{ todayReview.customerProfileShift.current.avgBudget }}
+                <span v-if="todayReview.customerProfileShift.previous" class="cp-stat-trend" :style="{ color: trendColor(todayReview.customerProfileShift.budgetTrend) }">
+                  {{ trendIcon(todayReview.customerProfileShift.budgetTrend) }}
+                  {{ todayReview.customerProfileShift.budgetChange > 0 ? '+' : '' }}{{ todayReview.customerProfileShift.budgetChange }}
+                </span>
+              </span>
+            </div>
+            <div class="cp-stat">
+              <span class="cp-stat-label">价格区间</span>
+              <span class="cp-stat-value">
+                ¥{{ todayReview.customerProfileShift.current.avgPriceRange[0] }}-¥{{ todayReview.customerProfileShift.current.avgPriceRange[1] }}
+              </span>
+            </div>
+            <div class="cp-stat">
+              <span class="cp-stat-label">会员占比</span>
+              <span class="cp-stat-value">{{ Math.round(todayReview.customerProfileShift.current.memberRatio * 100) }}%</span>
+            </div>
+            <div class="cp-stat">
+              <span class="cp-stat-label">回头客率</span>
+              <span class="cp-stat-value">{{ Math.round(todayReview.customerProfileShift.current.returningRatio * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="todayReview.customerProfileShift.previous" class="cp-changes">
+          <span class="cp-changes-label">较昨日变化</span>
+          <div class="cp-changes-list">
+            <span 
+              v-for="gc in todayReview.customerProfileShift.genreChanges.filter(c => c.trend !== 'stable')" 
+              :key="gc.genre"
+              class="cp-change-tag"
+              :style="{ color: trendColor(gc.trend) }"
+            >
+              {{ genreEmoji[gc.genre] }} {{ gc.genre }} {{ trendIcon(gc.trend) }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="todayReview && todayReview.suggestions.length > 0" class="review-card card suggestions-card">
+        <h3 class="rc-title">💡 明日经营建议</h3>
+        <div class="sg-list">
+          <div 
+            v-for="sg in todayReview.suggestions" 
+            :key="sg.id" 
+            class="sg-item"
+            :style="{ 
+              background: priorityConfig[sg.priority].bg, 
+              borderColor: priorityConfig[sg.priority].border 
+            }"
+          >
+            <div class="sg-header">
+              <span class="sg-category">{{ categoryConfig[sg.category].icon }} {{ categoryConfig[sg.category].label }}</span>
+              <span 
+                class="sg-priority" 
+                :style="{ 
+                  color: priorityConfig[sg.priority].color, 
+                  background: priorityConfig[sg.priority].bg,
+                  border: `1px solid ${priorityConfig[sg.priority].border}`
+                }"
+              >
+                {{ priorityConfig[sg.priority].label }}
+              </span>
+            </div>
+            <h4 class="sg-title">{{ sg.title }}</h4>
+            <p class="sg-desc">{{ sg.description }}</p>
+            <p v-if="sg.action" class="sg-action">👉 {{ sg.action }}</p>
           </div>
         </div>
       </div>
@@ -1899,5 +2072,351 @@ const backToMenu = () => {
 .lei-effect.debuff {
   background: rgba(245, 101, 101, 0.1);
   color: var(--danger);
+}
+
+.review-card {
+  margin: 0 16px;
+}
+
+.rc-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.hot-genres-card {
+  background: linear-gradient(135deg, rgba(237, 137, 54, 0.08) 0%, rgba(246, 224, 94, 0.08) 100%);
+  border: 1px solid rgba(237, 137, 54, 0.2);
+}
+
+.hg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hg-item {
+  display: grid;
+  grid-template-columns: 24px 28px 70px 1fr;
+  grid-template-rows: auto auto;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 8px;
+}
+
+.hg-rank {
+  grid-row: span 2;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.hg-rank.rank-1 {
+  background: linear-gradient(135deg, #f6e05e, #ecc94b);
+  color: #744210;
+}
+
+.hg-rank.rank-2 {
+  background: linear-gradient(135deg, #e2e8f0, #a0aec0);
+  color: #4a5568;
+}
+
+.hg-rank.rank-3 {
+  background: linear-gradient(135deg, #fbd38d, #dd6b20);
+  color: #7b341e;
+}
+
+.hg-genre-icon {
+  grid-row: span 2;
+  font-size: 22px;
+  text-align: center;
+}
+
+.hg-genre-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.hg-stats {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.hg-sales {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-orange);
+}
+
+.hg-revenue {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.hg-bar {
+  grid-column: 3 / -1;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hg-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-orange) 0%, var(--accent-gold) 100%);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+.lost-sales-card {
+  background: linear-gradient(135deg, rgba(245, 101, 101, 0.08) 0%, rgba(237, 137, 54, 0.08) 100%);
+  border: 1px solid rgba(245, 101, 101, 0.2);
+}
+
+.ls-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.ls-total-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ls-total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.ls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ls-item {
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border-radius: 8px;
+}
+
+.ls-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ls-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ls-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.ls-bar {
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.ls-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--danger) 0%, var(--accent-orange) 100%);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.ls-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.customer-profile-card {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(159, 122, 234, 0.08) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.cp-current {
+  margin-bottom: 14px;
+}
+
+.cp-section {
+  margin-bottom: 14px;
+}
+
+.cp-section-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.cp-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cp-genre-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.cp-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.cp-stat {
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cp-stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.cp-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.cp-stat-trend {
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.cp-changes {
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.cp-changes-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.cp-changes-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cp-change-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  background: var(--bg-card);
+  border-radius: 10px;
+}
+
+.suggestions-card {
+  background: linear-gradient(135deg, rgba(72, 187, 120, 0.08) 0%, rgba(56, 178, 172, 0.08) 100%);
+  border: 1px solid rgba(72, 187, 120, 0.2);
+}
+
+.sg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sg-item {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.sg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.sg-category {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sg-priority {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.sg-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+
+.sg-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 6px 0;
+}
+
+.sg-action {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success);
+  margin: 0;
 }
 </style>

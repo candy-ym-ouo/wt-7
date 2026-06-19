@@ -191,25 +191,6 @@ export interface SaleRecord {
   wasBargained: boolean
 }
 
-export interface DailyStats {
-  day: number
-  revenue: number
-  cost: number
-  profit: number
-  salesCount: number
-  customersServed: number
-  avgSatisfaction: number
-  newMembers: number
-  returningCustomers: number
-  memberSalesCount: number
-  memberRevenue: number
-  totalGrowthPointsEarned: number
-  renovationCost: number
-  conditionDegraded: number
-  timeSlotStats: TimeSlotStats[]
-  events: ActiveBusinessEvent[]
-}
-
 export interface LevelConfig {
   id: number
   name: string
@@ -431,6 +412,86 @@ export interface ActiveBusinessEvent {
   config: BusinessEventConfig
   day: number
   appliedEffects: BusinessEventEffect
+}
+
+export type LostSaleReason =
+  | 'price_too_high'
+  | 'no_matching_genre'
+  | 'poor_condition'
+  | 'patience_exhausted'
+  | 'bargain_failed'
+  | 'customer_skipped'
+  | 'other'
+
+export interface LostSaleStat {
+  reason: LostSaleReason
+  count: number
+  label: string
+  description: string
+}
+
+export interface HotGenre {
+  genre: Genre
+  salesCount: number
+  revenue: number
+  profit: number
+  avgSatisfaction: number
+}
+
+export interface CustomerProfileSnapshot {
+  topGenres: Genre[]
+  avgBudget: number
+  avgPriceRange: [number, number]
+  memberRatio: number
+  returningRatio: number
+  avgRarityPreference: number
+}
+
+export interface CustomerProfileShift {
+  current: CustomerProfileSnapshot
+  previous: CustomerProfileSnapshot | null
+  genreChanges: { genre: Genre; change: number; trend: 'up' | 'down' | 'stable' }[]
+  budgetChange: number
+  budgetTrend: 'up' | 'down' | 'stable'
+  memberRatioChange: number
+}
+
+export interface DailySuggestion {
+  id: string
+  category: 'inventory' | 'pricing' | 'display' | 'service' | 'member'
+  priority: 'high' | 'medium' | 'low'
+  title: string
+  description: string
+  action?: string
+}
+
+export interface DailyBusinessReview {
+  day: number
+  hotGenres: HotGenre[]
+  lostSales: LostSaleStat[]
+  totalLostSales: number
+  customerProfileShift: CustomerProfileShift
+  suggestions: DailySuggestion[]
+}
+
+export interface DailyStats {
+  day: number
+  revenue: number
+  cost: number
+  profit: number
+  salesCount: number
+  customersServed: number
+  avgSatisfaction: number
+  newMembers: number
+  returningCustomers: number
+  memberSalesCount: number
+  memberRevenue: number
+  totalGrowthPointsEarned: number
+  renovationCost: number
+  conditionDegraded: number
+  timeSlotStats: TimeSlotStats[]
+  events: ActiveBusinessEvent[]
+  review?: DailyBusinessReview
 }
 
 export interface GameState {

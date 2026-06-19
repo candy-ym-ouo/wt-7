@@ -6,7 +6,8 @@ import type {
   MemberProfile, MemberLevel, MemberStats, LevelReward,
   LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
   TimeSlot, TimeSlotStats, BargainState, BargainRound,
-  ActiveBusinessEvent
+  ActiveBusinessEvent, LostSaleReason, HotGenre,
+  CustomerProfileSnapshot, CustomerProfileShift, DailySuggestion, DailyBusinessReview
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -169,6 +170,7 @@ export const useGameStore = defineStore('game', () => {
   const patienceTickTimer = ref<number | null>(null)
   const consecutiveSkips = ref(0)
   const customersLeftAngrily = ref(0)
+  const dailyLostSales = ref<Map<LostSaleReason, number>>(new Map())
 
   const dailyEvent = ref<ActiveBusinessEvent | null>(null)
   const levelEvents = ref<ActiveBusinessEvent[]>([])
@@ -596,6 +598,7 @@ export const useGameStore = defineStore('game', () => {
     eventConditionPenalty.value = 0
     consecutiveSkips.value = 0
     customersLeftAngrily.value = 0
+    dailyLostSales.value = new Map()
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -1027,6 +1030,7 @@ export const useGameStore = defineStore('game', () => {
 
       if (updated.hasLeftAngrily && !cust.hasLeftAngrily) {
         leftAngrilyCount++
+        recordLostSale('patience_exhausted')
       }
 
       return updated
@@ -1038,6 +1042,11 @@ export const useGameStore = defineStore('game', () => {
     }
 
     resortCustomerQueueIfNeeded()
+  }
+
+  const recordLostSale = (reason: LostSaleReason) => {
+    const current = dailyLostSales.value.get(reason) || 0
+    dailyLostSales.value.set(reason, current + 1)
   }
 
   const resortCustomerQueueIfNeeded = () => {
@@ -1347,6 +1356,7 @@ export const useGameStore = defineStore('game', () => {
       dailySatisfactionSum.value += finalDissatisfaction
       slotSatisfactionSum.value += finalDissatisfaction
       shopReputation.value = Math.max(0, shopReputation.value - 2)
+      recordLostSale('bargain_failed')
     }
 
     currentBargain.value = null
@@ -1582,6 +1592,21 @@ export const useGameStore = defineStore('game', () => {
       shopReputation.value = Math.max(0, shopReputation.value - (wasBargained ? 2 : 1) - (patienceRatio < 0.3 ? 1 : 0))
 
       consecutiveSkips.value = 0
+
+      if (wasBargained) {
+        recordLostSale('bargain_failed')
+      } else if (salePrice > customer.budget || salePrice > record.marketPrice * 1.3) {
+        recordLostSale('price_too_high')
+      } else if (slotConditionScore < 50) {
+        recordLostSale('poor_condition')
+      } else {
+        const isGenreMatch = customer.preference.favoriteGenres.includes(record.genre)
+        if (!isGenreMatch) {
+          recordLostSale('no_matching_genre')
+        } else {
+          recordLostSale('other')
+        }
+      }
       
       const bargainMsg = wasBargained ? '砍价没谈拢，' : ''
       const patienceMsg = patienceRatio < 0.3 ? '（顾客已有些不耐烦）' : ''
@@ -1598,6 +1623,7 @@ export const useGameStore = defineStore('game', () => {
       consecutiveSkips.value++
       const customer = currentCustomer.value
       dailyServedCustomers.value += 1
+      recordLostSale('customer_skipped')
 
       const patienceRatio = customer.patience / customer.maxPatience
       const skipPenalty = Math.min(5, Math.floor(consecutiveSkips.value * 0.8))
@@ -1748,6 +1774,314 @@ export const useGameStore = defineStore('game', () => {
     return calculateRenovationCost(currentScore, targetScore, rarity)
   }
 
+  const getLostSaleReasonLabel = (reason: LostSaleReason): { label: string; description: string } => {
+    const labels: { [key in LostSaleReason]: { label: string; description: string } } = {
+      price_too_high: { label: '定价过高', description: '售价超出顾客预算或市场均价过多' },
+      no_matching_genre: { label: '品类不匹配', description: '陈列的唱片不符合顾客偏好品类' },
+      poor_condition: { label: '品相不佳', description: '唱片品相评分过低影响购买意愿' },
+      patience_exhausted: { label: '等待过久', description: '顾客等待时间过长，耐心耗尽离开' },
+      bargain_failed: { label: '砍价失败', description: '价格谈判未能达成一致' },
+      customer_skipped: { label: '跳过服务', description: '主动跳过接待该顾客' },
+      other: { label: '其他原因', description: '未能成交的其他综合因素' }
+    }
+    return labels[reason]
+  }
+
+  const calculateHotGenres = (daySales: SaleRecord[]): HotGenre[] => {
+    const genreMap = new Map<Genre, { sales: number; revenue: number; profit: number; satisfaction: number[] }>()
+
+    for (const sale of daySales) {
+      const record = getRecordById(sale.recordId)
+      if (!record) continue
+      const existing = genreMap.get(record.genre) || { sales: 0, revenue: 0, profit: 0, satisfaction: [] }
+      existing.sales += 1
+      existing.revenue += sale.salePrice
+      existing.profit += sale.profit
+      existing.satisfaction.push(sale.customerSatisfaction)
+      genreMap.set(record.genre, existing)
+    }
+
+    const result: HotGenre[] = []
+    for (const [genre, data] of genreMap.entries()) {
+      result.push({
+        genre,
+        salesCount: data.sales,
+        revenue: data.revenue,
+        profit: data.profit,
+        avgSatisfaction: data.satisfaction.length > 0 ? data.satisfaction.reduce((a, b) => a + b, 0) / data.satisfaction.length : 0
+      })
+    }
+
+    return result.sort((a, b) => b.salesCount - a.salesCount || b.revenue - a.revenue)
+  }
+
+  const calculateLostSalesStats = () => {
+    const result = []
+    let total = 0
+    for (const [reason, count] of dailyLostSales.value.entries()) {
+      const { label, description } = getLostSaleReasonLabel(reason)
+      result.push({ reason, count, label, description })
+      total += count
+    }
+    return {
+      stats: result.sort((a, b) => b.count - a.count),
+      total
+    }
+  }
+
+  const buildCustomerProfileSnapshot = (dayCustomers: Customer[], _daySales: SaleRecord[]): CustomerProfileSnapshot => {
+    const genreCount = new Map<Genre, number>()
+    let totalBudget = 0
+    let totalPriceMin = 0
+    let totalPriceMax = 0
+    let memberCount = 0
+    let returningCount = 0
+    let totalRarityPref = 0
+    let rarityCount = 0
+
+    for (const c of dayCustomers) {
+      totalBudget += c.budget
+      totalPriceMin += c.preference.priceRange[0]
+      totalPriceMax += c.preference.priceRange[1]
+      if (c.memberProfile) memberCount++
+      if (c.isReturningCustomer) returningCount++
+      for (const g of c.preference.favoriteGenres) {
+        genreCount.set(g, (genreCount.get(g) || 0) + 1)
+      }
+      for (const r of c.preference.preferredRarity) {
+        totalRarityPref += r
+        rarityCount++
+      }
+    }
+
+    const sortedGenres = [...genreCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0])
+
+    return {
+      topGenres: sortedGenres,
+      avgBudget: dayCustomers.length > 0 ? Math.round(totalBudget / dayCustomers.length) : 0,
+      avgPriceRange: dayCustomers.length > 0
+        ? [Math.round(totalPriceMin / dayCustomers.length), Math.round(totalPriceMax / dayCustomers.length)] as [number, number]
+        : [0, 0],
+      memberRatio: dayCustomers.length > 0 ? memberCount / dayCustomers.length : 0,
+      returningRatio: dayCustomers.length > 0 ? returningCount / dayCustomers.length : 0,
+      avgRarityPreference: rarityCount > 0 ? Math.round((totalRarityPref / rarityCount) * 10) / 10 : 3
+    }
+  }
+
+  const getPreviousDayProfile = (): CustomerProfileSnapshot | null => {
+    if (dailyStats.value.length < 2) return null
+    const prevStats = dailyStats.value[dailyStats.value.length - 2]
+    if (!prevStats.review) return null
+    return prevStats.review.customerProfileShift.current
+  }
+
+  const calculateCustomerProfileShift = (
+    current: CustomerProfileSnapshot,
+    previous: CustomerProfileSnapshot | null
+  ): CustomerProfileShift => {
+    const allGenres: Genre[] = ['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk']
+    const genreChanges = allGenres.map(genre => {
+      const inCurrent = current.topGenres.includes(genre) ? 1 : 0
+      const inPrev = previous?.topGenres.includes(genre) ? 1 : 0
+      const change = inCurrent - inPrev
+      let trend: 'up' | 'down' | 'stable' = 'stable'
+      if (change > 0) trend = 'up'
+      else if (change < 0) trend = 'down'
+      return { genre, change, trend }
+    })
+
+    const budgetChange = previous ? current.avgBudget - previous.avgBudget : 0
+    let budgetTrend: 'up' | 'down' | 'stable' = 'stable'
+    if (budgetChange > 20) budgetTrend = 'up'
+    else if (budgetChange < -20) budgetTrend = 'down'
+
+    const memberRatioChange = previous ? current.memberRatio - previous.memberRatio : 0
+
+    return {
+      current,
+      previous,
+      genreChanges,
+      budgetChange,
+      budgetTrend,
+      memberRatioChange
+    }
+  }
+
+  const generateDailySuggestions = (
+    hotGenres: HotGenre[],
+    lostSales: { stats: { reason: LostSaleReason; count: number }[]; total: number },
+    profileShift: CustomerProfileShift,
+    todayStats: { salesCount: number; avgSatisfaction: number; profit: number }
+  ): DailySuggestion[] => {
+    const suggestions: DailySuggestion[] = []
+
+    if (lostSales.total > 0) {
+      const topLost = lostSales.stats[0]
+      if (topLost) {
+        switch (topLost.reason) {
+          case 'price_too_high':
+            suggestions.push({
+              id: 'sug-price',
+              category: 'pricing',
+              priority: 'high',
+              title: '优化定价策略',
+              description: `今日有 ${topLost.count} 单因价格过高流失，建议适当降低热门唱片报价或多进货性价比高的品种`,
+              action: '下次进货时关注成本控制'
+            })
+            break
+          case 'no_matching_genre':
+            suggestions.push({
+              id: 'sug-genre',
+              category: 'inventory',
+              priority: 'high',
+              title: '补充顾客偏好品类',
+              description: `${topLost.count} 位顾客没找到心仪的品类，建议根据顾客画像补充对应风格的唱片`,
+              action: profileShift.current.topGenres.length > 0 ? `重点关注: ${profileShift.current.topGenres.join('、')}` : undefined
+            })
+            break
+          case 'poor_condition':
+            suggestions.push({
+              id: 'sug-condition',
+              category: 'inventory',
+              priority: 'high',
+              title: '翻新维护唱片品相',
+              description: `${topLost.count} 单因品相不佳流失，陈列前请注意检查并及时翻新品相较低的唱片`,
+              action: '购买翻新维护服务'
+            })
+            break
+          case 'patience_exhausted':
+            suggestions.push({
+              id: 'sug-patience',
+              category: 'service',
+              priority: 'high',
+              title: '提升服务效率',
+              description: `${topLost.count} 位顾客因等待过久离开，建议优先接待不耐烦的顾客或播放匹配的音乐舒缓情绪`,
+              action: '使用耐心排序策略'
+            })
+            break
+          case 'bargain_failed':
+            suggestions.push({
+              id: 'sug-bargain',
+              category: 'pricing',
+              priority: 'medium',
+              title: '优化砍价策略',
+              description: `${topLost.count} 次砍价未能成交，建议在顾客可接受范围内灵活让步`,
+              action: '了解顾客底价，适当让步'
+            })
+            break
+          case 'customer_skipped':
+            suggestions.push({
+              id: 'sug-skip',
+              category: 'service',
+              priority: 'medium',
+              title: '减少跳过顾客',
+              description: `今日跳过了 ${topLost.count} 位顾客，尽量接待每一位顾客以提升销售机会和店铺声望`,
+              action: '耐心接待每位顾客'
+            })
+            break
+        }
+      }
+    }
+
+    if (hotGenres.length > 0) {
+      const topGenre = hotGenres[0]
+      suggestions.push({
+        id: 'sug-hot',
+        category: 'inventory',
+        priority: topGenre.salesCount >= 3 ? 'high' : 'medium',
+        title: `热销品类：${topGenre.genre}`,
+        description: `${topGenre.genre} 今日售出 ${topGenre.salesCount} 张，营收 ¥${topGenre.revenue}，建议持续补充该品类库存`,
+        action: '下次进货重点考虑'
+      })
+    }
+
+    if (profileShift.budgetTrend === 'up') {
+      suggestions.push({
+        id: 'sug-budget-up',
+        category: 'inventory',
+        priority: 'medium',
+        title: '顾客购买力提升',
+        description: `顾客平均预算较昨日上升 ¥${profileShift.budgetChange}，可考虑引入一些高品质、高价位的珍稀唱片`,
+        action: '探索稀有高价值品类'
+      })
+    } else if (profileShift.budgetTrend === 'down') {
+      suggestions.push({
+        id: 'sug-budget-down',
+        category: 'pricing',
+        priority: 'medium',
+        title: '顾客购买力下降',
+        description: `顾客平均预算较昨日下降 ¥${Math.abs(profileShift.budgetChange)}，建议多准备性价比高的平价唱片`,
+        action: '增加平价唱片库存'
+      })
+    }
+
+    if (todayStats.avgSatisfaction < 60 && todayStats.salesCount > 0) {
+      suggestions.push({
+        id: 'sug-satisfaction',
+        category: 'service',
+        priority: 'high',
+        title: '提升顾客满意度',
+        description: `今日平均满意度仅 ${Math.round(todayStats.avgSatisfaction)}%，请注意品相维护、合理定价和快速服务`,
+        action: '从多个维度改善顾客体验'
+      })
+    }
+
+    if (profileShift.current.returningRatio < 0.2 && todayStats.salesCount > 3) {
+      suggestions.push({
+        id: 'sug-returning',
+        category: 'member',
+        priority: 'medium',
+        title: '培养回头客',
+        description: '今日回头客比例较低，建议提升服务品质，鼓励顾客成为会员',
+        action: '提供优质服务，发展会员'
+      })
+    }
+
+    if (suggestions.length === 0) {
+      suggestions.push({
+        id: 'sug-default',
+        category: 'inventory',
+        priority: 'low',
+        title: '保持良好运营',
+        description: '今日整体经营状况良好，继续保持！',
+        action: '稳步推进每日经营'
+      })
+    }
+
+    return suggestions.sort((a, b) => {
+      const priorityOrder = { high: 0, medium: 1, low: 2 }
+      return priorityOrder[a.priority] - priorityOrder[b.priority]
+    }).slice(0, 4)
+  }
+
+  const calculateDailyBusinessReview = (): DailyBusinessReview => {
+    const todaySalesStartIdx = salesHistory.value.length - dailySalesCount.value
+    const todaySales = todaySalesStartIdx >= 0 ? salesHistory.value.slice(todaySalesStartIdx) : []
+
+    const hotGenres = calculateHotGenres(todaySales)
+    const lostSalesResult = calculateLostSalesStats()
+    const currentProfile = buildCustomerProfileSnapshot(customers.value, todaySales)
+    const previousProfile = getPreviousDayProfile()
+    const profileShift = calculateCustomerProfileShift(currentProfile, previousProfile)
+
+    const avgSatisfaction = dailyServedCustomers.value > 0 ? dailySatisfactionSum.value / dailyServedCustomers.value : 50
+    const suggestions = generateDailySuggestions(
+      hotGenres,
+      lostSalesResult,
+      profileShift,
+      { salesCount: dailySalesCount.value, avgSatisfaction, profit: dailyRevenue.value - dailyCost.value }
+    )
+
+    return {
+      day: currentDay.value,
+      hotGenres,
+      lostSales: lostSalesResult.stats,
+      totalLostSales: lostSalesResult.total,
+      customerProfileShift: profileShift,
+      suggestions
+    }
+  }
+
   const endDay = () => {
     stopPatienceTick()
     degradeAllRecords()
@@ -1775,6 +2109,8 @@ export const useGameStore = defineStore('game', () => {
       ? dailySatisfactionSum.value / dailyServedCustomers.value
       : 50
 
+    const review = calculateDailyBusinessReview()
+
     const stats: DailyStats = {
       day: currentDay.value,
       revenue: dailyRevenue.value,
@@ -1794,7 +2130,8 @@ export const useGameStore = defineStore('game', () => {
         { ...afternoonStats.value },
         { ...nightStats.value }
       ],
-      events: dailyEvent.value ? [{ ...dailyEvent.value }] : []
+      events: dailyEvent.value ? [{ ...dailyEvent.value }] : [],
+      review
     }
     dailyStats.value.push(stats)
 
