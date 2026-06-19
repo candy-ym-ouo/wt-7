@@ -12,6 +12,32 @@ const renovateInventory = ref<InventoryItem | null>(null)
 const renovateMessage = ref('')
 const renovateMessageType = ref<'success' | 'error'>('success')
 
+const getInventoryDisplayCount = (recordId: string) => {
+  return gameStore.displaySlots.filter(s => s.inventoryId === recordId).length
+}
+
+const getInventoryMinConditionScore = (inv: InventoryItem) => {
+  const displayed = gameStore.displaySlots
+    .filter(s => s.inventoryId === inv.record.id && s.conditionScore !== null)
+    .map(s => s.conditionScore as number)
+  const allScores = [...displayed]
+  for (let i = 0; i < inv.quantity; i++) {
+    allScores.push(inv.conditionScore)
+  }
+  return allScores.length ? Math.min(...allScores) : inv.conditionScore
+}
+
+const getInventoryMaxConditionScore = (inv: InventoryItem) => {
+  const displayed = gameStore.displaySlots
+    .filter(s => s.inventoryId === inv.record.id && s.conditionScore !== null)
+    .map(s => s.conditionScore as number)
+  const allScores = [...displayed]
+  for (let i = 0; i < inv.quantity; i++) {
+    allScores.push(inv.conditionScore)
+  }
+  return allScores.length ? Math.max(...allScores) : inv.conditionScore
+}
+
 const selectInventoryItem = (item: InventoryItem) => {
   if (item.quantity > 0) {
     selectedInventory.value = item
@@ -42,9 +68,7 @@ const getDisplayedRecord = (slot: DisplaySlot) => {
 }
 
 const getDisplayedConditionScore = (slot: DisplaySlot) => {
-  if (!slot.inventoryId) return -1
-  const invItem = gameStore.inventory.find(i => i.record.id === slot.inventoryId)
-  return invItem?.conditionScore ?? -1
+  return slot.conditionScore ?? -1
 }
 
 const openRenovateModal = (item: InventoryItem) => {
@@ -169,7 +193,7 @@ const goToPrevPhase = () => {
           <button 
             class="renovate-btn"
             @click.stop="openRenovateModal(item)"
-            :disabled="getRenovationOptions(item.conditionScore, item.record.rarity).length === 0"
+            :disabled="getRenovationOptions(getInventoryMinConditionScore(item), item.record.rarity).length === 0"
           >
             🔧
           </button>
@@ -202,24 +226,30 @@ const goToPrevPhase = () => {
             <div class="renovate-record-info">
               <h4>{{ renovateInventory.record.title }}</h4>
               <p>{{ renovateInventory.record.artist }}</p>
+              <div class="renovate-pieces-info">
+                <span class="rpi-tag">库存×{{ renovateInventory.quantity }}</span>
+                <span class="rpi-tag">陈列×{{ getInventoryDisplayCount(renovateInventory.record.id) }}</span>
+                <span class="rpi-tag">共{{ renovateInventory.quantity + getInventoryDisplayCount(renovateInventory.record.id) }}张</span>
+              </div>
               <div class="renovate-current-condition">
                 <span>当前品相</span>
                 <div class="condition-bar-lg">
                   <div 
                     class="condition-fill-lg" 
-                    :style="{ width: renovateInventory.conditionScore + '%', background: getConditionColor(renovateInventory.conditionScore) }"
+                    :style="{ width: getInventoryMinConditionScore(renovateInventory) + '%', background: getConditionColor(getInventoryMinConditionScore(renovateInventory)) }"
                   ></div>
                 </div>
-                <span :style="{ color: getConditionColor(renovateInventory.conditionScore) }">
-                  {{ getConditionLabel(renovateInventory.conditionScore) }} ({{ renovateInventory.conditionScore }})
+                <span :style="{ color: getConditionColor(getInventoryMinConditionScore(renovateInventory)) }">
+                  {{ getConditionLabel(getInventoryMinConditionScore(renovateInventory)) }}
+                  ({{ getInventoryMinConditionScore(renovateInventory) }}{{ getInventoryMinConditionScore(renovateInventory) !== getInventoryMaxConditionScore(renovateInventory) ? '-' + getInventoryMaxConditionScore(renovateInventory) : '' }})
                 </span>
               </div>
             </div>
 
             <div class="renovate-options">
-              <h4 class="ro-title">选择翻新方案</h4>
+              <h4 class="ro-title">选择翻新方案（所有副本统一升级）</h4>
               <div 
-                v-for="option in getRenovationOptions(renovateInventory.conditionScore, renovateInventory.record.rarity)" 
+                v-for="option in getRenovationOptions(getInventoryMinConditionScore(renovateInventory), renovateInventory.record.rarity)" 
                 :key="option.targetScore"
                 class="renovate-option"
                 :class="{ disabled: gameStore.budget < option.cost }"
@@ -235,7 +265,7 @@ const goToPrevPhase = () => {
                   ¥{{ option.cost }}
                 </span>
               </div>
-              <div v-if="getRenovationOptions(renovateInventory.conditionScore, renovateInventory.record.rarity).length === 0" class="ro-maxed">
+              <div v-if="getRenovationOptions(getInventoryMinConditionScore(renovateInventory), renovateInventory.record.rarity).length === 0" class="ro-maxed">
                 品相已达最佳，无需翻新
               </div>
             </div>
@@ -573,6 +603,22 @@ const goToPrevPhase = () => {
   font-size: 12px;
   color: var(--text-secondary);
   margin-bottom: 8px;
+}
+
+.renovate-pieces-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.rpi-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .renovate-current-condition {

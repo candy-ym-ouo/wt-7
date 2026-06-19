@@ -264,11 +264,11 @@ onUnmounted(() => {
               <span 
                 class="condition-badge"
                 :style="{ 
-                  color: getConditionColor(disp.item.conditionScore),
-                  background: getConditionColor(disp.item.conditionScore) + '20'
+                  color: getConditionColor(disp.conditionScore),
+                  background: getConditionColor(disp.conditionScore) + '20'
                 }"
               >
-                {{ getConditionLabel(disp.item.conditionScore) }}
+                {{ getConditionLabel(disp.conditionScore) }}
               </span>
               <span 
                 class="match-badge"
@@ -280,8 +280,8 @@ onUnmounted(() => {
                 {{ Math.round(disp.score) }}%
               </span>
             </div>
-            <div v-if="getConditionImpactOnSales(disp.item.conditionScore).priceModifier !== 1" class="condition-hint">
-              品相影响: 售价×{{ getConditionImpactOnSales(disp.item.conditionScore).priceModifier.toFixed(2) }}
+            <div v-if="getConditionImpactOnSales(disp.conditionScore).priceModifier !== 1" class="condition-hint">
+              品相影响: 售价×{{ getConditionImpactOnSales(disp.conditionScore).priceModifier.toFixed(2) }}
             </div>
           </div>
           <div class="display-actions">

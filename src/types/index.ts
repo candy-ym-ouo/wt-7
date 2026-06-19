@@ -73,6 +73,7 @@ export interface DisplaySlot {
   id: number
   inventoryId: string | null
   position: { x: number; y: number }
+  conditionScore: number | null
 }
 
 export interface CustomerPreference {

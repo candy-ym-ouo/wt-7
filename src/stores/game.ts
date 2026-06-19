@@ -75,12 +75,12 @@ export const useGameStore = defineStore('game', () => {
   })
   const displayedRecords = computed(() => {
     return displaySlots.value
-      .filter(s => s.inventoryId)
+      .filter(s => s.inventoryId && s.conditionScore !== null)
       .map(s => {
         const invItem = inventory.value.find(i => i.record.id === s.inventoryId)
-        return invItem ? { slot: s, item: invItem } : null
+        return invItem ? { slot: s, item: invItem, conditionScore: s.conditionScore as number } : null
       })
-      .filter((item): item is { slot: DisplaySlot; item: InventoryItem } => item !== null)
+      .filter((item): item is { slot: DisplaySlot; item: InventoryItem; conditionScore: number } => item !== null)
   })
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
   const isLastDay = computed(() => currentLevelConfig.value ? currentDay.value >= currentLevelConfig.value.days : false)
@@ -249,7 +249,8 @@ export const useGameStore = defineStore('game', () => {
       slots.push({
         id: i,
         inventoryId: null,
-        position: { x: i % cols, y: Math.floor(i / cols) }
+        position: { x: i % cols, y: Math.floor(i / cols) },
+        conditionScore: null
       })
     }
     displaySlots.value = slots
@@ -325,7 +326,10 @@ export const useGameStore = defineStore('game', () => {
     }
 
     slot.inventoryId = inventoryId
+    slot.conditionScore = invItem.conditionScore
     invItem.quantity -= 1
+
+    recalcInventoryCondition(invItem.record.id)
     return true
   }
 
@@ -335,10 +339,38 @@ export const useGameStore = defineStore('game', () => {
 
     const invItem = inventory.value.find(i => i.record.id === slot.inventoryId)
     if (invItem) {
+      const returningScore = slot.conditionScore!
+      const displayScores = displaySlots.value
+        .filter(s => s.id !== slot.id && s.inventoryId === invItem.record.id && s.conditionScore !== null)
+        .map(s => s.conditionScore as number)
+
+      const qtyBeforeAdd = invItem.quantity
+      const totalPieces = qtyBeforeAdd + displayScores.length + 1
+      const totalScore = invItem.conditionScore * qtyBeforeAdd +
+                         displayScores.reduce((a, b) => a + b, 0) +
+                         returningScore
       invItem.quantity += 1
+      invItem.conditionScore = Math.round(totalScore / totalPieces)
     }
     slot.inventoryId = null
+    slot.conditionScore = null
     return true
+  }
+
+  const recalcInventoryCondition = (recordId: string) => {
+    const invItem = inventory.value.find(i => i.record.id === recordId)
+    if (!invItem) return
+
+    const displayScores = displaySlots.value
+      .filter(s => s.inventoryId === recordId && s.conditionScore !== null)
+      .map(s => s.conditionScore as number)
+
+    const totalPieces = invItem.quantity + displayScores.length
+    if (totalPieces <= 0) return
+
+    const totalScore = invItem.conditionScore * invItem.quantity +
+                       displayScores.reduce((a, b) => a + b, 0)
+    invItem.conditionScore = Math.round(totalScore / totalPieces)
   }
 
   const startBusinessPhase = () => {
@@ -369,16 +401,16 @@ export const useGameStore = defineStore('game', () => {
 
   const getCustomerRecommendations = (customer: Customer) => {
     const displayed = displayedRecords.value
-    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; score: number }
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number }
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record)
       let finalScore = score
       if (currentPlayingRecord.value?.id === d.item.record.id) {
         finalScore += 15
       }
-      const conditionImpact = getConditionImpactOnSales(d.item.conditionScore)
+      const conditionImpact = getConditionImpactOnSales(d.conditionScore)
       finalScore += conditionImpact.buyChanceModifier * 100
-      return { ...d, score: finalScore } as ScoredRecord
+      return { slot: d.slot, item: d.item, conditionScore: d.conditionScore, score: finalScore } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
   }
@@ -417,7 +449,8 @@ export const useGameStore = defineStore('game', () => {
     if (!slot || !invItem) return { success: false, message: '唱片不存在' }
 
     const record = invItem.record
-    const conditionImpact = getConditionImpactOnSales(invItem.conditionScore)
+    const slotConditionScore = slot.conditionScore!
+    const conditionImpact = getConditionImpactOnSales(slotConditionScore)
     let salePrice = customPrice || record.marketPrice
 
     salePrice = Math.floor(salePrice * conditionImpact.priceModifier)
@@ -508,14 +541,15 @@ export const useGameStore = defineStore('game', () => {
       })
 
       slot.inventoryId = null
+      slot.conditionScore = null
 
       if (satisfaction >= 80 && Math.random() < 0.3) {
-        addToCollection(record, salePrice, invItem.conditionScore)
+        addToCollection(record, salePrice, slotConditionScore)
       }
 
       shopReputation.value = Math.min(100, shopReputation.value + (satisfaction > 60 ? 1 : -1))
 
-      const conditionLabel = getConditionLabel(invItem.conditionScore)
+      const conditionLabel = getConditionLabel(slotConditionScore)
 
       return {
         success: true,
@@ -553,18 +587,27 @@ export const useGameStore = defineStore('game', () => {
   const degradeAllRecords = () => {
     let totalDegraded = 0
 
-    const displayedIds = new Set(
-      displaySlots.value
-        .filter(s => s.inventoryId)
-        .map(s => s.inventoryId!)
-    )
+    const affectedRecordIds = new Set<string>()
+
+    for (const slot of displaySlots.value) {
+      if (!slot.inventoryId || slot.conditionScore === null) continue
+      const oldScore = slot.conditionScore
+      slot.conditionScore = degradeCondition(oldScore, true)
+      totalDegraded += oldScore - slot.conditionScore
+      affectedRecordIds.add(slot.inventoryId)
+    }
 
     for (const item of inventory.value) {
-      if (item.quantity <= 0) continue
-      const isDisplayed = displayedIds.has(item.record.id)
-      const oldScore = item.conditionScore
-      item.conditionScore = degradeCondition(oldScore, isDisplayed)
-      totalDegraded += oldScore - item.conditionScore
+      if (item.quantity > 0) {
+        const oldScore = item.conditionScore
+        item.conditionScore = degradeCondition(oldScore, false)
+        totalDegraded += oldScore - item.conditionScore
+        affectedRecordIds.add(item.record.id)
+      }
+    }
+
+    for (const recordId of affectedRecordIds) {
+      recalcInventoryCondition(recordId)
     }
 
     for (const item of collection.value) {
@@ -585,24 +628,42 @@ export const useGameStore = defineStore('game', () => {
     const invItem = inventory.value.find(i => i.record.id === inventoryId)
     if (!invItem) return { success: false, cost: 0, message: '唱片不存在' }
 
-    if (targetScore <= invItem.conditionScore) {
-      return { success: false, cost: 0, message: '目标品相不高于当前品相' }
+    const relatedSlots = displaySlots.value.filter(s => s.inventoryId === invItem.record.id && s.conditionScore !== null)
+    const allPieces: number[] = []
+    for (let i = 0; i < invItem.quantity; i++) {
+      allPieces.push(invItem.conditionScore)
+    }
+    relatedSlots.forEach(s => allPieces.push(s.conditionScore!))
+    if (allPieces.length === 0) {
+      return { success: false, cost: 0, message: '没有可翻新的副本' }
+    }
+    const minCurrent = Math.min(...allPieces)
+    if (targetScore <= minCurrent) {
+      return { success: false, cost: 0, message: '所有副本品相已达到目标' }
     }
 
-    const cost = calculateRenovationCostFromOptions(invItem.conditionScore, targetScore, invItem.record.rarity)
-    if (budget.value < cost) {
-      return { success: false, cost, message: `预算不足！需要 ¥${cost}` }
+    let totalCost = 0
+    for (const pieceScore of allPieces) {
+      if (pieceScore < targetScore) {
+        totalCost += calculateRenovationCostFromOptions(pieceScore, targetScore, invItem.record.rarity)
+      }
+    }
+    if (budget.value < totalCost) {
+      return { success: false, cost: totalCost, message: `预算不足！需要 ¥${totalCost}` }
     }
 
     invItem.conditionScore = targetScore
-    budget.value -= cost
-    dailyRenovationCost.value += cost
-    dailyCost.value += cost
+    relatedSlots.forEach(s => { s.conditionScore = targetScore })
 
+    budget.value -= totalCost
+    dailyRenovationCost.value += totalCost
+    dailyCost.value += totalCost
+
+    const avgBefore = Math.round(allPieces.reduce((a, b) => a + b, 0) / allPieces.length)
     return {
       success: true,
-      cost,
-      message: `翻新成功！《${invItem.record.title}》品相提升至 ${getConditionLabel(targetScore)}`
+      cost: totalCost,
+      message: `翻新成功！${allPieces.length}张《${invItem.record.title}》品相从${avgBefore}均提升至 ${getConditionLabel(targetScore)}（共${targetScore}分）`
     }
   }
 
