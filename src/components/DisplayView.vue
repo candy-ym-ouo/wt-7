@@ -114,6 +114,41 @@ const goToPrevPhase = () => {
       </p>
     </div>
 
+    <div v-if="gameStore.activeThemes.length > 0" class="theme-active-card card">
+      <div class="theme-header">
+        <span class="theme-icon">✨</span>
+        <span class="theme-title">当前主题加成</span>
+      </div>
+      <div class="theme-list">
+        <div v-for="t in gameStore.activeThemes" :key="t.theme.id" class="theme-item active">
+          <span class="theme-item-icon">{{ t.theme.icon }}</span>
+          <div class="theme-item-info">
+            <span class="theme-item-name">{{ t.theme.name }}</span>
+            <div class="theme-item-bonuses">
+              <span class="bonus-tag match">匹配 +{{ t.matchScoreBonus.toFixed(1) }}</span>
+              <span class="bonus-tag buy">购买 +{{ Math.round(t.buyChanceBonus * 100) }}%</span>
+              <span v-if="t.layoutBonus > 0" class="bonus-tag layout">布局 +{{ t.layoutBonus }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="theme-total">
+        总计: 匹配分 +{{ gameStore.themeMatchScoreBonus.toFixed(1) }} · 
+        购买率 +{{ Math.round(gameStore.themeBuyChanceBonus * 100) }}%
+      </p>
+    </div>
+
+    <div v-else class="theme-hint-card card">
+      <div class="theme-header">
+        <span class="theme-icon">🎯</span>
+        <span class="theme-title">主题陈列加成</span>
+      </div>
+      <p class="theme-hint-text">
+        按风格组合陈列唱片可激活主题，获得匹配分和购买率加成！<br>
+        同一主题的唱片相邻摆放还有额外布局加成~
+      </p>
+    </div>
+
     <div class="section-header">
       <h2 class="section-title">🏪 店内壁架</h2>
       <p class="section-desc">
@@ -297,6 +332,117 @@ const goToPrevPhase = () => {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+.theme-active-card {
+  background: linear-gradient(135deg, rgba(72, 187, 120, 0.12) 0%, rgba(56, 178, 172, 0.12) 100%);
+  border: 1px solid rgba(72, 187, 120, 0.35);
+}
+
+.theme-hint-card {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+
+.theme-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.theme-icon {
+  font-size: 18px;
+}
+
+.theme-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.theme-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
+.theme-item.active {
+  background: rgba(72, 187, 120, 0.15);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.theme-item-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.theme-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.theme-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.theme-item-bonuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bonus-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bonus-tag.match {
+  background: rgba(72, 187, 120, 0.25);
+  color: #48bb78;
+}
+
+.bonus-tag.buy {
+  background: rgba(246, 224, 94, 0.25);
+  color: var(--accent-gold);
+}
+
+.bonus-tag.layout {
+  background: rgba(102, 126, 234, 0.25);
+  color: #667eea;
+}
+
+.theme-total {
+  font-size: 11px;
+  color: var(--success);
+  font-weight: 600;
+  text-align: center;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(72, 187, 120, 0.3);
+  margin: 0;
+}
+
+.theme-hint-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
 }
 
 .section-header {

@@ -352,6 +352,29 @@ export interface RecordPerformance {
   lastSaleDate: number | null
 }
 
+export interface ThemeConfig {
+  id: string
+  name: string
+  icon: string
+  description: string
+  coreGenres: Genre[]
+  bonusGenres: Genre[]
+  matchScoreBonus: number
+  buyChanceBonus: number
+  layoutBonus: number
+}
+
+export interface ThemeMatchResult {
+  theme: ThemeConfig
+  matchCount: number
+  totalSlots: number
+  matchRatio: number
+  matchScoreBonus: number
+  buyChanceBonus: number
+  layoutBonus: number
+  isActive: boolean
+}
+
 export interface GameState {
   currentLevel: number
   currentDay: number

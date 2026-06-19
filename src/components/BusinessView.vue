@@ -287,7 +287,32 @@ onUnmounted(() => {
           <span class="np-genre">{{ gameStore.currentPlayingRecord.genre }}</span>
         </div>
       </div>
-      <p class="np-hint">播放中的唱片会提高顾客的购买意愿！当前时段试听加成 +{{ timeSlotInfo.playBoost }}</p>
+      <p class="np-hint">
+        播放中的唱片会提高顾客的购买意愿！
+        当前时段试听加成 +{{ timeSlotInfo.playBoost }}
+        <span v-if="gameStore.playbackThemeBonus > 0" class="np-theme-bonus">
+          · 主题联动 +{{ gameStore.playbackThemeBonus }}
+        </span>
+      </p>
+    </div>
+
+    <div v-if="gameStore.activeThemes.length > 0" class="theme-bonus-card card">
+      <div class="tbc-header">
+        <span class="tbc-icon">✨</span>
+        <span class="tbc-title">主题陈列加成</span>
+        <span class="tbc-count">{{ gameStore.activeThemes.length }}个激活</span>
+      </div>
+      <div class="tbc-themes">
+        <div v-for="t in gameStore.activeThemes.slice(0, 3)" :key="t.theme.id" class="tbc-theme">
+          <span class="tbc-theme-icon">{{ t.theme.icon }}</span>
+          <span class="tbc-theme-name">{{ t.theme.name }}</span>
+          <span class="tbc-theme-bonus">+{{ t.matchScoreBonus.toFixed(1) }}</span>
+        </div>
+      </div>
+      <div class="tbc-summary">
+        <span>匹配分总计 +{{ gameStore.themeMatchScoreBonus.toFixed(1) }}</span>
+        <span>购买率 +{{ Math.round(gameStore.themeBuyChanceBonus * 100) }}%</span>
+      </div>
     </div>
 
     <div class="time-slot-banner card" :class="{ afternoon: timeSlotInfo.isAfternoon, night: timeSlotInfo.isNight }">
@@ -768,6 +793,89 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
+  margin: 0;
+}
+
+.np-theme-bonus {
+  color: var(--success);
+  font-weight: 600;
+  font-style: normal;
+}
+
+.theme-bonus-card {
+  background: linear-gradient(135deg, rgba(72, 187, 120, 0.1) 0%, rgba(56, 178, 172, 0.1) 100%);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.tbc-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tbc-icon {
+  font-size: 16px;
+}
+
+.tbc-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.tbc-count {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: rgba(72, 187, 120, 0.2);
+  color: var(--success);
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.tbc-themes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tbc-theme {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+}
+
+.tbc-theme-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.tbc-theme-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tbc-theme-bonus {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.tbc-summary {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(72, 187, 120, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success);
 }
 
 .time-slot-banner {

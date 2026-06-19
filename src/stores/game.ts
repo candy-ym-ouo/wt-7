@@ -71,11 +71,21 @@ import {
   getCollectionValueBonus,
   getFavoriteBonuses
 } from '@/data/album'
+import {
+  calculateThemeMatches,
+  getActiveThemes,
+  getTotalThemeMatchScoreBonus,
+  getTotalThemeBuyChanceBonus,
+  getPlaybackThemeBonus,
+  themes
+} from '@/data/themeDisplay'
 import type {
   AlbumState,
   SpecialCustomerConfig,
   CollectionBonus,
-  AlbumBonusType
+  AlbumBonusType,
+  ThemeMatchResult,
+  ThemeConfig
 } from '@/types'
 
 export const useGameStore = defineStore('game', () => {
@@ -246,6 +256,29 @@ export const useGameStore = defineStore('game', () => {
       })
       .filter((item): item is { slot: DisplaySlot; item: InventoryItem; conditionScore: number } => item !== null)
   })
+
+  const themeMatches = computed<ThemeMatchResult[]>(() => {
+    return calculateThemeMatches(displaySlots.value, inventory.value)
+  })
+
+  const activeThemes = computed<ThemeMatchResult[]>(() => {
+    return getActiveThemes(displaySlots.value, inventory.value)
+  })
+
+  const themeMatchScoreBonus = computed(() => {
+    return getTotalThemeMatchScoreBonus(displaySlots.value, inventory.value)
+  })
+
+  const themeBuyChanceBonus = computed(() => {
+    return getTotalThemeBuyChanceBonus(displaySlots.value, inventory.value)
+  })
+
+  const playbackThemeBonus = computed(() => {
+    return getPlaybackThemeBonus(currentPlayingRecord.value, displaySlots.value, inventory.value)
+  })
+
+  const allThemes = computed<ThemeConfig[]>(() => themes)
+
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
   const isLastDay = computed(() => baseLevelConfig.value ? currentDay.value >= baseLevelConfig.value.days : false)
   const canAdvancePhase = computed(() => {
@@ -865,16 +898,24 @@ export const useGameStore = defineStore('game', () => {
     const displayed = displayedRecords.value
     const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
     const collectionMatchBonus = matchScoreBonusFromCollection.value
-    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number }
+    const themeBonus = themeMatchScoreBonus.value
+    const playbackBonus = playbackThemeBonus.value
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number }
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
-      let finalScore = score + collectionMatchBonus
+      let finalScore = score + collectionMatchBonus + themeBonus
       if (currentPlayingRecord.value?.id === d.item.record.id) {
-        finalScore += playBoost
+        finalScore += playBoost + playbackBonus
       }
       const conditionImpact = getConditionImpactOnSales(d.conditionScore)
       finalScore += conditionImpact.buyChanceModifier * 100
-      return { slot: d.slot, item: d.item, conditionScore: d.conditionScore, score: Math.min(100, finalScore) } as ScoredRecord
+      return { 
+        slot: d.slot, 
+        item: d.item, 
+        conditionScore: d.conditionScore, 
+        score: Math.min(100, finalScore),
+        themeBonus
+      } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
   }
@@ -1115,12 +1156,21 @@ export const useGameStore = defineStore('game', () => {
     const score = calculateMatchScore(customer, record, shopReputation.value)
     const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
     const collectionMatchBonus = matchScoreBonusFromCollection.value
-    const finalScore = Math.min(100, (currentPlayingRecord.value?.id === record.id ? score + playBoost : score) + collectionMatchBonus)
+    const themeBonus = themeMatchScoreBonus.value
+    const playbackThemeBonusVal = playbackThemeBonus.value
+    const themeBuyBonus = themeBuyChanceBonus.value
+
+    let baseScore = score + collectionMatchBonus + themeBonus
+    if (currentPlayingRecord.value?.id === record.id) {
+      baseScore += playBoost + playbackThemeBonusVal
+    }
+    const finalScore = Math.min(100, baseScore)
 
     let buyChance = finalScore / 100
     buyChance += conditionImpact.buyChanceModifier
     buyChance += getBuyChanceBonus(shopReputation.value)
     buyChance += buyChanceBonusFromCollection.value
+    buyChance += themeBuyBonus
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (salePrice > customer.budget) {
@@ -1717,6 +1767,12 @@ export const useGameStore = defineStore('game', () => {
     availableRecords,
     shopRecordsForPurchase,
     displayedRecords,
+    themeMatches,
+    activeThemes,
+    themeMatchScoreBonus,
+    themeBuyChanceBonus,
+    playbackThemeBonus,
+    allThemes,
     currentCustomer,
     isLastDay,
     canAdvancePhase,
