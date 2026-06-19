@@ -156,13 +156,28 @@ export const calculateLevelEvaluation = (
   targetSales: number,
   reputation: number,
   targetSatisfaction: number,
-  startReputation: number
+  startReputation: number,
+  genreSalesProgressMap?: Map<string, number>,
+  collectionProgress?: number,
+  avgSatisfactionProgress?: number
 ): LevelEvaluation => {
   const profitRatio = profit / targetProfit
   const salesRatio = sales / targetSales
   const satisfactionRatio = reputation / targetSatisfaction
 
-  const rawScore = (profitRatio * 40 + salesRatio * 30 + satisfactionRatio * 30)
+  const baseScore = (profitRatio * 30 + salesRatio * 20 + satisfactionRatio * 20)
+
+  const genreSalesCount = genreSalesProgressMap ? genreSalesProgressMap.size : 0
+  const genreSalesScore = genreSalesCount > 0
+    ? Array.from(genreSalesProgressMap!.values()).reduce((a, b) => a + b, 0) / genreSalesCount
+    : 100
+  const collectionScore = collectionProgress !== undefined ? collectionProgress : 100
+  const challengeAvgSatisfactionScore = avgSatisfactionProgress !== undefined ? avgSatisfactionProgress : 100
+
+  const challengeScore = (genreSalesScore + collectionScore + challengeAvgSatisfactionScore) / 3
+  const challengeWeight = 30
+
+  const rawScore = baseScore + (challengeScore / 100) * challengeWeight
 
   const reputationGain = reputation - startReputation
   let reputationTrend: 'rising' | 'stable' | 'declining' = 'stable'
@@ -192,7 +207,10 @@ export const calculateLevelEvaluation = (
     wordOfMouthBonus,
     reputationTrend,
     customerFlowBonus,
-    totalScore: Math.round(totalScore)
+    totalScore: Math.round(totalScore),
+    genreSalesScore: Math.round(genreSalesScore),
+    collectionScore: Math.round(collectionScore),
+    avgSatisfactionScore: Math.round(challengeAvgSatisfactionScore)
   }
 }
 

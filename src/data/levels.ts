@@ -32,6 +32,19 @@ export const levels: LevelConfig[] = [
       targetReturningVisits: 0,
       targetMemberSalesRatio: 0.2
     },
+    challengeTargets: {
+      genreSales: [
+        { genre: 'Jazz', targetCount: 2 },
+        { genre: 'Rock', targetCount: 2 }
+      ],
+      collection: {
+        targetActivatedAlbums: 0,
+        targetTotalCollectionValue: 500
+      },
+      avgSatisfaction: {
+        minAvgSatisfaction: 65
+      }
+    },
     overstockConfig: {
       ...defaultOverstockConfig,
       slowThresholdDays: 3,
@@ -58,6 +71,20 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 5,
       targetReturningVisits: 3,
       targetMemberSalesRatio: 0.35
+    },
+    challengeTargets: {
+      genreSales: [
+        { genre: 'Jazz', targetCount: 3 },
+        { genre: 'Soul', targetCount: 3 },
+        { genre: 'Pop', targetCount: 3 }
+      ],
+      collection: {
+        targetActivatedAlbums: 1,
+        targetTotalCollectionValue: 1500
+      },
+      avgSatisfaction: {
+        minAvgSatisfaction: 70
+      }
     },
     overstockConfig: {
       ...defaultOverstockConfig,
@@ -86,6 +113,20 @@ export const levels: LevelConfig[] = [
       targetReturningVisits: 8,
       targetMemberSalesRatio: 0.45
     },
+    challengeTargets: {
+      genreSales: [
+        { genre: 'Rock', targetCount: 5 },
+        { genre: 'Funk', targetCount: 4 },
+        { genre: 'Blues', targetCount: 3 }
+      ],
+      collection: {
+        targetActivatedAlbums: 2,
+        targetTotalCollectionValue: 3500
+      },
+      avgSatisfaction: {
+        minAvgSatisfaction: 75
+      }
+    },
     overstockConfig: {
       ...defaultOverstockConfig,
       slowDailyPenaltyRate: 0.02,
@@ -109,6 +150,21 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 12,
       targetReturningVisits: 15,
       targetMemberSalesRatio: 0.55
+    },
+    challengeTargets: {
+      genreSales: [
+        { genre: 'Jazz', targetCount: 6 },
+        { genre: 'Classical', targetCount: 4 },
+        { genre: 'Disco', targetCount: 5 },
+        { genre: 'Folk', targetCount: 3 }
+      ],
+      collection: {
+        targetActivatedAlbums: 4,
+        targetTotalCollectionValue: 7000
+      },
+      avgSatisfaction: {
+        minAvgSatisfaction: 78
+      }
     },
     overstockConfig: {
       ...defaultOverstockConfig,
@@ -136,6 +192,22 @@ export const levels: LevelConfig[] = [
       targetNewMembers: 18,
       targetReturningVisits: 25,
       targetMemberSalesRatio: 0.65
+    },
+    challengeTargets: {
+      genreSales: [
+        { genre: 'Jazz', targetCount: 8 },
+        { genre: 'Rock', targetCount: 8 },
+        { genre: 'Electronic', targetCount: 5 },
+        { genre: 'Classical', targetCount: 6 },
+        { genre: 'Soul', targetCount: 5 }
+      ],
+      collection: {
+        targetActivatedAlbums: 7,
+        targetTotalCollectionValue: 15000
+      },
+      avgSatisfaction: {
+        minAvgSatisfaction: 82
+      }
     },
     overstockConfig: {
       ...defaultOverstockConfig,
@@ -177,6 +249,20 @@ export const getScaledLevelConfig = (levelId: number, reputation: number): Level
     ...base,
     targetProfit: Math.floor(base.targetProfit * scale),
     targetSales: Math.max(base.targetSales, Math.floor(base.targetSales * scale)),
-    targetSatisfaction: Math.min(100, Math.floor(base.targetSatisfaction * scale))
+    targetSatisfaction: Math.min(100, Math.floor(base.targetSatisfaction * scale)),
+    challengeTargets: {
+      ...base.challengeTargets,
+      genreSales: base.challengeTargets.genreSales.map(t => ({
+        ...t,
+        targetCount: Math.max(1, Math.floor(t.targetCount * scale))
+      })),
+      collection: {
+        ...base.challengeTargets.collection,
+        targetTotalCollectionValue: Math.floor(base.challengeTargets.collection.targetTotalCollectionValue * scale)
+      },
+      avgSatisfaction: {
+        minAvgSatisfaction: Math.min(100, Math.floor(base.challengeTargets.avgSatisfaction.minAvgSatisfaction * (0.9 + scale * 0.1)))
+      }
+    }
   }
 }

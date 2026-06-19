@@ -153,6 +153,9 @@ export const useGameStore = defineStore('game', () => {
   const currentLevelNewMembers = ref(0)
   const currentLevelReturningVisits = ref(0)
   const currentLevelMemberSales = ref(0)
+  const currentLevelGenreSales = ref<Map<Genre, number>>(new Map())
+  const currentLevelSatisfactionSum = ref(0)
+  const currentLevelSatisfactionCount = ref(0)
 
   const dailyNewMembers = ref(0)
   const dailyReturningCustomers = ref(0)
@@ -318,6 +321,10 @@ export const useGameStore = defineStore('game', () => {
   const levelEvaluation = computed<LevelEvaluation | null>(() => {
     const config = currentLevelConfig.value
     if (!config) return null
+    const genreSalesMap = new Map<string, number>()
+    for (const [genre, data] of genreSalesProgress.value.entries()) {
+      genreSalesMap.set(genre, data.progress)
+    }
     return calculateLevelEvaluation(
       effectiveProfit.value,
       config.targetProfit,
@@ -325,7 +332,10 @@ export const useGameStore = defineStore('game', () => {
       config.targetSales,
       shopReputation.value,
       config.targetSatisfaction,
-      levelStartReputation.value
+      levelStartReputation.value,
+      genreSalesMap,
+      collectionProgress.value.overall,
+      avgSatisfactionProgress.value.progress
     )
   })
 
@@ -455,11 +465,26 @@ export const useGameStore = defineStore('game', () => {
 
   const levelProgress = computed(() => {
     const config = currentLevelConfig.value
-    if (!config) return { profit: 0, sales: 0, satisfaction: 0 }
+    if (!config) return { profit: 0, sales: 0, satisfaction: 0, genreSales: new Map(), collection: 0, avgSatisfaction: 0, challengeOverall: 0 }
+    const genreSalesMap = new Map<Genre, number>()
+    for (const [genre, data] of genreSalesProgress.value.entries()) {
+      genreSalesMap.set(genre, data.progress)
+    }
+    const challengeOverall = (
+      (isGenreSalesComplete.value ? 100 : Array.from(genreSalesMap.values()).reduce((a, b) => a + b, 0) / Math.max(1, genreSalesMap.size)) +
+      collectionProgress.value.overall +
+      avgSatisfactionProgress.value.progress
+    ) / 3
     return {
       profit: Math.min(100, (effectiveProfit.value / config.targetProfit) * 100),
       sales: Math.min(100, (currentLevelSales.value / config.targetSales) * 100),
-      satisfaction: Math.min(100, (shopReputation.value / config.targetSatisfaction) * 100)
+      satisfaction: Math.min(100, (shopReputation.value / config.targetSatisfaction) * 100),
+      genreSales: genreSalesMap,
+      collection: collectionProgress.value.overall,
+      collectionActivated: collectionProgress.value.activatedAlbums.progress,
+      collectionValue: collectionProgress.value.totalValue.progress,
+      avgSatisfaction: avgSatisfactionProgress.value.progress,
+      challengeOverall
     }
   })
   const isLevelComplete = computed(() => {
@@ -470,7 +495,7 @@ export const useGameStore = defineStore('game', () => {
            currentLevelSales.value >= config.targetSales &&
            shopReputation.value >= config.targetSatisfaction
 
-    return baseComplete && isMemberTargetsComplete.value
+    return baseComplete && isMemberTargetsComplete.value && isChallengeTargetsComplete.value
   })
 
   const calculateLevelReward = (): LevelReward => {
@@ -481,6 +506,10 @@ export const useGameStore = defineStore('game', () => {
       returningVisitsReward: 0,
       memberRatioReward: 0,
       memberTargetsCompletedBonus: 0,
+      genreSalesReward: 0,
+      collectionReward: 0,
+      avgSatisfactionReward: 0,
+      challengeTargetsCompletedBonus: 0,
       totalReward: 0,
       reputationBonus: 0,
       unlockedBonus: [],
@@ -535,6 +564,50 @@ export const useGameStore = defineStore('game', () => {
       reward.unlockedBonus.push(`收藏图鉴声望 +${collectionRepBonus}`)
     }
 
+    const challengeTargets = config.challengeTargets
+    let totalGenreTarget = 0
+    let totalGenreCurrent = 0
+    for (const target of challengeTargets.genreSales) {
+      totalGenreTarget += target.targetCount
+      totalGenreCurrent += currentLevelGenreSales.value.get(target.genre) || 0
+    }
+    const genreSalesRatio = totalGenreTarget > 0 ? Math.min(1, totalGenreCurrent / totalGenreTarget) : 1
+    reward.genreSalesReward = Math.floor(genreSalesRatio * totalGenreTarget * 80 * levelRewardMultiplier)
+
+    const activatedRatio = challengeTargets.collection.targetActivatedAlbums > 0
+      ? Math.min(1, albumState.value.totalActivated / challengeTargets.collection.targetActivatedAlbums)
+      : 1
+    const valueRatio = challengeTargets.collection.targetTotalCollectionValue > 0
+      ? Math.min(1, totalCollectionValue.value / challengeTargets.collection.targetTotalCollectionValue)
+      : 1
+    const collectionRewardRatio = (activatedRatio + valueRatio) / 2
+    reward.collectionReward = Math.floor(collectionRewardRatio * challengeTargets.collection.targetTotalCollectionValue * 0.1 * levelRewardMultiplier)
+
+    const avgSatRatio = challengeTargets.avgSatisfaction.minAvgSatisfaction > 0
+      ? Math.min(1, currentLevelAvgSatisfaction.value / challengeTargets.avgSatisfaction.minAvgSatisfaction)
+      : 1
+    reward.avgSatisfactionReward = Math.floor(avgSatRatio * 500 * config.id * levelRewardMultiplier)
+
+    if (isChallengeTargetsComplete.value) {
+      reward.challengeTargetsCompletedBonus = Math.floor(config.id * 800 * levelRewardMultiplier)
+      reward.reputationBonus += 15 + config.id * 3
+      reward.unlockedBonus.push('多条件挑战达成！')
+    }
+
+    if (activatedRatio >= 1 && challengeTargets.collection.targetActivatedAlbums > 0) {
+      reward.unlockedBonus.push(`激活 ${challengeTargets.collection.targetActivatedAlbums} 个图鉴达成`)
+      reward.reputationBonus += 5
+    }
+    if (avgSatRatio >= 1 && currentLevelAvgSatisfaction.value >= 85) {
+      reward.unlockedBonus.push('极高顾客满意度！')
+      reward.reputationBonus += 8
+    }
+
+    const genreSalesMap = new Map<string, number>()
+    for (const [genre, data] of genreSalesProgress.value.entries()) {
+      genreSalesMap.set(genre, data.progress)
+    }
+
     const evaluation = calculateLevelEvaluation(
       currentLevelProfit.value,
       config.targetProfit,
@@ -542,7 +615,10 @@ export const useGameStore = defineStore('game', () => {
       config.targetSales,
       shopReputation.value,
       config.targetSatisfaction,
-      levelStartReputation.value
+      levelStartReputation.value,
+      genreSalesMap,
+      collectionProgress.value.overall,
+      avgSatisfactionProgress.value.progress
     )
     reward.evaluation = evaluation
     reward.wordOfMouthBonus = Math.floor(evaluation.wordOfMouthBonus * levelRewardMultiplier)
@@ -563,6 +639,10 @@ export const useGameStore = defineStore('game', () => {
       reward.returningVisitsReward +
       reward.memberRatioReward +
       reward.memberTargetsCompletedBonus +
+      reward.genreSalesReward +
+      reward.collectionReward +
+      reward.avgSatisfactionReward +
+      reward.challengeTargetsCompletedBonus +
       reward.wordOfMouthBonus
 
     return reward
@@ -611,6 +691,9 @@ export const useGameStore = defineStore('game', () => {
     currentLevelNewMembers.value = 0
     currentLevelReturningVisits.value = 0
     currentLevelMemberSales.value = 0
+    currentLevelGenreSales.value = new Map()
+    currentLevelSatisfactionSum.value = 0
+    currentLevelSatisfactionCount.value = 0
     members.value = []
     lastLevelReward.value = null
     levelStartReputation.value = shopReputation.value
@@ -1103,6 +1186,79 @@ export const useGameStore = defineStore('game', () => {
     return getAverageAtmosphereValue(genreAtmosphere.value)
   })
 
+  const currentLevelAvgSatisfaction = computed<number>(() => {
+    if (currentLevelSatisfactionCount.value === 0) return 0
+    return currentLevelSatisfactionSum.value / currentLevelSatisfactionCount.value
+  })
+
+  const genreSalesProgress = computed<Map<Genre, { current: number; target: number; progress: number }>>(() => {
+    const result = new Map()
+    const config = currentLevelConfig.value
+    if (!config) return result
+
+    for (const target of config.challengeTargets.genreSales) {
+      const current = currentLevelGenreSales.value.get(target.genre) || 0
+      const progress = Math.min(100, (current / Math.max(1, target.targetCount)) * 100)
+      result.set(target.genre, { current, target: target.targetCount, progress })
+    }
+    return result
+  })
+
+  const isGenreSalesComplete = computed<boolean>(() => {
+    const progress = genreSalesProgress.value
+    if (progress.size === 0) return true
+    for (const data of progress.values()) {
+      if (data.progress < 100) return false
+    }
+    return true
+  })
+
+  const collectionProgress = computed<{ activatedAlbums: { current: number; target: number; progress: number }; totalValue: { current: number; target: number; progress: number }; overall: number }>(() => {
+    const config = currentLevelConfig.value
+    if (!config) return { activatedAlbums: { current: 0, target: 0, progress: 0 }, totalValue: { current: 0, target: 0, progress: 0 }, overall: 0 }
+
+    const targets = config.challengeTargets.collection
+    const currentActivated = albumState.value.totalActivated
+    const currentValue = totalCollectionValue.value
+
+    const activatedProgress = targets.targetActivatedAlbums > 0
+      ? Math.min(100, (currentActivated / targets.targetActivatedAlbums) * 100)
+      : 100
+    const valueProgress = targets.targetTotalCollectionValue > 0
+      ? Math.min(100, (currentValue / targets.targetTotalCollectionValue) * 100)
+      : 100
+
+    return {
+      activatedAlbums: { current: currentActivated, target: targets.targetActivatedAlbums, progress: activatedProgress },
+      totalValue: { current: currentValue, target: targets.targetTotalCollectionValue, progress: valueProgress },
+      overall: (activatedProgress + valueProgress) / 2
+    }
+  })
+
+  const isCollectionComplete = computed<boolean>(() => {
+    const progress = collectionProgress.value
+    return progress.activatedAlbums.progress >= 100 && progress.totalValue.progress >= 100
+  })
+
+  const avgSatisfactionProgress = computed<{ current: number; target: number; progress: number }>(() => {
+    const config = currentLevelConfig.value
+    if (!config) return { current: 0, target: 0, progress: 0 }
+
+    const target = config.challengeTargets.avgSatisfaction.minAvgSatisfaction
+    const current = currentLevelAvgSatisfaction.value
+    const progress = target > 0 ? Math.min(100, (current / target) * 100) : 100
+
+    return { current, target, progress }
+  })
+
+  const isAvgSatisfactionComplete = computed<boolean>(() => {
+    return avgSatisfactionProgress.value.progress >= 100
+  })
+
+  const isChallengeTargetsComplete = computed<boolean>(() => {
+    return isGenreSalesComplete.value && isCollectionComplete.value && isAvgSatisfactionComplete.value
+  })
+
   const getAtmospherePatienceSlowdown = (genres: Genre[]): number => {
     let maxSlowdown = 0
     for (const genre of genres) {
@@ -1236,6 +1392,8 @@ export const useGameStore = defineStore('game', () => {
       dailyServedCustomers.value += 1
       dailySatisfactionSum.value += 10
       slotSatisfactionSum.value += 10
+      currentLevelSatisfactionSum.value += 10
+      currentLevelSatisfactionCount.value += 1
       currentCustomerIndex.value++
     }
   }
@@ -1509,6 +1667,9 @@ export const useGameStore = defineStore('game', () => {
       slotSatisfactionSum.value += finalDissatisfaction
       shopReputation.value = Math.max(0, shopReputation.value - 2)
       recordLostSale('bargain_failed')
+
+      currentLevelSatisfactionSum.value += finalDissatisfaction
+      currentLevelSatisfactionCount.value += 1
     }
 
     currentBargain.value = null
@@ -1653,6 +1814,11 @@ export const useGameStore = defineStore('game', () => {
       currentLevelSales.value += 1
       totalProfit.value += profit
 
+      const currentGenreCount = currentLevelGenreSales.value.get(record.genre) || 0
+      currentLevelGenreSales.value.set(record.genre, currentGenreCount + 1)
+      currentLevelSatisfactionSum.value += satisfaction
+      currentLevelSatisfactionCount.value += 1
+
       const memberProfile = customer.memberProfile || findOrCreateMember(customer, salePrice, satisfaction)
       let growthPointsEarned = 0
       let isMemberPurchase = false
@@ -1757,6 +1923,9 @@ export const useGameStore = defineStore('game', () => {
       slotSatisfactionSum.value += finalDissatisfaction
       shopReputation.value = Math.max(0, shopReputation.value - (wasBargained ? 2 : 1) - (patienceRatio < 0.3 ? 1 : 0))
 
+      currentLevelSatisfactionSum.value += finalDissatisfaction
+      currentLevelSatisfactionCount.value += 1
+
       consecutiveSkips.value = 0
 
       if (wasBargained) {
@@ -1800,6 +1969,9 @@ export const useGameStore = defineStore('game', () => {
       dailySatisfactionSum.value += finalDissatisfaction
       slotSatisfactionSum.value += finalDissatisfaction
       shopReputation.value = Math.max(0, shopReputation.value - (2 + skipPenalty))
+
+      currentLevelSatisfactionSum.value += finalDissatisfaction
+      currentLevelSatisfactionCount.value += 1
 
       const remaining = customers.value.slice(currentCustomerIndex.value + 1)
       customers.value = [

@@ -22,6 +22,9 @@ export interface LevelEvaluation {
   reputationTrend: 'rising' | 'stable' | 'declining'
   customerFlowBonus: number
   totalScore: number
+  genreSalesScore: number
+  collectionScore: number
+  avgSatisfactionScore: number
 }
 
 export type Genre = 'Jazz' | 'Rock' | 'Soul' | 'Funk' | 'Disco' | 'Classical' | 'Blues' | 'Pop' | 'Electronic' | 'Folk'
@@ -91,6 +94,26 @@ export interface LevelMemberTarget {
   targetNewMembers: number
   targetReturningVisits: number
   targetMemberSalesRatio: number
+}
+
+export interface GenreSalesTarget {
+  genre: Genre
+  targetCount: number
+}
+
+export interface CollectionTarget {
+  targetActivatedAlbums: number
+  targetTotalCollectionValue: number
+}
+
+export interface AvgSatisfactionTarget {
+  minAvgSatisfaction: number
+}
+
+export interface LevelChallengeTargets {
+  genreSales: GenreSalesTarget[]
+  collection: CollectionTarget
+  avgSatisfaction: AvgSatisfactionTarget
 }
 
 export interface Record {
@@ -280,6 +303,7 @@ export interface LevelConfig {
   initialBudget: number
   days: number
   memberTargets: LevelMemberTarget
+  challengeTargets: LevelChallengeTargets
   overstockConfig: OverstockConfig
 }
 
@@ -385,6 +409,10 @@ export interface LevelReward {
   returningVisitsReward: number
   memberRatioReward: number
   memberTargetsCompletedBonus: number
+  genreSalesReward: number
+  collectionReward: number
+  avgSatisfactionReward: number
+  challengeTargetsCompletedBonus: number
   totalReward: number
   reputationBonus: number
   unlockedBonus: string[]
