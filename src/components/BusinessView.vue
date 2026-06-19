@@ -183,6 +183,10 @@ const handleCounterOffer = () => {
   } else if ('failed' in result && result.failed) {
     message.value = result.message
     messageType.value = 'error'
+    setTimeout(() => {
+      closeSellModal()
+      gameStore.nextCustomer()
+    }, 2000)
   } else if (result.offerPrice) {
     counterPrice.value = suggestedCounterPrice.value
   }

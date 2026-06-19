@@ -884,6 +884,16 @@ export const useGameStore = defineStore('game', () => {
       bargain.phase = 'failed'
       bargain.active = false
 
+      if (customer) {
+        const finalDissatisfaction = Math.max(15, 25)
+        dailyServedCustomers.value += 1
+        dailySatisfactionSum.value += finalDissatisfaction
+        slotSatisfactionSum.value += finalDissatisfaction
+        shopReputation.value = Math.max(0, shopReputation.value - 2)
+      }
+
+      currentBargain.value = null
+
       return {
         success: true,
         accepted: false,
@@ -929,10 +939,21 @@ export const useGameStore = defineStore('game', () => {
 
   const rejectBargain = () => {
     const bargain = currentBargain.value
+    const customer = currentCustomer.value
     if (!bargain) return { success: false, message: '没有进行中的砍价' }
 
     bargain.phase = 'failed'
     bargain.active = false
+
+    if (customer) {
+      const finalDissatisfaction = Math.max(15, 25)
+      dailyServedCustomers.value += 1
+      dailySatisfactionSum.value += finalDissatisfaction
+      slotSatisfactionSum.value += finalDissatisfaction
+      shopReputation.value = Math.max(0, shopReputation.value - 2)
+    }
+
+    currentBargain.value = null
 
     return {
       success: true,
@@ -994,10 +1015,13 @@ export const useGameStore = defineStore('game', () => {
     }
 
     if (wasBargained) {
-      buyChance = Math.min(1.0, buyChance * 1.6)
+      buyChance = Math.min(1.0, buyChance * 2.2)
     }
 
-    const success = wasBargained ? (currentBargain.value?.phase === 'agreed') : (Math.random() < buyChance)
+    const bargainAgreed = currentBargain.value?.phase === 'agreed'
+    const success = wasBargained && bargainAgreed
+      ? (Math.random() < Math.min(1.0, buyChance * 0.95 + 0.05))
+      : (Math.random() < buyChance)
 
     if (success) {
       const profit = salePrice - invItem.actualCostPrice
