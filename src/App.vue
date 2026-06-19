@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useGameStore } from './stores/game'
 import LevelSelect from './components/LevelSelect.vue'
 import GameHeader from './components/GameHeader.vue'
@@ -25,9 +25,6 @@ const backToMenu = () => {
 const toggleCollection = () => {
   showCollection.value = !showCollection.value
 }
-
-onMounted(() => {
-})
 </script>
 
 <template>

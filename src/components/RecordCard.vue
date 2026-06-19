@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { Record } from '@/types'
+import type { Record as VinylRecordType } from '@/types'
 import VinylRecord from './VinylRecord.vue'
 
 interface Props {
-  record: Record
+  record: VinylRecordType
   showPrice?: boolean
   showCost?: boolean
   quantity?: number
@@ -11,7 +11,7 @@ interface Props {
   matchScore?: number
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   showPrice: true,
   showCost: false,
   quantity: 0,
@@ -26,7 +26,7 @@ const emit = defineEmits<{
 const rarityStars = (rarity: number) => '★'.repeat(rarity) + '☆'.repeat(5 - rarity)
 
 const conditionColor = (condition: string) => {
-  const colors: Record<string, string> = {
+  const colors: { [key: string]: string } = {
     'Mint': '#48bb78',
     'Near Mint': '#38b2ac',
     'Very Good': '#ed8936',

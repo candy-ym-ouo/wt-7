@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import RecordCard from './RecordCard.vue'
 import VinylRecord from './VinylRecord.vue'
 import type { Record } from '@/types'
 import { calculateMatchScore } from '@/data/customers'
@@ -150,8 +149,8 @@ onUnmounted(() => {
           <span class="rec-icon">💡</span>
           <span class="rec-text">
             这位顾客可能喜欢 
-            <strong>{{ recommendations[0]!.item.record.title }}</strong>
-            （匹配度 {{ Math.round(recommendations[0]!.score) }}%）
+            <strong>{{ recommendations[0]?.item.record.title }}</strong>
+            （匹配度 {{ Math.round(recommendations[0]?.score || 0) }}%）
           </span>
         </div>
       </div>
@@ -163,45 +162,45 @@ onUnmounted(() => {
 
       <div class="display-grid">
         <div 
-          v-for="disp in gameStore.displayedRecords" 
-          :key="disp!.slot.id"
+          v-for="disp in recommendations" 
+          :key="disp.slot.id"
           class="display-item"
-          :class="{ playing: gameStore.currentPlayingRecord?.id === disp!.item.record.id }"
+          :class="{ playing: gameStore.currentPlayingRecord?.id === disp.item.record.id }"
         >
           <div class="display-record">
             <VinylRecord 
-              :record="disp!.item.record" 
+              :record="disp.item.record" 
               size="medium"
-              :spinning="gameStore.currentPlayingRecord?.id === disp!.item.record.id"
+              :spinning="gameStore.currentPlayingRecord?.id === disp.item.record.id"
             />
           </div>
           <div class="display-info">
-            <h4 class="display-title">{{ disp!.item.record.title }}</h4>
-            <p class="display-artist">{{ disp!.item.record.artist }}</p>
+            <h4 class="display-title">{{ disp.item.record.title }}</h4>
+            <p class="display-artist">{{ disp.item.record.artist }}</p>
             <div class="display-meta">
-              <span class="price">¥{{ disp!.item.record.marketPrice }}</span>
+              <span class="price">¥{{ disp.item.record.marketPrice }}</span>
               <span 
                 class="match-badge"
                 :style="{ 
-                  background: disp!.score >= 60 ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 101, 101, 0.2)',
-                  color: disp!.score >= 60 ? '#48bb78' : '#f56565'
+                  background: disp.score >= 60 ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 101, 101, 0.2)',
+                  color: disp.score >= 60 ? '#48bb78' : '#f56565'
                 }"
               >
-                {{ Math.round(disp!.score) }}%
+                {{ Math.round(disp.score) }}%
               </span>
             </div>
           </div>
           <div class="display-actions">
             <button 
               class="play-btn"
-              :class="{ active: gameStore.currentPlayingRecord?.id === disp!.item.record.id }"
-              @click="handlePlayRecord(disp!.item.record)"
+              :class="{ active: gameStore.currentPlayingRecord?.id === disp.item.record.id }"
+              @click="handlePlayRecord(disp.item.record)"
             >
-              {{ gameStore.currentPlayingRecord?.id === disp!.item.record.id ? '⏸' : '▶' }}
+              {{ gameStore.currentPlayingRecord?.id === disp.item.record.id ? '⏸' : '▶' }}
             </button>
             <button 
               class="sell-btn"
-              @click="openSellModal(disp!.item.record)"
+              @click="openSellModal(disp.item.record)"
             >
               推销
             </button>
@@ -209,7 +208,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="recommendations.length === 0" class="empty-state card">
+      <div v-if="recommendations.length === 0 && gameStore.displayedRecords.length === 0" class="empty-state card">
         <p>货架上没有唱片，请先返回陈列阶段摆放唱片。</p>
       </div>
 

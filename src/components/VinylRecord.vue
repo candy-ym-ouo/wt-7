@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { Record } from '@/types'
+import type { Record as VinylRecordType } from '@/types'
 
 interface Props {
-  record: Record
+  record: VinylRecordType
   size?: 'small' | 'medium' | 'large'
   spinning?: boolean
   showLabel?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   size: 'medium',
   spinning: false,
   showLabel: true

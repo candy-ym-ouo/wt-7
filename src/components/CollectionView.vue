@@ -63,8 +63,14 @@ const updateNotes = (recordId: string, notes: string) => {
   gameStore.updateCollectionNotes(recordId, notes)
 }
 
+const handleNotesInput = (e: Event) => {
+  if (!selectedItem.value) return
+  const target = e.target as HTMLTextAreaElement
+  updateNotes(selectedItem.value.record.id, target.value)
+}
+
 const conditionColor = (condition: string) => {
-  const colors: Record<string, string> = {
+  const colors: { [key: string]: string } = {
     'Mint': '#48bb78',
     'Near Mint': '#38b2ac',
     'Very Good': '#ed8936',
@@ -199,7 +205,7 @@ const conditionColor = (condition: string) => {
                 <textarea 
                   class="notes-input"
                   :value="selectedItem.notes"
-                  @input="(e) => updateNotes(selectedItem.record.id, (e.target as HTMLTextAreaElement).value)"
+                  @input="handleNotesInput"
                   placeholder="记录你对这张唱片的感受..."
                   rows="3"
                 ></textarea>

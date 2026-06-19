@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { 
-  GameState, GamePhase, Record, InventoryItem, DisplaySlot, 
+  GamePhase, Record, InventoryItem, DisplaySlot, 
   Customer, SaleRecord, DailyStats, CollectionItem 
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres } from '@/data/levels'
@@ -48,10 +48,10 @@ export const useGameStore = defineStore('game', () => {
         const invItem = inventory.value.find(i => i.record.id === s.inventoryId)
         return invItem ? { slot: s, item: invItem } : null
       })
-      .filter(Boolean)
+      .filter((item): item is { slot: DisplaySlot; item: InventoryItem } => item !== null)
   })
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
-  const isLastDay = computed(() => currentLevelConfig ? currentDay.value >= currentLevelConfig.days : false)
+  const isLastDay = computed(() => currentLevelConfig.value ? currentDay.value >= currentLevelConfig.value.days : false)
   const canAdvancePhase = computed(() => {
     switch (phase.value) {
       case 'purchase':
@@ -192,15 +192,15 @@ export const useGameStore = defineStore('game', () => {
 
   const getCustomerRecommendations = (customer: Customer) => {
     const displayed = displayedRecords.value
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; score: number }
     const scored = displayed.map(d => {
-      if (!d) return null
       const score = calculateMatchScore(customer, d.item.record)
       let finalScore = score
       if (currentPlayingRecord.value?.id === d.item.record.id) {
         finalScore += 15
       }
-      return { ...d, score: finalScore }
-    }).filter(Boolean).sort((a, b) => b!.score - a!.score)
+      return { ...d, score: finalScore } as ScoredRecord
+    }).sort((a, b) => b.score - a.score)
     return scored
   }
 
