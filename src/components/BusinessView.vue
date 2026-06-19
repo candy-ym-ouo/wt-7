@@ -5,6 +5,7 @@ import VinylRecord from './VinylRecord.vue'
 import type { Record, MemberLevel } from '@/types'
 import { calculateMatchScore } from '@/data/customers'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
+import { getConditionLabel, getConditionColor, getConditionImpactOnSales } from '@/data/condition'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -261,6 +262,15 @@ onUnmounted(() => {
             <div class="display-meta">
               <span class="price">¥{{ disp.item.record.marketPrice }}</span>
               <span 
+                class="condition-badge"
+                :style="{ 
+                  color: getConditionColor(disp.item.conditionScore),
+                  background: getConditionColor(disp.item.conditionScore) + '20'
+                }"
+              >
+                {{ getConditionLabel(disp.item.conditionScore) }}
+              </span>
+              <span 
                 class="match-badge"
                 :style="{ 
                   background: disp.score >= 60 ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 101, 101, 0.2)',
@@ -269,6 +279,9 @@ onUnmounted(() => {
               >
                 {{ Math.round(disp.score) }}%
               </span>
+            </div>
+            <div v-if="getConditionImpactOnSales(disp.item.conditionScore).priceModifier !== 1" class="condition-hint">
+              品相影响: 售价×{{ getConditionImpactOnSales(disp.item.conditionScore).priceModifier.toFixed(2) }}
             </div>
           </div>
           <div class="display-actions">
@@ -814,6 +827,19 @@ onUnmounted(() => {
   border-radius: 10px;
   font-size: 10px;
   font-weight: 600;
+}
+
+.condition-badge {
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.condition-hint {
+  font-size: 9px;
+  color: var(--warning);
+  margin-top: 2px;
 }
 
 .display-actions {

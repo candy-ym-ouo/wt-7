@@ -66,6 +66,7 @@ export interface InventoryItem {
   record: Record
   quantity: number
   purchaseDate: number
+  conditionScore: number
 }
 
 export interface DisplaySlot {
@@ -120,6 +121,8 @@ export interface DailyStats {
   memberSalesCount: number
   memberRevenue: number
   totalGrowthPointsEarned: number
+  renovationCost: number
+  conditionDegraded: number
 }
 
 export interface LevelConfig {
@@ -143,6 +146,8 @@ export interface CollectionItem {
   purchasePrice: number
   isFavorite: boolean
   notes: string
+  conditionScore: number
+  collectionValue: number
 }
 
 export type GamePhase = 'purchase' | 'display' | 'business' | 'settlement'
@@ -179,4 +184,6 @@ export interface GameState {
   currentLevelReturningVisits: number
   currentLevelMemberSales: number
   lastLevelReward: LevelReward | null
+  dailyRenovationCost: number
+  dailyConditionDegraded: number
 }

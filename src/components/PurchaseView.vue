@@ -3,6 +3,7 @@ import { useGameStore } from '@/stores/game'
 import RecordCard from './RecordCard.vue'
 import type { Record } from '@/types'
 import { ref } from 'vue'
+import { getConditionColor, getConditionScoreFromLabel } from '@/data/condition'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -119,6 +120,19 @@ const goToNextPhase = () => {
               :show-cost="true" 
               :show-price="true" 
             />
+
+            <div class="condition-info-row">
+              <span class="cir-label">初始品相</span>
+              <div class="cir-bar">
+                <div 
+                  class="cir-fill" 
+                  :style="{ width: getConditionScoreFromLabel(selectedRecord.condition) + '%', background: getConditionColor(getConditionScoreFromLabel(selectedRecord.condition)) }"
+                ></div>
+              </div>
+              <span class="cir-value" :style="{ color: getConditionColor(getConditionScoreFromLabel(selectedRecord.condition)) }">
+                {{ selectedRecord.condition }} ({{ getConditionScoreFromLabel(selectedRecord.condition) }})
+              </span>
+            </div>
 
             <div class="quantity-selector">
               <span class="qty-label">购买数量</span>
@@ -361,5 +375,40 @@ const goToNextPhase = () => {
 
 .modal-footer button {
   flex: 1;
+}
+
+.condition-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.cir-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.cir-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-primary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.cir-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.cir-value {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 </style>

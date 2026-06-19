@@ -129,6 +129,23 @@ const backToMenu = () => {
         </div>
       </div>
 
+      <div v-if="todayStats && (todayStats.renovationCost > 0 || todayStats.conditionDegraded > 0)" class="condition-maintenance-card card">
+        <h3 class="cm-title">🔧 品相维护报告</h3>
+        <div class="cm-grid">
+          <div v-if="todayStats.conditionDegraded > 0" class="cm-item warning">
+            <span class="cmi-icon">📉</span>
+            <span class="cmi-value">{{ todayStats.conditionDegraded }}</span>
+            <span class="cmi-label">品相衰减总量</span>
+          </div>
+          <div v-if="todayStats.renovationCost > 0" class="cm-item cost">
+            <span class="cmi-icon">🔧</span>
+            <span class="cmi-value">¥{{ todayStats.renovationCost }}</span>
+            <span class="cmi-label">翻新维护支出</span>
+          </div>
+        </div>
+        <p class="cm-hint">陈列中的唱片品相衰减更快，注意及时翻新维护！</p>
+      </div>
+
       <div class="level-progress-card card">
         <h3 class="lp-title">关卡进度</h3>
         
@@ -1084,5 +1101,78 @@ const backToMenu = () => {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+.condition-maintenance-card {
+  margin: 0 16px;
+  background: linear-gradient(135deg, rgba(237, 137, 54, 0.08) 0%, rgba(245, 101, 101, 0.08) 100%);
+  border: 1px solid rgba(237, 137, 54, 0.2);
+}
+
+.cm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.cm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.cm-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.cm-item.warning {
+  background: rgba(237, 137, 54, 0.1);
+  border: 1px solid rgba(237, 137, 54, 0.2);
+}
+
+.cm-item.cost {
+  background: rgba(245, 101, 101, 0.1);
+  border: 1px solid rgba(245, 101, 101, 0.2);
+}
+
+.cmi-icon {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.cmi-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.cm-item.warning .cmi-value {
+  color: var(--accent-orange);
+}
+
+.cm-item.cost .cmi-value {
+  color: var(--danger);
+}
+
+.cmi-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.cm-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+  font-style: italic;
 }
 </style>

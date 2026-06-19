@@ -17,6 +17,14 @@ import {
   shouldCustomerBecomeMember,
   generateMemberNoteIdeas
 } from '@/data/members'
+import {
+  getConditionScoreFromLabel,
+  degradeCondition,
+  calculateCollectionValue,
+  getConditionImpactOnSales,
+  getConditionLabel,
+  calculateRenovationCost
+} from '@/data/condition'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -54,6 +62,8 @@ export const useGameStore = defineStore('game', () => {
   const dailyMemberRevenue = ref(0)
   const dailyGrowthPointsEarned = ref(0)
   const lastLevelReward = ref<LevelReward | null>(null)
+  const dailyRenovationCost = ref(0)
+  const dailyConditionDegraded = ref(0)
 
   const currentLevelConfig = computed(() => getLevelById(currentLevel.value))
   const availableRecords = computed(() => {
@@ -280,6 +290,8 @@ export const useGameStore = defineStore('game', () => {
     dailyMemberSalesCount.value = 0
     dailyMemberRevenue.value = 0
     dailyGrowthPointsEarned.value = 0
+    dailyRenovationCost.value = 0
+    dailyConditionDegraded.value = 0
   }
 
   const purchaseRecord = (record: Record, quantity: number = 1) => {
@@ -293,7 +305,8 @@ export const useGameStore = defineStore('game', () => {
       inventory.value.push({
         record,
         quantity,
-        purchaseDate: Date.now()
+        purchaseDate: Date.now(),
+        conditionScore: getConditionScoreFromLabel(record.condition)
       })
     }
 
@@ -363,6 +376,8 @@ export const useGameStore = defineStore('game', () => {
       if (currentPlayingRecord.value?.id === d.item.record.id) {
         finalScore += 15
       }
+      const conditionImpact = getConditionImpactOnSales(d.item.conditionScore)
+      finalScore += conditionImpact.buyChanceModifier * 100
       return { ...d, score: finalScore } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
@@ -402,7 +417,10 @@ export const useGameStore = defineStore('game', () => {
     if (!slot || !invItem) return { success: false, message: '唱片不存在' }
 
     const record = invItem.record
+    const conditionImpact = getConditionImpactOnSales(invItem.conditionScore)
     let salePrice = customPrice || record.marketPrice
+
+    salePrice = Math.floor(salePrice * conditionImpact.priceModifier)
 
     if (customer.memberDiscount > 0) {
       salePrice = Math.floor(salePrice * (1 - customer.memberDiscount))
@@ -412,6 +430,7 @@ export const useGameStore = defineStore('game', () => {
     const finalScore = currentPlayingRecord.value?.id === record.id ? score + 15 : score
 
     let buyChance = finalScore / 100
+    buyChance += conditionImpact.buyChanceModifier
     if (salePrice > customer.budget) {
       buyChance *= 0.3
     }
@@ -431,7 +450,7 @@ export const useGameStore = defineStore('game', () => {
       const profit = salePrice - record.costPrice
       const baseSatisfaction = 50 + finalScore * 0.5 - (salePrice > record.marketPrice ? 20 : 0)
       const memberBonus = customer.isReturningCustomer ? 5 : 0
-      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus))
+      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier))
 
       budget.value += salePrice
       dailyRevenue.value += salePrice
@@ -491,14 +510,16 @@ export const useGameStore = defineStore('game', () => {
       slot.inventoryId = null
 
       if (satisfaction >= 80 && Math.random() < 0.3) {
-        addToCollection(record, salePrice)
+        addToCollection(record, salePrice, invItem.conditionScore)
       }
 
       shopReputation.value = Math.min(100, shopReputation.value + (satisfaction > 60 ? 1 : -1))
 
+      const conditionLabel = getConditionLabel(invItem.conditionScore)
+
       return {
         success: true,
-        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}`,
+        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}`,
         satisfaction,
         profit,
         growthPoints: growthPointsEarned,
@@ -529,7 +550,95 @@ export const useGameStore = defineStore('game', () => {
     currentCustomerIndex.value++
   }
 
+  const degradeAllRecords = () => {
+    let totalDegraded = 0
+
+    const displayedIds = new Set(
+      displaySlots.value
+        .filter(s => s.inventoryId)
+        .map(s => s.inventoryId!)
+    )
+
+    for (const item of inventory.value) {
+      if (item.quantity <= 0) continue
+      const isDisplayed = displayedIds.has(item.record.id)
+      const oldScore = item.conditionScore
+      item.conditionScore = degradeCondition(oldScore, isDisplayed)
+      totalDegraded += oldScore - item.conditionScore
+    }
+
+    for (const item of collection.value) {
+      const oldScore = item.conditionScore
+      item.conditionScore = degradeCondition(oldScore, false)
+      item.collectionValue = calculateCollectionValue(
+        item.record.rarity,
+        item.conditionScore,
+        item.record.marketPrice
+      )
+      totalDegraded += oldScore - item.conditionScore
+    }
+
+    dailyConditionDegraded.value = totalDegraded
+  }
+
+  const renovateInventoryRecord = (inventoryId: string, targetScore: number): { success: boolean; cost: number; message: string } => {
+    const invItem = inventory.value.find(i => i.record.id === inventoryId)
+    if (!invItem) return { success: false, cost: 0, message: '唱片不存在' }
+
+    if (targetScore <= invItem.conditionScore) {
+      return { success: false, cost: 0, message: '目标品相不高于当前品相' }
+    }
+
+    const cost = calculateRenovationCostFromOptions(invItem.conditionScore, targetScore, invItem.record.rarity)
+    if (budget.value < cost) {
+      return { success: false, cost, message: `预算不足！需要 ¥${cost}` }
+    }
+
+    invItem.conditionScore = targetScore
+    budget.value -= cost
+    dailyRenovationCost.value += cost
+    dailyCost.value += cost
+
+    return {
+      success: true,
+      cost,
+      message: `翻新成功！《${invItem.record.title}》品相提升至 ${getConditionLabel(targetScore)}`
+    }
+  }
+
+  const renovateCollectionItem = (recordId: string, targetScore: number): { success: boolean; cost: number; message: string } => {
+    const item = collection.value.find(c => c.record.id === recordId)
+    if (!item) return { success: false, cost: 0, message: '收藏品不存在' }
+
+    if (targetScore <= item.conditionScore) {
+      return { success: false, cost: 0, message: '目标品相不高于当前品相' }
+    }
+
+    const cost = calculateRenovationCostFromOptions(item.conditionScore, targetScore, item.record.rarity)
+    if (budget.value < cost) {
+      return { success: false, cost, message: `预算不足！需要 ¥${cost}` }
+    }
+
+    item.conditionScore = targetScore
+    item.collectionValue = calculateCollectionValue(item.record.rarity, targetScore, item.record.marketPrice)
+    budget.value -= cost
+    dailyRenovationCost.value += cost
+    dailyCost.value += cost
+
+    return {
+      success: true,
+      cost,
+      message: `翻新成功！《${item.record.title}》品相提升至 ${getConditionLabel(targetScore)}，收藏价值 ¥${item.collectionValue}`
+    }
+  }
+
+  const calculateRenovationCostFromOptions = (currentScore: number, targetScore: number, rarity: number): number => {
+    return calculateRenovationCost(currentScore, targetScore, rarity)
+  }
+
   const endDay = () => {
+    degradeAllRecords()
+
     const avgSatisfaction = dailyServedCustomers.value > 0
       ? dailySatisfactionSum.value / dailyServedCustomers.value
       : 50
@@ -546,7 +655,9 @@ export const useGameStore = defineStore('game', () => {
       returningCustomers: dailyReturningCustomers.value,
       memberSalesCount: dailyMemberSalesCount.value,
       memberRevenue: dailyMemberRevenue.value,
-      totalGrowthPointsEarned: dailyGrowthPointsEarned.value
+      totalGrowthPointsEarned: dailyGrowthPointsEarned.value,
+      renovationCost: dailyRenovationCost.value,
+      conditionDegraded: dailyConditionDegraded.value
     }
     dailyStats.value.push(stats)
 
@@ -584,15 +695,19 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  const addToCollection = (record: Record, purchasePrice: number) => {
+  const addToCollection = (record: Record, purchasePrice: number, conditionScore: number = 100) => {
     if (collection.value.some(c => c.record.id === record.id)) return
+
+    const collValue = calculateCollectionValue(record.rarity, conditionScore, record.marketPrice)
 
     collection.value.push({
       record,
       acquiredDate: Date.now(),
       purchasePrice,
       isFavorite: false,
-      notes: ''
+      notes: '',
+      conditionScore,
+      collectionValue: collValue
     })
   }
 
@@ -661,6 +776,8 @@ export const useGameStore = defineStore('game', () => {
     dailyMemberRevenue,
     dailyGrowthPointsEarned,
     lastLevelReward,
+    dailyRenovationCost,
+    dailyConditionDegraded,
     currentLevelConfig,
     availableRecords,
     shopRecordsForPurchase,
@@ -694,6 +811,9 @@ export const useGameStore = defineStore('game', () => {
     getMemberBenefit,
     getNextLevelInfo,
     calculateMemberDiscount,
-    calculateLevelReward
+    calculateLevelReward,
+    degradeAllRecords,
+    renovateInventoryRecord,
+    renovateCollectionItem
   }
 })

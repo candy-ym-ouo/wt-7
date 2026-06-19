@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Record as VinylRecordType } from '@/types'
 import VinylRecord from './VinylRecord.vue'
+import { getConditionLabel, getConditionColor } from '@/data/condition'
 
 interface Props {
   record: VinylRecordType
@@ -9,14 +10,16 @@ interface Props {
   quantity?: number
   highlight?: boolean
   matchScore?: number
+  conditionScore?: number
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   showPrice: true,
   showCost: false,
   quantity: 0,
   highlight: false,
-  matchScore: 0
+  matchScore: 0,
+  conditionScore: -1
 })
 
 const emit = defineEmits<{
@@ -25,14 +28,19 @@ const emit = defineEmits<{
 
 const rarityStars = (rarity: number) => '★'.repeat(rarity) + '☆'.repeat(5 - rarity)
 
-const conditionColor = (condition: string) => {
-  const colors: { [key: string]: string } = {
-    'Mint': '#48bb78',
-    'Near Mint': '#38b2ac',
-    'Very Good': '#ed8936',
-    'Good': '#e53e3e'
+const effectiveConditionScore = () => {
+  return props.conditionScore >= 0 ? props.conditionScore : getConditionScoreFromLabel(props.record.condition)
+}
+
+const getConditionScoreFromLabel = (label: string): number => {
+  const map: Record<string, number> = {
+    'Mint': 95,
+    'Near Mint': 82,
+    'Very Good': 65,
+    'Good': 45,
+    'Poor': 20
   }
-  return colors[condition] || '#718096'
+  return map[label] || 50
 }
 </script>
 
@@ -58,11 +66,22 @@ const conditionColor = (condition: string) => {
     <div class="card-body">
       <div class="meta-row">
         <span class="rarity" :style="{ color: '#f6e05e' }">{{ rarityStars(record.rarity) }}</span>
-        <span class="condition" :style="{ color: conditionColor(record.condition) }">
-          {{ record.condition }}
+        <span class="condition" :style="{ color: getConditionColor(effectiveConditionScore()) }">
+          {{ getConditionLabel(effectiveConditionScore()) }}
         </span>
       </div>
       
+      <div class="condition-bar">
+        <div 
+          class="condition-fill" 
+          :style="{ 
+            width: effectiveConditionScore() + '%', 
+            background: getConditionColor(effectiveConditionScore())
+          }"
+        ></div>
+        <span class="condition-score">{{ effectiveConditionScore() }}</span>
+      </div>
+
       <div v-if="matchScore > 0" class="match-score">
         <div class="match-bar">
           <div class="match-fill" :style="{ width: `${matchScore}%` }"></div>
@@ -193,6 +212,31 @@ const conditionColor = (condition: string) => {
 .condition {
   font-size: 11px;
   font-weight: 500;
+}
+
+.condition-bar {
+  position: relative;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.condition-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.condition-score {
+  position: absolute;
+  right: 4px;
+  top: -1px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 8px;
 }
 
 .match-score {

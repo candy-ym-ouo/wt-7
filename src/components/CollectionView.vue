@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 import VinylRecord from './VinylRecord.vue'
 import type { CollectionItem, MemberProfile, MemberLevel } from '@/types'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
+import { getConditionLabel, getConditionColor, getConditionDescription, getRenovationOptions } from '@/data/condition'
 
 const emit = defineEmits<{
   close: []
@@ -13,7 +14,7 @@ const gameStore = useGameStore()
 const selectedItem = ref<CollectionItem | null>(null)
 const selectedMember = ref<MemberProfile | null>(null)
 const filterGenre = ref<string>('all')
-const sortBy = ref<'date' | 'price' | 'rarity'>('date')
+const sortBy = ref<'date' | 'price' | 'rarity' | 'value'>('date')
 const activeTab = ref<'records' | 'members'>('records')
 const memberSortBy = ref<'level' | 'visits' | 'spent'>('level')
 const memberLevelFilter = ref<MemberLevel | 'all'>('all')
@@ -43,6 +44,9 @@ const filteredCollection = computed(() => {
       break
     case 'rarity':
       items.sort((a, b) => b.record.rarity - a.record.rarity)
+      break
+    case 'value':
+      items.sort((a, b) => b.collectionValue - a.collectionValue)
       break
   }
 
@@ -145,15 +149,38 @@ const handleMemberNotesInput = (e: Event) => {
   gameStore.updateMemberNotes(selectedMember.value.id, target.value)
 }
 
-const conditionColor = (condition: string) => {
-  const colors: { [key: string]: string } = {
-    'Mint': '#48bb78',
-    'Near Mint': '#38b2ac',
-    'Very Good': '#ed8936',
-    'Good': '#e53e3e'
-  }
-  return colors[condition] || '#718096'
+const showRenovateModal = ref(false)
+const renovateItem = ref<CollectionItem | null>(null)
+const renovateMessage = ref('')
+const renovateMessageType = ref<'success' | 'error'>('success')
+
+const openRenovateModal = (item: CollectionItem) => {
+  renovateItem.value = item
+  renovateMessage.value = ''
+  showRenovateModal.value = true
 }
+
+const closeRenovateModal = () => {
+  showRenovateModal.value = false
+  renovateItem.value = null
+  renovateMessage.value = ''
+}
+
+const handleRenovate = (targetScore: number) => {
+  if (!renovateItem.value) return
+  const result = gameStore.renovateCollectionItem(renovateItem.value.record.id, targetScore)
+  renovateMessage.value = result.message
+  renovateMessageType.value = result.success ? 'success' : 'error'
+  if (result.success) {
+    setTimeout(() => {
+      closeRenovateModal()
+    }, 1500)
+  }
+}
+
+const totalCollectionValue = computed(() => {
+  return gameStore.collection.reduce((sum, item) => sum + item.collectionValue, 0)
+})
 
 const levelNameMap: Record<MemberLevel, string> = {
   Bronze: '青铜会员',
@@ -170,7 +197,7 @@ const levelNameMap: Record<MemberLevel, string> = {
       <button class="back-btn" @click="emit('close')">← 返回</button>
       <h1 class="cv-title">📚 我的收藏</h1>
       <div class="cv-count">
-        {{ gameStore.collection.length }} 张 · {{ gameStore.members.length }} 会员
+        {{ gameStore.collection.length }} 张 · ¥{{ totalCollectionValue }} 收藏价值
       </div>
     </div>
 
@@ -210,6 +237,7 @@ const levelNameMap: Record<MemberLevel, string> = {
           <option value="date">按日期</option>
           <option value="price">按价格</option>
           <option value="rarity">按稀有度</option>
+          <option value="value">按收藏价值</option>
         </select>
       </div>
 
@@ -230,9 +258,12 @@ const levelNameMap: Record<MemberLevel, string> = {
             <div class="ci-meta">
               <span class="ci-rarity" style="color: #f6e05e">{{ rarityStars(item.record.rarity) }}</span>
               <span class="ci-genre">{{ item.record.genre }}</span>
+              <span class="ci-condition" :style="{ color: getConditionColor(item.conditionScore) }">
+                {{ getConditionLabel(item.conditionScore) }}
+              </span>
             </div>
             <div class="ci-bottom">
-              <span class="ci-price">¥{{ item.purchasePrice }}</span>
+              <span class="ci-price">¥{{ item.collectionValue }}</span>
               <span class="ci-date">{{ formatDate(item.acquiredDate) }}</span>
             </div>
           </div>
@@ -401,10 +432,26 @@ const levelNameMap: Record<MemberLevel, string> = {
                 <span class="detail-tag">{{ selectedItem.record.year }}</span>
                 <span
                   class="detail-tag"
-                  :style="{ color: conditionColor(selectedItem.record.condition) }"
+                  :style="{ color: getConditionColor(selectedItem.conditionScore), borderColor: getConditionColor(selectedItem.conditionScore) + '40' }"
                 >
-                  {{ selectedItem.record.condition }}
+                  {{ getConditionLabel(selectedItem.conditionScore) }}
                 </span>
+              </div>
+
+              <div class="detail-condition-section">
+                <div class="dcs-header">
+                  <span class="dcs-label">品相评分</span>
+                  <span class="dcs-score" :style="{ color: getConditionColor(selectedItem.conditionScore) }">
+                    {{ selectedItem.conditionScore }}/100
+                  </span>
+                </div>
+                <div class="dcs-bar">
+                  <div 
+                    class="dcs-fill" 
+                    :style="{ width: selectedItem.conditionScore + '%', background: getConditionColor(selectedItem.conditionScore) }"
+                  ></div>
+                </div>
+                <p class="dcs-desc">{{ getConditionDescription(getConditionLabel(selectedItem.conditionScore) as any) }}</p>
               </div>
 
               <div class="detail-rarity">
@@ -420,6 +467,10 @@ const levelNameMap: Record<MemberLevel, string> = {
                   <span class="ds-value">¥{{ selectedItem.purchasePrice }}</span>
                 </div>
                 <div class="ds-item">
+                  <span class="ds-label">收藏价值</span>
+                  <span class="ds-value" :style="{ color: getConditionColor(selectedItem.conditionScore) }">¥{{ selectedItem.collectionValue }}</span>
+                </div>
+                <div class="ds-item">
                   <span class="ds-label">购入时间</span>
                   <span class="ds-value">{{ formatDate(selectedItem.acquiredDate) }}</span>
                 </div>
@@ -427,6 +478,12 @@ const levelNameMap: Record<MemberLevel, string> = {
                   <span class="ds-label">曲目数量</span>
                   <span class="ds-value">{{ selectedItem.record.trackCount }} 首</span>
                 </div>
+              </div>
+
+              <div v-if="getRenovationOptions(selectedItem.conditionScore, selectedItem.record.rarity).length > 0" class="renovate-section">
+                <button class="renovate-trigger-btn" @click="openRenovateModal(selectedItem)">
+                  🔧 翻新维护 · 提升收藏价值
+                </button>
               </div>
 
               <div class="notes-section">
@@ -575,6 +632,63 @@ const levelNameMap: Record<MemberLevel, string> = {
                 rows="3"
               ></textarea>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="showRenovateModal && renovateItem" class="modal-overlay" @click.self="closeRenovateModal">
+        <div class="modal-content animate-slide-up">
+          <div class="modal-header">
+            <h3>🔧 翻新收藏</h3>
+            <button class="close-btn" @click="closeRenovateModal">✕</button>
+          </div>
+
+          <div class="modal-body">
+            <div class="renovate-record-info">
+              <h4>{{ renovateItem.record.title }}</h4>
+              <p>{{ renovateItem.record.artist }}</p>
+              <div class="renovate-current-condition">
+                <span>当前品相</span>
+                <div class="condition-bar-lg">
+                  <div 
+                    class="condition-fill-lg" 
+                    :style="{ width: renovateItem.conditionScore + '%', background: getConditionColor(renovateItem.conditionScore) }"
+                  ></div>
+                </div>
+                <span :style="{ color: getConditionColor(renovateItem.conditionScore) }">
+                  {{ getConditionLabel(renovateItem.conditionScore) }} ({{ renovateItem.conditionScore }})
+                </span>
+              </div>
+              <div class="renovate-value-preview">
+                <span>当前收藏价值</span>
+                <span class="rvp-value">¥{{ renovateItem.collectionValue }}</span>
+              </div>
+            </div>
+
+            <div class="renovate-options">
+              <h4 class="ro-title">选择翻新方案</h4>
+              <div 
+                v-for="option in getRenovationOptions(renovateItem.conditionScore, renovateItem.record.rarity)" 
+                :key="option.targetScore"
+                class="renovate-option"
+                :class="{ disabled: gameStore.budget < option.cost }"
+                @click="handleRenovate(option.targetScore)"
+              >
+                <div class="ro-info">
+                  <span class="ro-label" :style="{ color: getConditionColor(option.targetScore) }">
+                    {{ option.targetLabel }}
+                  </span>
+                  <span class="ro-desc">{{ option.description }}</span>
+                </div>
+                <span class="ro-cost" :class="{ 'cannot-afford': gameStore.budget < option.cost }">
+                  ¥{{ option.cost }}
+                </span>
+              </div>
+            </div>
+
+            <p v-if="renovateMessage" class="renovate-message" :class="renovateMessageType">
+              {{ renovateMessage }}
+            </p>
           </div>
         </div>
       </div>
@@ -747,6 +861,11 @@ const levelNameMap: Record<MemberLevel, string> = {
   padding: 1px 6px;
   border-radius: 8px;
   font-size: 10px;
+}
+
+.ci-condition {
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .ci-bottom {
@@ -1408,5 +1527,197 @@ const levelNameMap: Record<MemberLevel, string> = {
 .mdp-benefit-value {
   font-weight: 700;
   color: var(--accent-gold);
+}
+
+.detail-condition-section {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.dcs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.dcs-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dcs-score {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dcs-bar {
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.dcs-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.dcs-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.renovate-section {
+  margin-bottom: 16px;
+}
+
+.renovate-trigger-btn {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.15) 0%, rgba(233, 69, 96, 0.1) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.3);
+  border-radius: 10px;
+  color: var(--accent-gold);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.renovate-trigger-btn:hover {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.25) 0%, rgba(233, 69, 96, 0.15) 100%);
+  border-color: var(--accent-gold);
+}
+
+.renovate-record-info h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.renovate-record-info p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.renovate-current-condition {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.condition-bar-lg {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.condition-fill-lg {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.renovate-value-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(246, 224, 94, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.rvp-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-gold);
+}
+
+.ro-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.renovate-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+  margin-bottom: 6px;
+}
+
+.renovate-option:hover:not(.disabled) {
+  border-color: var(--accent-gold);
+  background: rgba(246, 224, 94, 0.1);
+}
+
+.renovate-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ro-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ro-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ro-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ro-cost {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-gold);
+}
+
+.ro-cost.cannot-afford {
+  color: var(--danger);
+}
+
+.renovate-message {
+  text-align: center;
+  font-size: 13px;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.renovate-message.success {
+  color: var(--success);
+  background: rgba(72, 187, 120, 0.1);
+}
+
+.renovate-message.error {
+  color: var(--danger);
+  background: rgba(245, 101, 101, 0.1);
 }
 </style>
