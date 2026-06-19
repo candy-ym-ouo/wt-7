@@ -70,6 +70,32 @@ const isReturningBadge = computed(() => {
   return null
 })
 
+const currentPatienceInfo = computed(() => {
+  if (!gameStore.currentCustomer) return null
+  return gameStore.getCustomerPatienceInfo(gameStore.currentCustomer)
+})
+
+const queueCustomers = computed(() => {
+  return gameStore.getQueueCustomers().map(c => ({
+    customer: c,
+    patience: gameStore.getCustomerPatienceInfo(c)
+  }))
+})
+
+const totalWaitingCount = computed(() => {
+  return gameStore.customers
+    .slice(gameStore.currentCustomerIndex + 1)
+    .filter(c => !c.hasLeftAngrily).length
+})
+
+const leftAngrilyCount = computed(() => {
+  return gameStore.customersLeftAngrily
+})
+
+const skipWarning = computed(() => {
+  return gameStore.consecutiveSkips >= 2
+})
+
 const reputationHint = computed(() => {
   const config = getWordOfMouthTier(gameStore.shopReputation)
   if (config.customerCountModifier <= 0) return null
@@ -387,6 +413,33 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <div v-if="currentPatienceInfo" class="patience-section">
+          <div class="patience-header">
+            <span class="patience-label">耐心状态</span>
+            <span 
+              class="patience-level" 
+              :style="{ color: currentPatienceInfo.color }"
+            >
+              {{ currentPatienceInfo.label }}
+            </span>
+            <span class="patience-value">
+              {{ currentPatienceInfo.current }}/{{ currentPatienceInfo.max }}
+            </span>
+          </div>
+          <div class="patience-bar">
+            <div 
+              class="patience-fill"
+              :style="{ 
+                width: (currentPatienceInfo.ratio * 100) + '%',
+                background: `linear-gradient(90deg, ${currentPatienceInfo.color} 0%, ${currentPatienceInfo.color}dd 100%)`
+              }"
+            ></div>
+          </div>
+          <p v-if="currentPatienceInfo.isImpatient" class="patience-warning">
+            ⚠️ 顾客已不耐烦，请尽快推荐合适的唱片！
+          </p>
+        </div>
+
         <div v-if="customerMemberInfo" class="member-progress card">
           <div class="mp-header">
             <span class="mp-level" :style="{ color: customerMemberInfo.color }">
@@ -438,15 +491,65 @@ onUnmounted(() => {
         </div>
 
         <div v-if="recommendations.length > 0 && recommendations[0]?.score >= 60" class="recommendation">
-          <span class="rec-icon">💡</span>
+          <span class="rec-icon">{{ recommendations[0]?.urgencyHint ? '🚨' : '💡' }}</span>
           <span class="rec-text">
-            这位{{ customerMemberInfo ? customerMemberInfo.levelName + '会员' : (gameStore.currentCustomer?.isReturningCustomer ? '回头客' : '新顾客') }}可能喜欢 
-            <strong>{{ recommendations[0]?.item.record.title }}</strong>
+            这位{{ customerMemberInfo ? customerMemberInfo.levelName + '会员' : (gameStore.currentCustomer?.isReturningCustomer ? '回头客' : '新顾客') }}
+            <span v-if="recommendations[0]?.urgencyHint" style="color: #f56565; font-weight: 600;">
+              {{ recommendations[0].urgencyHint }}
+            </span>
+            可能喜欢 
+            <strong :style="{ color: recommendations[0]?.urgencyHint ? '#f56565' : '' }">
+              {{ recommendations[0]?.item.record.title }}
+            </strong>
             （匹配度 {{ Math.round(recommendations[0]?.score || 0) }}%）
             <span v-if="customerMemberInfo && customerMemberInfo.discount > 0" class="discount-hint">
               · 会员价可省 ¥{{ Math.round(recommendations[0]?.item.record.marketPrice * customerMemberInfo.discount) }}
             </span>
           </span>
+        </div>
+
+        <div v-if="queueCustomers.length > 0" class="queue-section">
+          <div class="queue-header">
+            <span class="queue-icon">🕒</span>
+            <span class="queue-title">等候队列</span>
+            <span class="queue-count">
+              还有 {{ totalWaitingCount }} 位等待中
+              <span v-if="leftAngrilyCount > 0" class="angry-count" style="color: #f56565;">
+                · {{ leftAngrilyCount }} 位已离开
+              </span>
+            </span>
+          </div>
+          <div class="queue-list">
+            <div 
+              v-for="qc in queueCustomers" 
+              :key="qc.customer.id"
+              class="queue-item"
+              :class="{ impatient: qc.patience.isImpatient }"
+            >
+              <span class="qi-avatar">{{ qc.customer.avatar }}</span>
+              <div class="qi-info">
+                <span class="qi-name">
+                  {{ qc.customer.name }}
+                  <span v-if="qc.customer.memberProfile" class="qi-member">会员</span>
+                </span>
+                <div class="qi-bar-bg">
+                  <div 
+                    class="qi-bar-fill"
+                    :style="{
+                      width: (qc.patience.ratio * 100) + '%',
+                      background: qc.patience.color
+                    }"
+                  ></div>
+                </div>
+              </div>
+              <span 
+                class="qi-patience"
+                :style="{ color: qc.patience.color }"
+              >
+                {{ qc.patience.label }}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -470,7 +573,15 @@ onUnmounted(() => {
             />
           </div>
           <div class="display-info">
-            <h4 class="display-title">{{ disp.item.record.title }}</h4>
+            <h4 class="display-title">
+              {{ disp.item.record.title }}
+              <span 
+                v-if="disp.urgencyHint" 
+                class="urgency-tag"
+              >
+                {{ disp.urgencyHint }}
+              </span>
+            </h4>
             <p class="display-artist">{{ disp.item.record.artist }}</p>
             <div class="display-meta">
               <span class="price">¥{{ disp.item.record.marketPrice }}</span>
@@ -486,8 +597,12 @@ onUnmounted(() => {
               <span 
                 class="match-badge"
                 :style="{ 
-                  background: disp.score >= 60 ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 101, 101, 0.2)',
-                  color: disp.score >= 60 ? '#48bb78' : '#f56565'
+                  background: disp.urgencyHint 
+                    ? 'rgba(245, 101, 101, 0.25)' 
+                    : (disp.score >= 60 ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 101, 101, 0.2)'),
+                  color: disp.urgencyHint 
+                    ? '#f56565' 
+                    : (disp.score >= 60 ? '#48bb78' : '#f56565')
                 }"
               >
                 {{ Math.round(disp.score) }}%
@@ -520,8 +635,12 @@ onUnmounted(() => {
       </div>
 
       <div class="action-bar">
-        <button class="btn-secondary action-btn" @click="handleSkip">
-          跳过顾客
+        <button 
+          class="btn-secondary action-btn skip-btn"
+          :class="{ warning: skipWarning }"
+          @click="handleSkip"
+        >
+          {{ skipWarning ? '⚠️ 跳过顾客（连续跳过）' : '跳过顾客' }}
         </button>
         <button 
           v-if="gameStore.canSwitchToNight"
@@ -1837,5 +1956,190 @@ onUnmounted(() => {
 .bh-profit {
   color: var(--success);
   font-weight: 600;
+}
+
+.patience-section {
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.patience-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.patience-label {
+  color: var(--text-muted);
+}
+
+.patience-level {
+  font-weight: 700;
+}
+
+.patience-value {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.patience-bar {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.patience-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease, background 0.3s ease;
+}
+
+.patience-warning {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(245, 101, 101, 0.15);
+  border: 1px solid rgba(245, 101, 101, 0.3);
+  border-radius: 6px;
+  color: #f56565;
+  font-size: 11px;
+  font-weight: 600;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.queue-section {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 4px;
+}
+
+.queue-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.queue-icon {
+  font-size: 16px;
+}
+
+.queue-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.queue-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.queue-item.impatient {
+  border-color: rgba(245, 101, 101, 0.4);
+  background: rgba(245, 101, 101, 0.05);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.qi-avatar {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.qi-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.qi-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.qi-member {
+  font-size: 9px;
+  padding: 1px 6px;
+  background: rgba(246, 224, 94, 0.2);
+  color: var(--accent-gold);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.qi-bar-bg {
+  height: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.qi-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.qi-patience {
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.urgency-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: rgba(245, 101, 101, 0.2);
+  color: #f56565;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.skip-btn.warning {
+  background: rgba(245, 101, 101, 0.15) !important;
+  border: 1px solid rgba(245, 101, 101, 0.4) !important;
+  color: #f56565 !important;
+  font-weight: 600;
+}
+
+.recommendation {
+  transition: all 0.2s ease;
 }
 </style>

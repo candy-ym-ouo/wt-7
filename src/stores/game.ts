@@ -5,7 +5,7 @@ import type {
   Customer, SaleRecord, DailyStats, CollectionItem,
   MemberProfile, MemberLevel, MemberStats, LevelReward,
   LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
-  TimeSlot, TimeSlotStats, BargainState, BargainRound, Genre,
+  TimeSlot, TimeSlotStats, BargainState, BargainRound,
   ActiveBusinessEvent
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
@@ -16,8 +16,16 @@ import {
   createMemberProfile,
   generateCustomerBargainOffer,
   generateCustomerCounterOffer,
-  calculateBargainSatisfactionBonus
+  calculateBargainSatisfactionBonus,
+  defaultPatienceConfig,
+  getPatienceLevel,
+  getPatienceLevelLabel,
+  getPatienceLevelColor,
+  calculatePatienceDecay,
+  applyPatienceDecay,
+  sortCustomerQueue
 } from '@/data/customers'
+import type { Genre } from '@/types'
 import {
   updateMemberAfterPurchase,
   calculateGrowthPoints,
@@ -157,6 +165,10 @@ export const useGameStore = defineStore('game', () => {
   })
   const slotSatisfactionSum = ref(0)
   const currentBargain = ref<BargainState | null>(null)
+
+  const patienceTickTimer = ref<number | null>(null)
+  const consecutiveSkips = ref(0)
+  const customersLeftAngrily = ref(0)
 
   const dailyEvent = ref<ActiveBusinessEvent | null>(null)
   const levelEvents = ref<ActiveBusinessEvent[]>([])
@@ -558,6 +570,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   const resetDailyStats = () => {
+    stopPatienceTick()
     dailyRevenue.value = 0
     dailyCost.value = 0
     dailySalesCount.value = 0
@@ -581,6 +594,8 @@ export const useGameStore = defineStore('game', () => {
     eventBuyChanceModifier.value = 0
     eventSatisfactionModifier.value = 0
     eventConditionPenalty.value = 0
+    consecutiveSkips.value = 0
+    customersLeftAngrily.value = 0
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -836,6 +851,7 @@ export const useGameStore = defineStore('game', () => {
           inventoryGenres,
           timeSlot
         )
+        specialCustomer.priorityScore = 95
         specialCustomersToAdd.push(specialCustomer)
       }
     }
@@ -844,11 +860,13 @@ export const useGameStore = defineStore('game', () => {
       const slotsToReplace = Math.min(specialCustomersToAdd.length, Math.floor(customers.length * 0.3))
       for (let i = 0; i < slotsToReplace && i < specialCustomersToAdd.length; i++) {
         const replaceIndex = Math.floor(Math.random() * customers.length)
-        customers[replaceIndex] = specialCustomersToAdd[i]
+        const sp = specialCustomersToAdd[i]
+        sp.arrivalOrder = customers[replaceIndex]?.arrivalOrder || count + i
+        customers[replaceIndex] = sp
       }
     }
 
-    return customers.sort(() => Math.random() - 0.5)
+    return sortCustomerQueue(customers)
   }
 
   const triggerDailyEvent = () => {
@@ -912,12 +930,18 @@ export const useGameStore = defineStore('game', () => {
 
     dailyReturningCustomers.value = customers.value.filter(c => c.isReturningCustomer).length
     currentLevelReturningVisits.value += dailyReturningCustomers.value
+    customersLeftAngrily.value = 0
+    consecutiveSkips.value = 0
 
     currentCustomerIndex.value = 0
     phase.value = 'business'
+    checkCurrentCustomerValid()
+    startPatienceTick()
   }
 
   const switchToNightSlot = () => {
+    stopPatienceTick()
+
     const stats = getCurrentSlotStats()
     stats.revenue = dailyRevenue.value - (afternoonCompleted.value ? afternoonStats.value.revenue : 0)
     stats.salesCount = dailySalesCount.value - (afternoonCompleted.value ? afternoonStats.value.salesCount : 0)
@@ -932,6 +956,8 @@ export const useGameStore = defineStore('game', () => {
     slotSatisfactionSum.value = 0
 
     stopPlaying()
+    consecutiveSkips.value = 0
+    customersLeftAngrily.value = 0
 
     if (!baseLevelConfig.value) return
     const baseCount = Math.min(
@@ -951,6 +977,8 @@ export const useGameStore = defineStore('game', () => {
     dailyReturningCustomers.value += customers.value.filter(c => c.isReturningCustomer).length
     currentLevelReturningVisits.value += customers.value.filter(c => c.isReturningCustomer).length
     currentCustomerIndex.value = 0
+    checkCurrentCustomerValid()
+    startPatienceTick()
   }
 
   const getCurrentSlotStats = (): TimeSlotStats => {
@@ -968,27 +996,159 @@ export const useGameStore = defineStore('game', () => {
     currentPlayingRecord.value = null
   }
 
+  const getPlayingGenres = (): Genre[] => {
+    if (!currentPlayingRecord.value) return []
+    return [currentPlayingRecord.value.genre]
+  }
+
+  const tickAllCustomerPatience = () => {
+    if (phase.value !== 'business') return
+
+    const playingGenres = getPlayingGenres()
+    let leftAngrilyCount = 0
+
+    customers.value = customers.value.map((cust, idx) => {
+      if (cust.hasLeftAngrily) return cust
+
+      let decay = calculatePatienceDecay(
+        cust,
+        isPlaying.value,
+        playingGenres,
+        defaultPatienceConfig
+      )
+
+      if (idx === currentCustomerIndex.value) {
+        decay *= 0.3
+      }
+
+      decay *= (1 + consecutiveSkips.value * 0.1)
+
+      const updated = applyPatienceDecay(cust, decay)
+
+      if (updated.hasLeftAngrily && !cust.hasLeftAngrily) {
+        leftAngrilyCount++
+      }
+
+      return updated
+    })
+
+    if (leftAngrilyCount > 0) {
+      customersLeftAngrily.value += leftAngrilyCount
+      shopReputation.value = Math.max(0, shopReputation.value - leftAngrilyCount * 3)
+    }
+
+    resortCustomerQueueIfNeeded()
+  }
+
+  const resortCustomerQueueIfNeeded = () => {
+    const remaining = customers.value.slice(currentCustomerIndex.value + 1)
+    const sortedRemaining = sortCustomerQueue(remaining, {
+      prioritizeImpatient: true,
+      prioritizeMembers: true,
+      prioritizeHighBudget: true,
+      prioritizeSpecial: true
+    })
+
+    customers.value = [
+      ...customers.value.slice(0, currentCustomerIndex.value + 1),
+      ...sortedRemaining
+    ]
+  }
+
+  const getCustomerPatienceInfo = (customer: Customer) => {
+    const level = getPatienceLevel(customer.patience, customer.maxPatience)
+    return {
+      level,
+      label: getPatienceLevelLabel(level),
+      color: getPatienceLevelColor(level),
+      ratio: customer.patience / customer.maxPatience,
+      current: customer.patience,
+      max: customer.maxPatience,
+      isImpatient: customer.isImpatient,
+      hasLeftAngrily: customer.hasLeftAngrily
+    }
+  }
+
+  const getQueueCustomers = () => {
+    return customers.value
+      .slice(currentCustomerIndex.value + 1)
+      .filter(c => !c.hasLeftAngrily)
+      .slice(0, 5)
+  }
+
+  const startPatienceTick = () => {
+    if (patienceTickTimer.value !== null) {
+      clearInterval(patienceTickTimer.value)
+    }
+    patienceTickTimer.value = window.setInterval(() => {
+      tickAllCustomerPatience()
+    }, 2000)
+  }
+
+  const stopPatienceTick = () => {
+    if (patienceTickTimer.value !== null) {
+      clearInterval(patienceTickTimer.value)
+      patienceTickTimer.value = null
+    }
+  }
+
+  const checkCurrentCustomerValid = () => {
+    while (currentCustomer.value && currentCustomer.value.hasLeftAngrily) {
+      dailyServedCustomers.value += 1
+      dailySatisfactionSum.value += 10
+      slotSatisfactionSum.value += 10
+      currentCustomerIndex.value++
+    }
+  }
+
   const getCustomerRecommendations = (customer: Customer) => {
     const displayed = displayedRecords.value
     const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
     const collectionMatchBonus = matchScoreBonusFromCollection.value
     const themeBonus = themeMatchScoreBonus.value
     const playbackBonus = playbackThemeBonus.value
-    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number }
+
+    const patienceRatio = customer.patience / customer.maxPatience
+    const urgencyMultiplier = customer.isImpatient ? 1.8 : (patienceRatio < 0.5 ? 1.0 + (0.5 - patienceRatio) : 1.0)
+    const genreWeightBoost = patienceRatio < 0.5 ? (1 - patienceRatio) * 15 : 0
+
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; urgencyHint: string | null }
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
       let finalScore = score + collectionMatchBonus + themeBonus
+
+      const isGenreMatch = customer.preference.favoriteGenres.includes(d.item.record.genre)
+      if (customer.isImpatient && isGenreMatch) {
+        finalScore += genreWeightBoost
+      } else if (isGenreMatch) {
+        finalScore += genreWeightBoost * 0.5
+      }
+
+      finalScore *= urgencyMultiplier
+
       if (currentPlayingRecord.value?.id === d.item.record.id) {
         finalScore += playBoost + playbackBonus
+        if (customer.isImpatient && isGenreMatch) {
+          finalScore += 8
+        }
       }
       const conditionImpact = getConditionImpactOnSales(d.conditionScore)
       finalScore += conditionImpact.buyChanceModifier * 100
+
+      let urgencyHint: string | null = null
+      if (customer.isImpatient && isGenreMatch) {
+        urgencyHint = '急需匹配！'
+      } else if (patienceRatio < 0.4 && isGenreMatch) {
+        urgencyHint = '建议优先'
+      }
+
       return { 
         slot: d.slot, 
         item: d.item, 
         conditionScore: d.conditionScore, 
         score: Math.min(100, finalScore),
-        themeBonus
+        themeBonus,
+        urgencyHint
       } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
@@ -1286,7 +1446,30 @@ export const useGameStore = defineStore('game', () => {
         initialAskPrice,
         customer
       )
-      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier + bargainSatisfactionBonus + eventSatisfactionModifier.value))
+
+      const patienceRatio = customer.patience / customer.maxPatience
+      let patienceSatisfactionMod = 0
+      if (patienceRatio >= 0.7) {
+        patienceSatisfactionMod = 8
+      } else if (patienceRatio >= 0.4) {
+        patienceSatisfactionMod = 0
+      } else if (patienceRatio >= 0.2) {
+        patienceSatisfactionMod = -8
+      } else {
+        patienceSatisfactionMod = -15
+      }
+
+      const fastServiceBonus = customer.patience >= customer.maxPatience * 0.8 ? 5 : 0
+
+      const satisfaction = Math.max(
+        20,
+        Math.min(
+          100,
+          baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier +
+          bargainSatisfactionBonus + eventSatisfactionModifier.value +
+          patienceSatisfactionMod + fastServiceBonus
+        )
+      )
 
       budget.value += salePrice
       dailyRevenue.value += salePrice
@@ -1391,32 +1574,56 @@ export const useGameStore = defineStore('game', () => {
     } else {
       dailyServedCustomers.value += 1
       const bargainFailurePenalty = wasBargained ? -10 : 0
-      const finalDissatisfaction = Math.max(20, 30 + bargainFailurePenalty)
+      const patienceRatio = customer.patience / customer.maxPatience
+      const patienceFailureBonus = patienceRatio < 0.3 ? -10 : (patienceRatio < 0.5 ? -5 : 0)
+      const finalDissatisfaction = Math.max(15, 30 + bargainFailurePenalty + patienceFailureBonus)
       dailySatisfactionSum.value += finalDissatisfaction
       slotSatisfactionSum.value += finalDissatisfaction
-      shopReputation.value = Math.max(0, shopReputation.value - (wasBargained ? 2 : 1))
+      shopReputation.value = Math.max(0, shopReputation.value - (wasBargained ? 2 : 1) - (patienceRatio < 0.3 ? 1 : 0))
+
+      consecutiveSkips.value = 0
       
       const bargainMsg = wasBargained ? '砍价没谈拢，' : ''
+      const patienceMsg = patienceRatio < 0.3 ? '（顾客已有些不耐烦）' : ''
       currentBargain.value = null
       return {
         success: false,
-        message: `${bargainMsg}${customer.name} 考虑了一下，还是没有买...`
+        message: `${bargainMsg}${customer.name} 考虑了一下，还是没有买...${patienceMsg}`
       }
     }
   }
 
   const skipCustomer = () => {
     if (currentCustomer.value) {
+      consecutiveSkips.value++
+      const customer = currentCustomer.value
       dailyServedCustomers.value += 1
-      dailySatisfactionSum.value += 20
-      slotSatisfactionSum.value += 20
-      shopReputation.value = Math.max(0, shopReputation.value - 2)
+
+      const patienceRatio = customer.patience / customer.maxPatience
+      const skipPenalty = Math.min(5, Math.floor(consecutiveSkips.value * 0.8))
+      const patienceBasedDissatisfaction = patienceRatio < 0.3 ? 10 : (patienceRatio < 0.5 ? 5 : 0)
+      const baseSatisfaction = 20 - skipPenalty + patienceBasedDissatisfaction
+      const finalDissatisfaction = Math.max(10, Math.min(35, baseSatisfaction))
+
+      dailySatisfactionSum.value += finalDissatisfaction
+      slotSatisfactionSum.value += finalDissatisfaction
+      shopReputation.value = Math.max(0, shopReputation.value - (2 + skipPenalty))
+
+      const remaining = customers.value.slice(currentCustomerIndex.value + 1)
+      customers.value = [
+        ...customers.value.slice(0, currentCustomerIndex.value + 1),
+        ...sortCustomerQueue(remaining)
+      ]
     }
     currentCustomerIndex.value++
+    checkCurrentCustomerValid()
   }
 
   const nextCustomer = () => {
+    consecutiveSkips.value = 0
     currentCustomerIndex.value++
+    checkCurrentCustomerValid()
+    resortCustomerQueueIfNeeded()
   }
 
   const degradeAllRecords = () => {
@@ -1542,6 +1749,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   const endDay = () => {
+    stopPatienceTick()
     degradeAllRecords()
 
     const currentSlotStats = getCurrentSlotStats()
@@ -1755,6 +1963,7 @@ export const useGameStore = defineStore('game', () => {
     const slotConfig = getTimeSlotConfig(timeSlot)
     const baseBudget = preference.priceRange[1] * (2.5 + Math.random() * 1.5)
     const budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * slotConfig.budgetModifier * config.budgetMultiplier)
+    const basePatience = 70 + Math.floor(Math.random() * 40)
 
     return {
       id: `cust-special-${baseId}-${Date.now()}`,
@@ -1762,14 +1971,20 @@ export const useGameStore = defineStore('game', () => {
       avatar: config.avatar,
       preference,
       budget,
-      patience: 60 + Math.floor(Math.random() * 40),
+      patience: basePatience,
+      maxPatience: basePatience,
+      patienceDecayRate: defaultPatienceConfig.decayBaseRate * 0.75,
+      arrivalOrder: 999,
+      priorityScore: 90,
       satisfaction: 70 + config.satisfactionBonus,
       memberProfile: null,
       isReturningCustomer: false,
       memberDiscount: 0,
       bargainAggressiveness: 0.1 + Math.random() * 0.3,
       bargainToughness: 0.2 + Math.random() * 0.3,
-      willBargain: Math.random() < 0.2
+      willBargain: Math.random() < 0.2,
+      isImpatient: false,
+      hasLeftAngrily: false
     }
   }
 
@@ -1927,6 +2142,13 @@ export const useGameStore = defineStore('game', () => {
     eventCustomerCountModifier,
     eventBudgetModifier,
     eventBuyChanceModifier,
-    eventSatisfactionModifier
+    eventSatisfactionModifier,
+    consecutiveSkips,
+    customersLeftAngrily,
+    getCustomerPatienceInfo,
+    getQueueCustomers,
+    tickAllCustomerPatience,
+    resortCustomerQueueIfNeeded,
+    checkCurrentCustomerValid
   }
 })

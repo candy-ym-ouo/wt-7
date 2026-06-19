@@ -2,7 +2,7 @@
 import { useGameStore } from '@/stores/game'
 import { ref, computed } from 'vue'
 import VinylRecord from './VinylRecord.vue'
-import type { CollectionItem, MemberProfile, MemberLevel, AlbumEntry, AlbumCategory, SpecialCustomerConfig } from '@/types'
+import type { CollectionItem, MemberProfile, MemberLevel, AlbumEntry } from '@/types'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
 import { getConditionLabel, getConditionColor, getConditionDescription, getRenovationOptions } from '@/data/condition'
 import { checkAlbumActivation } from '@/data/album'
@@ -491,7 +491,7 @@ const formatBonusValue = (type: string, value: number): string => {
           <div class="asc-item">
             <span class="asc-icon">✨</span>
             <div class="asc-info">
-              <span class="asc-value">{{ activatedAlbumBonuses.length }}</span>
+              <span class="asc-value">{{ gameStore.activatedAlbumBonuses.length }}</span>
               <span class="asc-label">激活加成</span>
             </div>
           </div>

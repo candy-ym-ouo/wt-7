@@ -117,6 +117,10 @@ export interface Customer {
   preference: CustomerPreference
   budget: number
   patience: number
+  maxPatience: number
+  patienceDecayRate: number
+  arrivalOrder: number
+  priorityScore: number
   satisfaction: number
   memberProfile: MemberProfile | null
   isReturningCustomer: boolean
@@ -124,6 +128,26 @@ export interface Customer {
   bargainAggressiveness: number
   bargainToughness: number
   willBargain: boolean
+  isImpatient: boolean
+  hasLeftAngrily: boolean
+}
+
+export type PatienceLevel = 'calm' | 'waiting' | 'restless' | 'impatient' | 'furious'
+
+export interface PatienceConfig {
+  decayBaseRate: number
+  playbackSlowdownFactor: number
+  genreMatchSlowdownFactor: number
+  skipChainPenaltyFactor: number
+  lowPatienceUrgencyBoost: number
+  maxPriorityBonus: number
+}
+
+export interface CustomerQueueSortStrategy {
+  prioritizeImpatient: boolean
+  prioritizeMembers: boolean
+  prioritizeHighBudget: boolean
+  prioritizeSpecial: boolean
 }
 
 export type BargainPhase = 'initial' | 'customer_offer' | 'seller_counter' | 'agreed' | 'failed'

@@ -1,4 +1,4 @@
-import type { Customer, Genre, MemberProfile, TimeSlot } from '@/types'
+import type { Customer, Genre, MemberProfile, TimeSlot, PatienceLevel, PatienceConfig, CustomerQueueSortStrategy } from '@/types'
 import {
   createMemberProfile,
   updateMemberOnVisit,
@@ -64,19 +64,169 @@ const generatePreference = () => {
   }
 }
 
+export const defaultPatienceConfig: PatienceConfig = {
+  decayBaseRate: 1.0,
+  playbackSlowdownFactor: 0.5,
+  genreMatchSlowdownFactor: 0.65,
+  skipChainPenaltyFactor: 1.5,
+  lowPatienceUrgencyBoost: 30,
+  maxPriorityBonus: 50
+}
+
+export const getPatienceLevel = (patience: number, maxPatience: number): PatienceLevel => {
+  const ratio = patience / maxPatience
+  if (ratio >= 0.8) return 'calm'
+  if (ratio >= 0.6) return 'waiting'
+  if (ratio >= 0.4) return 'restless'
+  if (ratio >= 0.2) return 'impatient'
+  return 'furious'
+}
+
+export const getPatienceLevelLabel = (level: PatienceLevel): string => {
+  const labels: Record<PatienceLevel, string> = {
+    calm: '从容',
+    waiting: '等候中',
+    restless: '略显烦躁',
+    impatient: '不耐烦',
+    furious: '即将离开'
+  }
+  return labels[level]
+}
+
+export const getPatienceLevelColor = (level: PatienceLevel): string => {
+  const colors: Record<PatienceLevel, string> = {
+    calm: '#48bb78',
+    waiting: '#ecc94b',
+    restless: '#ed8936',
+    impatient: '#ed64a6',
+    furious: '#f56565'
+  }
+  return colors[level]
+}
+
+const calculatePriorityScore = (
+  customer: Customer,
+  config: PatienceConfig,
+  arrivalOrder: number
+): number => {
+  let score = 0
+
+  const patienceRatio = customer.patience / customer.maxPatience
+  score += (1 - patienceRatio) * config.lowPatienceUrgencyBoost
+
+  if (customer.memberProfile) {
+    const memberLevelBonus: Record<string, number> = {
+      Diamond: 40,
+      Platinum: 30,
+      Gold: 20,
+      Silver: 10,
+      Bronze: 5
+    }
+    score += memberLevelBonus[customer.memberProfile.level] || 0
+  }
+
+  if (customer.isReturningCustomer && !customer.memberProfile) {
+    score += 5
+  }
+
+  const budgetScore = Math.min(20, customer.budget / 50)
+  score += budgetScore
+
+  score -= arrivalOrder * 0.1
+
+  return Math.min(config.maxPriorityBonus + 100, Math.max(0, score))
+}
+
+export const calculatePatienceDecay = (
+  customer: Customer,
+  isPlaying: boolean,
+  playingRecordGenres: Genre[],
+  config: PatienceConfig = defaultPatienceConfig
+): number => {
+  let decay = customer.patienceDecayRate
+
+  if (isPlaying && playingRecordGenres.length > 0) {
+    const hasGenreMatch = customer.preference.favoriteGenres.some(
+      g => playingRecordGenres.includes(g)
+    )
+    if (hasGenreMatch) {
+      decay *= config.genreMatchSlowdownFactor
+    } else {
+      decay *= config.playbackSlowdownFactor
+    }
+  }
+
+  return decay
+}
+
+export const applyPatienceDecay = (
+  customer: Customer,
+  decayAmount: number
+): Customer => {
+  const newPatience = Math.max(0, customer.patience - decayAmount)
+  const patienceRatio = newPatience / customer.maxPatience
+  return {
+    ...customer,
+    patience: newPatience,
+    isImpatient: patienceRatio <= 0.3,
+    hasLeftAngrily: newPatience <= 0
+  }
+}
+
+export const sortCustomerQueue = (
+  customers: Customer[],
+  strategy: CustomerQueueSortStrategy = {
+    prioritizeImpatient: true,
+    prioritizeMembers: true,
+    prioritizeHighBudget: true,
+    prioritizeSpecial: true
+  }
+): Customer[] => {
+  return [...customers].sort((a, b) => {
+    if (a.hasLeftAngrily && !b.hasLeftAngrily) return 1
+    if (!a.hasLeftAngrily && b.hasLeftAngrily) return -1
+
+    let scoreA = a.priorityScore
+    let scoreB = b.priorityScore
+
+    if (strategy.prioritizeImpatient) {
+      const patiencePenaltyA = (a.patience / a.maxPatience) * 40
+      const patiencePenaltyB = (b.patience / b.maxPatience) * 40
+      scoreA += (40 - patiencePenaltyA)
+      scoreB += (40 - patiencePenaltyB)
+    }
+
+    if (strategy.prioritizeMembers) {
+      if (a.memberProfile && !b.memberProfile) scoreA += 25
+      if (!a.memberProfile && b.memberProfile) scoreB += 25
+    }
+
+    if (strategy.prioritizeHighBudget) {
+      const budgetDiff = a.budget - b.budget
+      scoreA += Math.min(15, budgetDiff / 100)
+      scoreB -= Math.min(15, budgetDiff / 100)
+    }
+
+    return scoreB - scoreA
+  })
+}
+
 export const generateCustomer = (
   id: string,
   memberProfile: MemberProfile | null = null,
   reputation: number = 50,
   inventoryGenres: Genre[] = [],
-  timeSlot: TimeSlot = 'afternoon'
+  timeSlot: TimeSlot = 'afternoon',
+  arrivalOrder: number = 0
 ): Customer => {
   let preference
   let name
   let avatar
   let budget
-  let patience
+  let basePatience
   let memberDiscount = 0
+  let patienceDecayRate = defaultPatienceConfig.decayBaseRate
+  let baseSatisfaction = 50
 
   if (memberProfile) {
     const updatedMember = updateMemberOnVisit(memberProfile)
@@ -99,26 +249,46 @@ export const generateCustomer = (
     const slotConfig = getTimeSlotConfig(timeSlot)
     const baseBudget = preference.priceRange[1] * (1.8 + Math.random() * 0.8)
     budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * slotConfig.budgetModifier * (1 + updatedMember.visitCount * 0.03))
-    patience = 40 + Math.floor(Math.random() * 40) + updatedMember.visitCount
+    basePatience = 50 + Math.floor(Math.random() * 50) + updatedMember.visitCount
     memberDiscount = calculateMemberDiscount(updatedMember.level)
+    baseSatisfaction = 50 + Math.floor(updatedMember.visitCount * 2)
+
+    const levelDecayMod: Record<string, number> = {
+      Diamond: 0.6,
+      Platinum: 0.7,
+      Gold: 0.8,
+      Silver: 0.9,
+      Bronze: 0.95
+    }
+    patienceDecayRate *= (levelDecayMod[updatedMember.level] || 1.0)
 
     const memberBargainBias = updatedMember.level === 'Diamond' || updatedMember.level === 'Platinum' ? -0.2 :
                               updatedMember.level === 'Gold' ? -0.1 : 0
-    return {
+
+    const customer: Customer = {
       id,
       name,
       avatar,
       preference,
       budget,
-      patience,
-      satisfaction: 50 + Math.floor(updatedMember.visitCount * 2),
+      patience: basePatience,
+      maxPatience: basePatience,
+      patienceDecayRate,
+      arrivalOrder,
+      priorityScore: 0,
+      satisfaction: baseSatisfaction,
       memberProfile: updatedMember,
       isReturningCustomer: true,
       memberDiscount,
       bargainAggressiveness: Math.max(0.1, Math.min(0.8, 0.3 + Math.random() * 0.4 + memberBargainBias)),
       bargainToughness: Math.max(0.2, Math.min(0.9, 0.4 + Math.random() * 0.4 + memberBargainBias * 0.5)),
-      willBargain: Math.random() < (0.35 + memberBargainBias + updatedMember.visitCount * 0.01)
+      willBargain: Math.random() < (0.35 + memberBargainBias + updatedMember.visitCount * 0.01),
+      isImpatient: false,
+      hasLeftAngrily: false
     }
+
+    customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, arrivalOrder)
+    return customer
   } else {
     const nameIndex = Math.floor(Math.random() * customerNames.length)
     const avatarIndex = Math.floor(Math.random() * avatars.length)
@@ -134,7 +304,11 @@ export const generateCustomer = (
     }
     const baseBudget = preference.priceRange[1] * (1.5 + Math.random())
     budget = getBudgetWithReputation(Math.floor(baseBudget), reputation)
-    patience = 30 + Math.floor(Math.random() * 40)
+    basePatience = 30 + Math.floor(Math.random() * 40)
+
+    if (timeSlot === 'night') {
+      patienceDecayRate *= 1.15
+    }
 
     if (inventoryGenres.length > 0) {
       preference.favoriteGenres = alignPreferencesWithInventory(
@@ -144,21 +318,30 @@ export const generateCustomer = (
       )
     }
 
-    return {
+    const customer: Customer = {
       id,
       name,
       avatar,
       preference,
       budget,
-      patience,
-      satisfaction: 50,
+      patience: basePatience,
+      maxPatience: basePatience,
+      patienceDecayRate,
+      arrivalOrder,
+      priorityScore: 0,
+      satisfaction: baseSatisfaction,
       memberProfile: null,
       isReturningCustomer: false,
       memberDiscount: 0,
       bargainAggressiveness: 0.2 + Math.random() * 0.6,
       bargainToughness: 0.3 + Math.random() * 0.5,
-      willBargain: Math.random() < 0.45
+      willBargain: Math.random() < 0.45,
+      isImpatient: false,
+      hasLeftAngrily: false
     }
+
+    customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, arrivalOrder)
+    return customer
   }
 }
 
@@ -172,6 +355,7 @@ export const generateDailyCustomers = (
 ): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
   const newMemberProfiles: MemberProfile[] = []
+  let arrivalCounter = 0
 
   const returningMemberCount = Math.min(
     existingMembers.length,
@@ -182,21 +366,46 @@ export const generateDailyCustomers = (
 
   for (let i = 0; i < selectedReturningMembers.length; i++) {
     const member = selectedReturningMembers[i]
-    const customer = generateCustomer(`cust-${day}-return-${i}-${Date.now()}`, member, reputation, inventoryGenres, timeSlot)
+    const customer = generateCustomer(
+      `cust-${day}-return-${i}-${Date.now()}`,
+      member,
+      reputation,
+      inventoryGenres,
+      timeSlot,
+      arrivalCounter++
+    )
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customers.push(customer)
   }
 
   const newCustomerCount = count - selectedReturningMembers.length
   for (let i = 0; i < newCustomerCount; i++) {
-    const customer = generateCustomer(`cust-${day}-new-${i}-${Date.now()}`, null, reputation, inventoryGenres, timeSlot)
+    const customer = generateCustomer(
+      `cust-${day}-new-${i}-${Date.now()}`,
+      null,
+      reputation,
+      inventoryGenres,
+      timeSlot,
+      arrivalCounter++
+    )
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
-    customer.patience = Math.floor(customer.patience * (1 - day * 0.02))
+    const dayPatienceMod = Math.max(0.7, 1 - day * 0.02)
+    customer.patience = Math.floor(customer.patience * dayPatienceMod)
+    customer.maxPatience = customer.patience
+    customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, customer.arrivalOrder)
     customers.push(customer)
   }
 
+  const initialShuffle = [...customers].sort(() => Math.random() - 0.5)
+  const sortedQueue = sortCustomerQueue(initialShuffle, {
+    prioritizeImpatient: true,
+    prioritizeMembers: true,
+    prioritizeHighBudget: false,
+    prioritizeSpecial: true
+  })
+
   return {
-    customers: customers.sort(() => Math.random() - 0.5),
+    customers: sortedQueue,
     newMembers: newMemberProfiles
   }
 }
