@@ -1,4 +1,5 @@
 import type { LevelConfig, Genre } from '@/types'
+import { getDifficultyScale } from './wordOfMouth'
 
 export const levels: LevelConfig[] = [
   {
@@ -109,4 +110,18 @@ export const isLevelUnlocked = (levelId: number, completedLevels: number[]): boo
 export const getUnlockedGenres = (currentLevel: number): Genre[] => {
   const level = levels.find(l => l.id === currentLevel)
   return level?.unlockGenres || ['Jazz', 'Rock', 'Pop']
+}
+
+export const getScaledLevelConfig = (levelId: number, reputation: number): LevelConfig | undefined => {
+  const base = getLevelById(levelId)
+  if (!base) return undefined
+
+  const scale = getDifficultyScale(reputation)
+
+  return {
+    ...base,
+    targetProfit: Math.floor(base.targetProfit * scale),
+    targetSales: Math.max(base.targetSales, Math.floor(base.targetSales * scale)),
+    targetSatisfaction: Math.min(100, Math.floor(base.targetSatisfaction * scale))
+  }
 }

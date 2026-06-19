@@ -5,6 +5,11 @@ import {
   calculateMemberDiscount,
   getMemberBenefit
 } from './members'
+import {
+  getBudgetWithReputation,
+  alignPreferencesWithInventory,
+  getMatchScoreBonus
+} from './wordOfMouth'
 
 const customerNames = [
   '老爵士王', '摇滚青年', '灵魂歌者', '放克达人', '迪斯科女王',
@@ -56,7 +61,9 @@ const generatePreference = () => {
 
 export const generateCustomer = (
   id: string,
-  memberProfile: MemberProfile | null = null
+  memberProfile: MemberProfile | null = null,
+  reputation: number = 50,
+  inventoryGenres: Genre[] = []
 ): Customer => {
   let preference
   let name
@@ -76,7 +83,7 @@ export const generateCustomer = (
     name = updatedMember.name
     avatar = updatedMember.avatar
     const baseBudget = preference.priceRange[1] * (1.8 + Math.random() * 0.8)
-    budget = Math.floor(baseBudget * (1 + updatedMember.visitCount * 0.03))
+    budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * (1 + updatedMember.visitCount * 0.03))
     patience = 40 + Math.floor(Math.random() * 40) + updatedMember.visitCount
     memberDiscount = calculateMemberDiscount(updatedMember.level)
 
@@ -99,8 +106,16 @@ export const generateCustomer = (
     name = customerNames[nameIndex]
     avatar = avatars[avatarIndex]
     const baseBudget = preference.priceRange[1] * (1.5 + Math.random())
-    budget = Math.floor(baseBudget)
+    budget = getBudgetWithReputation(Math.floor(baseBudget), reputation)
     patience = 30 + Math.floor(Math.random() * 40)
+
+    if (inventoryGenres.length > 0) {
+      preference.favoriteGenres = alignPreferencesWithInventory(
+        preference.favoriteGenres,
+        inventoryGenres,
+        reputation
+      )
+    }
 
     return {
       id,
@@ -120,7 +135,9 @@ export const generateCustomer = (
 export const generateDailyCustomers = (
   count: number,
   day: number,
-  existingMembers: MemberProfile[] = []
+  existingMembers: MemberProfile[] = [],
+  reputation: number = 50,
+  inventoryGenres: Genre[] = []
 ): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
   const newMemberProfiles: MemberProfile[] = []
@@ -134,14 +151,14 @@ export const generateDailyCustomers = (
 
   for (let i = 0; i < selectedReturningMembers.length; i++) {
     const member = selectedReturningMembers[i]
-    const customer = generateCustomer(`cust-${day}-return-${i}-${Date.now()}`, member)
+    const customer = generateCustomer(`cust-${day}-return-${i}-${Date.now()}`, member, reputation, inventoryGenres)
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customers.push(customer)
   }
 
   const newCustomerCount = count - selectedReturningMembers.length
   for (let i = 0; i < newCustomerCount; i++) {
-    const customer = generateCustomer(`cust-${day}-new-${i}-${Date.now()}`)
+    const customer = generateCustomer(`cust-${day}-new-${i}-${Date.now()}`, null, reputation, inventoryGenres)
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customer.patience = Math.floor(customer.patience * (1 - day * 0.02))
     customers.push(customer)
@@ -153,7 +170,7 @@ export const generateDailyCustomers = (
   }
 }
 
-export const calculateMatchScore = (customer: Customer, record: any): number => {
+export const calculateMatchScore = (customer: Customer, record: any, reputation: number = 50): number => {
   let score = 0
 
   if (customer.preference.favoriteGenres.includes(record.genre)) {
@@ -191,6 +208,8 @@ export const calculateMatchScore = (customer: Customer, record: any): number => 
     score += benefit.priorityBoost
     score += Math.min(10, customer.memberProfile.visitCount * 0.5)
   }
+
+  score += getMatchScoreBonus(reputation)
 
   return Math.max(0, Math.min(100, score))
 }

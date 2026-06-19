@@ -1,3 +1,29 @@
+export type WordOfMouthTier = 'unknown' | 'known' | 'spread' | 'famous' | 'legendary'
+
+export interface WordOfMouthConfig {
+  tier: WordOfMouthTier
+  tierName: string
+  icon: string
+  minReputation: number
+  maxReputation: number
+  customerCountModifier: number
+  budgetModifier: number
+  matchScoreBonus: number
+  buyChanceBonus: number
+  preferenceAlignmentBonus: number
+  difficultyScale: number
+  description: string
+}
+
+export interface LevelEvaluation {
+  grade: 'S' | 'A' | 'B' | 'C' | 'D'
+  gradeLabel: string
+  wordOfMouthBonus: number
+  reputationTrend: 'rising' | 'stable' | 'declining'
+  customerFlowBonus: number
+  totalScore: number
+}
+
 export type Genre = 'Jazz' | 'Rock' | 'Soul' | 'Funk' | 'Disco' | 'Classical' | 'Blues' | 'Pop' | 'Electronic' | 'Folk'
 
 export type MemberLevel = 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond'
@@ -162,6 +188,8 @@ export interface LevelReward {
   totalReward: number
   reputationBonus: number
   unlockedBonus: string[]
+  wordOfMouthBonus: number
+  evaluation: LevelEvaluation | null
 }
 
 export interface GameState {

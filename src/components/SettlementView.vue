@@ -3,6 +3,7 @@ import { useGameStore } from '@/stores/game'
 import { computed } from 'vue'
 import type { MemberLevel } from '@/types'
 import { memberBenefits, getLevelIcon, getLevelColor } from '@/data/members'
+import { getGradeColor, getGradeIcon, getTrendIcon, getTrendLabel, getWordOfMouthTier } from '@/data/wordOfMouth'
 
 const emit = defineEmits<{
   back: []
@@ -28,6 +29,19 @@ const memberLevelDistribution = computed(() => {
 const memberSalesRatio = computed(() => {
   if (gameStore.currentLevelSales === 0) return 0
   return Math.round((gameStore.currentLevelMemberSales / gameStore.currentLevelSales) * 100)
+})
+
+const currentWordOfMouth = computed(() => getWordOfMouthTier(gameStore.shopReputation))
+const nextWordOfMouth = computed(() => {
+  const tiers = [
+    { min: 0, name: '默默无闻' },
+    { min: 21, name: '小有名气' },
+    { min: 41, name: '口碑相传' },
+    { min: 61, name: '声名远播' },
+    { min: 81, name: '传奇名店' }
+  ]
+  const next = tiers.find(t => t.min > gameStore.shopReputation)
+  return next ? next.name : null
 })
 
 const continueAction = () => {
@@ -146,6 +160,37 @@ const backToMenu = () => {
         <p class="cm-hint">陈列中的唱片品相衰减更快，注意及时翻新维护！</p>
       </div>
 
+      <div class="word-of-mouth-card card">
+        <h3 class="wom-title">{{ currentWordOfMouth.icon }} 口碑传播 · {{ currentWordOfMouth.tierName }}</h3>
+        <p class="wom-desc">{{ currentWordOfMouth.description }}</p>
+        <div class="wom-bar-section">
+          <div class="wom-bar">
+            <div class="wom-fill" :style="{ width: gameStore.shopReputation + '%' }"></div>
+          </div>
+          <span class="wom-score">{{ gameStore.shopReputation }}</span>
+        </div>
+        <div class="wom-effects">
+          <div class="wom-effect">
+            <span class="we-label">客流加成</span>
+            <span class="we-value positive">+{{ Math.round(currentWordOfMouth.customerCountModifier * 100) }}%</span>
+          </div>
+          <div class="wom-effect">
+            <span class="we-label">预算倍率</span>
+            <span class="we-value">×{{ currentWordOfMouth.budgetModifier.toFixed(2) }}</span>
+          </div>
+          <div class="wom-effect">
+            <span class="we-label">匹配加成</span>
+            <span class="we-value">+{{ currentWordOfMouth.matchScoreBonus }}</span>
+          </div>
+          <div class="wom-effect">
+            <span class="we-label">成交加成</span>
+            <span class="we-value">+{{ Math.round(currentWordOfMouth.buyChanceBonus * 100) }}%</span>
+          </div>
+        </div>
+        <p v-if="nextWordOfMouth" class="wom-next">距离「{{ nextWordOfMouth }}」还需提升声望</p>
+        <p v-else class="wom-next maxed">已达最高口碑等级！</p>
+      </div>
+
       <div class="level-progress-card card">
         <h3 class="lp-title">关卡进度</h3>
         
@@ -262,6 +307,25 @@ const backToMenu = () => {
         </p>
       </div>
 
+      <div v-if="gameStore.levelEvaluation" class="evaluation-card card">
+        <div class="eval-grade" :style="{ color: getGradeColor(gameStore.levelEvaluation.grade) }">
+          <span class="eval-icon">{{ getGradeIcon(gameStore.levelEvaluation.grade) }}</span>
+          <span class="eval-letter">{{ gameStore.levelEvaluation.grade }}</span>
+          <span class="eval-label">{{ gameStore.levelEvaluation.gradeLabel }}</span>
+        </div>
+        <div class="eval-details">
+          <div class="eval-score">综合评分：{{ gameStore.levelEvaluation.totalScore }}</div>
+          <div class="eval-trend">
+            <span>口碑趋势</span>
+            <span>{{ getTrendIcon(gameStore.levelEvaluation.reputationTrend) }} {{ getTrendLabel(gameStore.levelEvaluation.reputationTrend) }}</span>
+          </div>
+          <div class="eval-wom-bonus">
+            <span>口碑奖励</span>
+            <span class="positive">+¥{{ gameStore.levelEvaluation.wordOfMouthBonus }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="final-stats">
         <h3 class="fs-title">最终成绩</h3>
 
@@ -348,6 +412,10 @@ const backToMenu = () => {
             <div v-if="gameStore.lastLevelReward.memberTargetsCompletedBonus > 0" class="rb-item highlight">
               <span class="rb-label">🏆 会员目标全部达成!</span>
               <span class="rb-value special">+¥{{ gameStore.lastLevelReward.memberTargetsCompletedBonus }}</span>
+            </div>
+            <div v-if="gameStore.lastLevelReward.wordOfMouthBonus > 0" class="rb-item">
+              <span class="rb-label">📣 口碑传播奖励</span>
+              <span class="rb-value positive">+¥{{ gameStore.lastLevelReward.wordOfMouthBonus }}</span>
             </div>
           </div>
 
@@ -1174,5 +1242,161 @@ const backToMenu = () => {
   text-align: center;
   line-height: 1.5;
   font-style: italic;
+}
+
+.word-of-mouth-card {
+  margin: 0 16px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.08) 0%, rgba(233, 69, 96, 0.08) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.25);
+}
+
+.wom-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-gold);
+  margin-bottom: 6px;
+}
+
+.wom-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.wom-bar-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.wom-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.wom-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-orange) 100%);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.wom-score {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  min-width: 30px;
+  text-align: right;
+}
+
+.wom-effects {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.wom-effect {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border-radius: 6px;
+}
+
+.we-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.we-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.we-value.positive {
+  color: var(--success);
+}
+
+.wom-next {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.wom-next.maxed {
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+.evaluation-card {
+  margin: 16px;
+  padding: 20px;
+  text-align: center;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.1) 0%, rgba(72, 187, 120, 0.1) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.3);
+}
+
+.eval-grade {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.eval-icon {
+  font-size: 28px;
+}
+
+.eval-letter {
+  font-size: 36px;
+  font-weight: 800;
+}
+
+.eval-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.eval-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 0 12px;
+}
+
+.eval-score {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.eval-trend,
+.eval-wom-bonus {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border-radius: 6px;
+}
+
+.eval-wom-bonus .positive {
+  color: var(--success);
+  font-weight: 700;
 }
 </style>

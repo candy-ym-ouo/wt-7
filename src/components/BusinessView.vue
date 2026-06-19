@@ -6,6 +6,7 @@ import type { Record, MemberLevel } from '@/types'
 import { calculateMatchScore } from '@/data/customers'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
 import { getConditionLabel, getConditionColor, getConditionImpactOnSales } from '@/data/condition'
+import { getWordOfMouthTier } from '@/data/wordOfMouth'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -64,6 +65,12 @@ const isReturningBadge = computed(() => {
     return customer.memberProfile ? '会员回访' : '回头客'
   }
   return null
+})
+
+const reputationHint = computed(() => {
+  const config = getWordOfMouthTier(gameStore.shopReputation)
+  if (config.customerCountModifier <= 0) return null
+  return `口碑${config.tierName}：客流+${Math.round(config.customerCountModifier * 100)}% | 预算×${config.budgetModifier.toFixed(2)}`
 })
 
 const openSellModal = (record: Record) => {
@@ -224,6 +231,11 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <div v-if="reputationHint" class="reputation-hint">
+          <span class="rh-icon">{{ gameStore.wordOfMouthConfig.icon }}</span>
+          <span class="rh-text">{{ reputationHint }}</span>
+        </div>
+
         <div v-if="recommendations.length > 0 && recommendations[0]?.score >= 60" class="recommendation">
           <span class="rec-icon">💡</span>
           <span class="rec-text">
@@ -343,7 +355,7 @@ onUnmounted(() => {
             <RecordCard
               :record="selectedRecord"
               :show-price="true"
-              :match-score="gameStore.currentCustomer ? calculateMatchScore(gameStore.currentCustomer, selectedRecord) : 0"
+              :match-score="gameStore.currentCustomer ? calculateMatchScore(gameStore.currentCustomer, selectedRecord, gameStore.shopReputation) : 0"
             />
 
             <div v-if="customerMemberInfo" class="member-discount-info">
@@ -735,6 +747,26 @@ onUnmounted(() => {
   border-radius: 8px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.reputation-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.1) 0%, rgba(233, 69, 96, 0.1) 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(246, 224, 94, 0.2);
+}
+
+.rh-icon {
+  font-size: 14px;
+}
+
+.rh-text {
+  font-size: 11px;
+  color: var(--accent-gold);
+  font-weight: 500;
 }
 
 .rec-icon {

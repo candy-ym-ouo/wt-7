@@ -3,7 +3,8 @@ import { ref, computed } from 'vue'
 import type {
   GamePhase, Record, InventoryItem, DisplaySlot,
   Customer, SaleRecord, DailyStats, CollectionItem,
-  MemberProfile, MemberLevel, MemberStats, LevelReward
+  MemberProfile, MemberLevel, MemberStats, LevelReward,
+  LevelEvaluation
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -25,6 +26,12 @@ import {
   getConditionLabel,
   calculateRenovationCost
 } from '@/data/condition'
+import {
+  getWordOfMouthTier,
+  getCustomerCountWithReputation,
+  getBuyChanceBonus,
+  calculateLevelEvaluation
+} from '@/data/wordOfMouth'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -64,8 +71,23 @@ export const useGameStore = defineStore('game', () => {
   const lastLevelReward = ref<LevelReward | null>(null)
   const dailyRenovationCost = ref(0)
   const dailyConditionDegraded = ref(0)
+  const levelStartReputation = ref(50)
 
   const currentLevelConfig = computed(() => getLevelById(currentLevel.value))
+  const wordOfMouthConfig = computed(() => getWordOfMouthTier(shopReputation.value))
+  const levelEvaluation = computed<LevelEvaluation | null>(() => {
+    const config = currentLevelConfig.value
+    if (!config) return null
+    return calculateLevelEvaluation(
+      currentLevelProfit.value,
+      config.targetProfit,
+      currentLevelSales.value,
+      config.targetSales,
+      shopReputation.value,
+      config.targetSatisfaction,
+      levelStartReputation.value
+    )
+  })
   const availableRecords = computed(() => {
     const unlocked = getUnlockedGenres(currentLevel.value)
     return allRecords.filter(r => unlocked.includes(r.genre))
@@ -181,7 +203,9 @@ export const useGameStore = defineStore('game', () => {
       memberTargetsCompletedBonus: 0,
       totalReward: 0,
       reputationBonus: 0,
-      unlockedBonus: []
+      unlockedBonus: [],
+      wordOfMouthBonus: 0,
+      evaluation: null
     }
 
     if (!config) return reward
@@ -223,11 +247,31 @@ export const useGameStore = defineStore('game', () => {
       reward.reputationBonus += 10
     }
 
+    const evaluation = calculateLevelEvaluation(
+      currentLevelProfit.value,
+      config.targetProfit,
+      currentLevelSales.value,
+      config.targetSales,
+      shopReputation.value,
+      config.targetSatisfaction,
+      levelStartReputation.value
+    )
+    reward.evaluation = evaluation
+    reward.wordOfMouthBonus = evaluation.wordOfMouthBonus
+
+    if (evaluation.grade === 'S') {
+      reward.unlockedBonus.push('完美通关！S级评价')
+      reward.reputationBonus += 8
+    } else if (evaluation.grade === 'A') {
+      reward.reputationBonus += 3
+    }
+
     reward.totalReward = reward.baseReward +
       reward.newMembersReward +
       reward.returningVisitsReward +
       reward.memberRatioReward +
-      reward.memberTargetsCompletedBonus
+      reward.memberTargetsCompletedBonus +
+      reward.wordOfMouthBonus
 
     return reward
   }
@@ -276,6 +320,7 @@ export const useGameStore = defineStore('game', () => {
     currentLevelMemberSales.value = 0
     members.value = []
     lastLevelReward.value = null
+    levelStartReputation.value = shopReputation.value
     initializeDisplaySlots(config.displaySlots)
     resetDailyStats()
   }
@@ -375,11 +420,19 @@ export const useGameStore = defineStore('game', () => {
 
   const startBusinessPhase = () => {
     if (!currentLevelConfig.value) return
-    const customerCount = Math.min(
+    const baseCount = Math.min(
       currentLevelConfig.value.maxCustomers,
       5 + Math.floor(Math.random() * 4)
     )
-    const result = generateDailyCustomers(customerCount, currentDay.value, members.value)
+    const customerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
+    const result = generateDailyCustomers(
+      customerCount,
+      currentDay.value,
+      members.value,
+      shopReputation.value,
+      inventoryGenres
+    )
     customers.value = result.customers
 
     dailyReturningCustomers.value = customers.value.filter(c => c.isReturningCustomer).length
@@ -403,7 +456,7 @@ export const useGameStore = defineStore('game', () => {
     const displayed = displayedRecords.value
     type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number }
     const scored = displayed.map(d => {
-      const score = calculateMatchScore(customer, d.item.record)
+      const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
       let finalScore = score
       if (currentPlayingRecord.value?.id === d.item.record.id) {
         finalScore += 15
@@ -459,11 +512,12 @@ export const useGameStore = defineStore('game', () => {
       salePrice = Math.floor(salePrice * (1 - customer.memberDiscount))
     }
 
-    const score = calculateMatchScore(customer, record)
+    const score = calculateMatchScore(customer, record, shopReputation.value)
     const finalScore = currentPlayingRecord.value?.id === record.id ? score + 15 : score
 
     let buyChance = finalScore / 100
     buyChance += conditionImpact.buyChanceModifier
+    buyChance += getBuyChanceBonus(shopReputation.value)
     if (salePrice > customer.budget) {
       buyChance *= 0.3
     }
@@ -839,7 +893,10 @@ export const useGameStore = defineStore('game', () => {
     lastLevelReward,
     dailyRenovationCost,
     dailyConditionDegraded,
+    levelStartReputation,
     currentLevelConfig,
+    wordOfMouthConfig,
+    levelEvaluation,
     availableRecords,
     shopRecordsForPurchase,
     displayedRecords,

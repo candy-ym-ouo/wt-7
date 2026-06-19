@@ -60,6 +60,10 @@ const phaseDescription = computed(() => {
         <span class="stat-icon">⭐</span>
         <span class="stat-value">{{ gameStore.shopReputation }}</span>
       </div>
+      <div class="stat-item word-of-mouth">
+        <span class="stat-icon">{{ gameStore.wordOfMouthConfig.icon }}</span>
+        <span class="stat-value wom-tier">{{ gameStore.wordOfMouthConfig.tierName }}</span>
+      </div>
     </div>
 
     <div class="phase-indicator">
@@ -151,6 +155,14 @@ const phaseDescription = computed(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.stat-item.word-of-mouth {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.15) 0%, rgba(233, 69, 96, 0.15) 100%);
+}
+
+.wom-tier {
+  font-size: 11px;
 }
 
 .stat-icon {
