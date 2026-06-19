@@ -308,6 +308,60 @@ const backToMenu = () => {
           </div>
         </div>
 
+        <div v-if="gameStore.lastLevelReward" class="reward-breakdown card">
+          <h4 class="rb-header">🎁 通关奖励发放</h4>
+
+          <div class="rb-grid">
+            <div class="rb-item">
+              <span class="rb-label">基础通关奖励</span>
+              <span class="rb-value positive">+¥{{ gameStore.lastLevelReward.baseReward }}</span>
+            </div>
+            <div v-if="gameStore.lastLevelReward.newMembersReward > 0" class="rb-item">
+              <span class="rb-label">👥 新增会员奖励</span>
+              <span class="rb-value positive">+¥{{ gameStore.lastLevelReward.newMembersReward }}</span>
+            </div>
+            <div v-if="gameStore.lastLevelReward.returningVisitsReward > 0" class="rb-item">
+              <span class="rb-label">🔄 回头客运营奖励</span>
+              <span class="rb-value positive">+¥{{ gameStore.lastLevelReward.returningVisitsReward }}</span>
+            </div>
+            <div v-if="gameStore.lastLevelReward.memberRatioReward > 0" class="rb-item">
+              <span class="rb-label">💳 会员销售占比奖励</span>
+              <span class="rb-value positive">+¥{{ gameStore.lastLevelReward.memberRatioReward }}</span>
+            </div>
+            <div v-if="gameStore.lastLevelReward.memberTargetsCompletedBonus > 0" class="rb-item highlight">
+              <span class="rb-label">🏆 会员目标全部达成!</span>
+              <span class="rb-value special">+¥{{ gameStore.lastLevelReward.memberTargetsCompletedBonus }}</span>
+            </div>
+          </div>
+
+          <div class="rb-divider"></div>
+
+          <div class="rb-total">
+            <span class="rbt-label">资金奖励总计</span>
+            <span class="rbt-value">+¥{{ gameStore.lastLevelReward.totalReward }}</span>
+          </div>
+
+          <div v-if="gameStore.lastLevelReward.reputationBonus > 0" class="rb-reputation">
+            <span>⭐ 店铺声望</span>
+            <span class="positive">+{{ gameStore.lastLevelReward.reputationBonus }}</span>
+          </div>
+
+          <div v-if="gameStore.lastLevelReward.unlockedBonus.length > 0" class="rb-achievements">
+            <span class="rba-label">解锁成就</span>
+            <div class="rba-list">
+              <span v-for="(bonus, idx) in gameStore.lastLevelReward.unlockedBonus" :key="idx" class="rba-badge">
+                🏅 {{ bonus }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="gameStore.isLevelComplete && !gameStore.lastLevelReward" class="reward-pending card">
+          <p class="rp-text">
+            💡 点击「下一关」按钮即可领取所有奖励！
+          </p>
+        </div>
+
         <div v-if="gameStore.collection.length > 0" class="collection-unlock">
           <span class="cu-icon">📚</span>
           <span class="cu-text">
@@ -881,5 +935,154 @@ const backToMenu = () => {
 
 .result-actions button {
   width: 100%;
+}
+
+.reward-breakdown {
+  margin-top: 16px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.08) 0%, rgba(72, 187, 120, 0.08) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.25);
+}
+
+.rb-header {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.rb-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rb-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.rb-item.highlight {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.15) 0%, rgba(233, 69, 96, 0.1) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.3);
+  padding: 10px 12px;
+}
+
+.rb-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.rb-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rb-value.positive {
+  color: var(--success);
+}
+
+.rb-value.special {
+  color: var(--accent-gold);
+  font-size: 16px;
+}
+
+.rb-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+  margin: 12px 0;
+}
+
+.rb-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.rbt-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rbt-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--success);
+}
+
+.rb-reputation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.rb-reputation .positive {
+  color: var(--accent-gold);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.rb-achievements {
+  padding: 10px 12px;
+  background: rgba(159, 122, 234, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(159, 122, 234, 0.2);
+}
+
+.rba-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.rba-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rba-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #9f7aea;
+  font-weight: 600;
+}
+
+.reward-pending {
+  margin-top: 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(56, 178, 172, 0.08) 0%, rgba(66, 153, 225, 0.08) 100%);
+  border: 1px dashed rgba(56, 178, 172, 0.3);
+}
+
+.rp-text {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 </style>

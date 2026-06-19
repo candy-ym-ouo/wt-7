@@ -147,6 +147,17 @@ export interface CollectionItem {
 
 export type GamePhase = 'purchase' | 'display' | 'business' | 'settlement'
 
+export interface LevelReward {
+  baseReward: number
+  newMembersReward: number
+  returningVisitsReward: number
+  memberRatioReward: number
+  memberTargetsCompletedBonus: number
+  totalReward: number
+  reputationBonus: number
+  unlockedBonus: string[]
+}
+
 export interface GameState {
   currentLevel: number
   currentDay: number
@@ -167,4 +178,5 @@ export interface GameState {
   currentLevelNewMembers: number
   currentLevelReturningVisits: number
   currentLevelMemberSales: number
+  lastLevelReward: LevelReward | null
 }

@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import type {
   GamePhase, Record, InventoryItem, DisplaySlot,
   Customer, SaleRecord, DailyStats, CollectionItem,
-  MemberProfile, MemberLevel, MemberStats
+  MemberProfile, MemberLevel, MemberStats, LevelReward
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -53,6 +53,7 @@ export const useGameStore = defineStore('game', () => {
   const dailyMemberSalesCount = ref(0)
   const dailyMemberRevenue = ref(0)
   const dailyGrowthPointsEarned = ref(0)
+  const lastLevelReward = ref<LevelReward | null>(null)
 
   const currentLevelConfig = computed(() => getLevelById(currentLevel.value))
   const availableRecords = computed(() => {
@@ -152,10 +153,84 @@ export const useGameStore = defineStore('game', () => {
   const isLevelComplete = computed(() => {
     const config = currentLevelConfig.value
     if (!config) return false
-    return currentLevelProfit.value >= config.targetProfit &&
+
+    const baseComplete = currentLevelProfit.value >= config.targetProfit &&
            currentLevelSales.value >= config.targetSales &&
            shopReputation.value >= config.targetSatisfaction
+
+    return baseComplete && isMemberTargetsComplete.value
   })
+
+  const calculateLevelReward = (): LevelReward => {
+    const config = currentLevelConfig.value
+    const reward: LevelReward = {
+      baseReward: 0,
+      newMembersReward: 0,
+      returningVisitsReward: 0,
+      memberRatioReward: 0,
+      memberTargetsCompletedBonus: 0,
+      totalReward: 0,
+      reputationBonus: 0,
+      unlockedBonus: []
+    }
+
+    if (!config) return reward
+
+    reward.baseReward = Math.floor(currentLevelProfit.value * 0.2) + config.id * 200
+
+    const memberTargetRatio = currentLevelNewMembers.value / config.memberTargets.targetNewMembers
+    reward.newMembersReward = Math.floor(
+      Math.min(1, memberTargetRatio) * config.memberTargets.targetNewMembers * 50
+    )
+
+    const returningRatio = currentLevelReturningVisits.value / Math.max(1, config.memberTargets.targetReturningVisits)
+    reward.returningVisitsReward = Math.floor(
+      Math.min(1, returningRatio) * Math.max(1, config.memberTargets.targetReturningVisits) * 40
+    )
+
+    const actualMemberSalesRatio = currentLevelSales.value > 0
+      ? currentLevelMemberSales.value / currentLevelSales.value
+      : 0
+    const ratioProgress = Math.min(1, actualMemberSalesRatio / config.memberTargets.targetMemberSalesRatio)
+    reward.memberRatioReward = Math.floor(ratioProgress * 300)
+
+    if (isMemberTargetsComplete.value) {
+      reward.memberTargetsCompletedBonus = config.id * 500
+      reward.reputationBonus = 10 + config.id * 2
+      reward.unlockedBonus.push('会员专属成就')
+    }
+
+    if (members.value.some(m => m.level === 'Gold' || m.level === 'Platinum' || m.level === 'Diamond')) {
+      reward.unlockedBonus.push('黄金及以上会员达成')
+      reward.reputationBonus += 5
+    }
+    if (members.value.some(m => m.level === 'Platinum' || m.level === 'Diamond')) {
+      reward.unlockedBonus.push('铂金及以上会员达成')
+      reward.reputationBonus += 5
+    }
+    if (members.value.some(m => m.level === 'Diamond')) {
+      reward.unlockedBonus.push('传奇钻石会员')
+      reward.reputationBonus += 10
+    }
+
+    reward.totalReward = reward.baseReward +
+      reward.newMembersReward +
+      reward.returningVisitsReward +
+      reward.memberRatioReward +
+      reward.memberTargetsCompletedBonus
+
+    return reward
+  }
+
+  const grantLevelReward = () => {
+    const reward = calculateLevelReward()
+    lastLevelReward.value = reward
+
+    budget.value += reward.totalReward
+    shopReputation.value = Math.min(100, shopReputation.value + reward.reputationBonus)
+
+    return reward
+  }
 
   const initializeDisplaySlots = (count: number) => {
     const slots: DisplaySlot[] = []
@@ -189,6 +264,7 @@ export const useGameStore = defineStore('game', () => {
     currentLevelReturningVisits.value = 0
     currentLevelMemberSales.value = 0
     members.value = []
+    lastLevelReward.value = null
     initializeDisplaySlots(config.displaySlots)
     resetDailyStats()
   }
@@ -493,7 +569,10 @@ export const useGameStore = defineStore('game', () => {
           if (isLevelComplete.value) {
             if (!completedLevels.value.includes(currentLevel.value)) {
               completedLevels.value.push(currentLevel.value)
+              grantLevelReward()
             }
+          } else {
+            lastLevelReward.value = null
           }
         } else {
           currentDay.value++
@@ -581,6 +660,7 @@ export const useGameStore = defineStore('game', () => {
     dailyMemberSalesCount,
     dailyMemberRevenue,
     dailyGrowthPointsEarned,
+    lastLevelReward,
     currentLevelConfig,
     availableRecords,
     shopRecordsForPurchase,
@@ -613,6 +693,7 @@ export const useGameStore = defineStore('game', () => {
     getRecordById,
     getMemberBenefit,
     getNextLevelInfo,
-    calculateMemberDiscount
+    calculateMemberDiscount,
+    calculateLevelReward
   }
 })
