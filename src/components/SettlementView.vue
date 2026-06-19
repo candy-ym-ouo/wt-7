@@ -130,8 +130,6 @@ const backToMenu = () => {
         </div>
       </div>
 
-      <div v-if="todayStats && (todayStats.newMembers > 0 || todayStats.returningCustomers > 0 || gameStore.members.length > 0)" class="member-stats-card card">
-
       <div v-if="afternoonSlotStats || nightSlotStats" class="time-slot-settlement card">
         <h3 class="tss-title">🕐 时段营业数据</h3>
         <div class="tss-grid">

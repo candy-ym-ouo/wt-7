@@ -938,6 +938,7 @@ export const useGameStore = defineStore('game', () => {
     if (currentCustomer.value) {
       dailyServedCustomers.value += 1
       dailySatisfactionSum.value += 20
+      slotSatisfactionSum.value += 20
       shopReputation.value = Math.max(0, shopReputation.value - 2)
     }
     currentCustomerIndex.value++
