@@ -65,7 +65,8 @@ const rockLegends: AlbumEntry[] = [
     requiredMinRarity: 4,
     bonuses: [
       createBonus('special_customer', 0.1, '摇滚收藏家出现概率 +10%'),
-      createBonus('level_reward', 0.1, '关卡奖励 +10%')
+      createBonus('level_reward', 0.1, '关卡奖励 +10%'),
+      createBonus('record_unlock', 0.05, '稀有唱片出现概率 +5%')
     ],
     isActivated: false,
     activatedDate: null
@@ -83,7 +84,8 @@ const soulFunk: AlbumEntry[] = [
     requiredMinRarity: 3,
     bonuses: [
       createBonus('reputation', 5, '店铺声望 +5'),
-      createBonus('customer_budget', 0.08, '顾客预算 +8%')
+      createBonus('customer_budget', 0.08, '顾客预算 +8%'),
+      createBonus('record_unlock', 0.03, '稀有唱片出现概率 +3%')
     ],
     isActivated: false,
     activatedDate: null
@@ -101,7 +103,8 @@ const popIcons: AlbumEntry[] = [
     requiredMinRarity: 4,
     bonuses: [
       createBonus('reputation', 8, '店铺声望 +8'),
-      createBonus('level_reward', 0.12, '关卡奖励 +12%')
+      createBonus('level_reward', 0.12, '关卡奖励 +12%'),
+      createBonus('record_unlock', 0.08, '稀有唱片出现概率 +8%')
     ],
     isActivated: false,
     activatedDate: null
@@ -175,7 +178,8 @@ const genreComplete: AlbumEntry[] = [
       createBonus('reputation', 20, '店铺声望 +20'),
       createBonus('customer_budget', 0.15, '顾客预算 +15%'),
       createBonus('match_score', 8, '顾客匹配度 +8'),
-      createBonus('special_customer', 0.15, '特殊顾客出现概率 +15%')
+      createBonus('special_customer', 0.15, '特殊顾客出现概率 +15%'),
+      createBonus('record_unlock', 0.12, '稀有唱片出现概率 +12%')
     ],
     isActivated: false,
     activatedDate: null

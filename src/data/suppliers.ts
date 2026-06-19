@@ -204,7 +204,8 @@ export const generateSupplierInventory = (
   unlockedGenres: Genre[],
   performances: RecordPerformance[],
   excludeRecordIds: string[] = [],
-  count: number = 8
+  count: number = 8,
+  rarityBonus: number = 0
 ): SupplierInventoryItem[] => {
   const availableRecords = allRecords.filter(r => 
     unlockedGenres.includes(r.genre) && 
@@ -213,8 +214,11 @@ export const generateSupplierInventory = (
   
   const weightedRecords = availableRecords.map(record => {
     const rarityIndex = record.rarity - 1
-    const weight = supplier.rarityDistribution[rarityIndex] || 5
+    let weight = supplier.rarityDistribution[rarityIndex] || 5
     const genreBoost = supplier.genreFocus.includes(record.genre) ? 1.5 : 1
+    if (record.rarity >= 4 && rarityBonus > 0) {
+      weight = weight * (1 + rarityBonus)
+    }
     return { record, weight: weight * genreBoost }
   })
   

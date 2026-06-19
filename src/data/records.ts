@@ -347,8 +347,50 @@ export const getRecordById = (id: string): Record | undefined => {
   return allRecords.find(r => r.id === id)
 }
 
-export const getRandomRecords = (count: number, excludeIds: string[] = []): Record[] => {
+export const getRandomRecords = (count: number, excludeIds: string[] = [], rarityBonus: number = 0): Record[] => {
   const available = allRecords.filter(r => !excludeIds.includes(r.id))
-  const shuffled = [...available].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, count)
+  
+  if (rarityBonus <= 0) {
+    const shuffled = [...available].sort(() => Math.random() - 0.5)
+    return shuffled.slice(0, count)
+  }
+  
+  const weightedRecords = available.map(record => {
+    const rarityIndex = record.rarity - 1
+    const baseWeights = [40, 30, 20, 8, 2]
+    let weight = baseWeights[rarityIndex] || 5
+    if (record.rarity >= 4) {
+      weight = weight * (1 + rarityBonus)
+    }
+    return { record, weight }
+  })
+  
+  const totalWeight = weightedRecords.reduce((sum, item) => sum + item.weight, 0)
+  const selected: Record[] = []
+  const pool = [...weightedRecords]
+  
+  while (selected.length < count && pool.length > 0) {
+    let random = Math.random() * totalWeight
+    let found = false
+    
+    const currentTotal = pool.reduce((sum, item) => sum + item.weight, 0)
+    random = Math.random() * currentTotal
+    
+    for (let i = 0; i < pool.length; i++) {
+      random -= pool[i].weight
+      if (random <= 0) {
+        selected.push(pool[i].record)
+        pool.splice(i, 1)
+        found = true
+        break
+      }
+    }
+    
+    if (!found && pool.length > 0) {
+      selected.push(pool[0].record)
+      pool.splice(0, 1)
+    }
+  }
+  
+  return selected
 }

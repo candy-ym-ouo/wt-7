@@ -221,7 +221,7 @@ export const useGameStore = defineStore('game', () => {
     if (supplierInventory.value.length > 0) {
       return supplierInventory.value.map(item => item.record)
     }
-    return getRandomRecords(8, inventory.value.map(i => i.record.id))
+    return getRandomRecords(8, inventory.value.map(i => i.record.id), recordUnlockBonus.value)
   })
 
   const inventoryRiskScore = computed(() => {
@@ -544,7 +544,8 @@ export const useGameStore = defineStore('game', () => {
       unlockedGenres,
       recordPerformances.value,
       excludeIds,
-      8
+      8,
+      recordUnlockBonus.value
     )
   }
 
