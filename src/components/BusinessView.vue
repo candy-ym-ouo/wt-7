@@ -2,8 +2,9 @@
 import { useGameStore } from '@/stores/game'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import VinylRecord from './VinylRecord.vue'
-import type { Record } from '@/types'
+import type { Record, MemberLevel } from '@/types'
 import { calculateMatchScore } from '@/data/customers'
+import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -28,6 +29,42 @@ const customerPriceRangeText = computed(() => {
   return `¥${min} - ¥${max}`
 })
 
+const customerMemberInfo = computed(() => {
+  const customer = gameStore.currentCustomer
+  if (!customer || !customer.memberProfile) return null
+
+  const member = customer.memberProfile
+  const benefit = getMemberBenefit(member.level)
+  const nextLevel = getNextLevelInfo(member.level)
+  const progressToNext = nextLevel
+    ? Math.min(100, ((member.growthPoints - getMemberBenefit(member.level).minGrowthPoints) / (nextLevel.minGrowthPoints - getMemberBenefit(member.level).minGrowthPoints)) * 100)
+    : 100
+
+  return {
+    level: member.level as MemberLevel,
+    levelName: benefit.levelName,
+    icon: getLevelIcon(member.level),
+    color: getLevelColor(member.level),
+    growthPoints: member.growthPoints,
+    visitCount: member.visitCount,
+    purchaseCount: member.purchaseCount,
+    discount: benefit.discountRate,
+    totalSpent: member.totalSpent,
+    nextLevelName: nextLevel?.levelName,
+    progressToNext,
+    notes: member.notes
+  }
+})
+
+const isReturningBadge = computed(() => {
+  const customer = gameStore.currentCustomer
+  if (!customer) return null
+  if (customer.isReturningCustomer) {
+    return customer.memberProfile ? '会员回访' : '回头客'
+  }
+  return null
+})
+
 const openSellModal = (record: Record) => {
   selectedRecord.value = record
   customPrice.value = record.marketPrice
@@ -43,16 +80,16 @@ const closeSellModal = () => {
 
 const handleSell = () => {
   if (!selectedRecord.value) return
-  
+
   const result = gameStore.trySellToCustomer(selectedRecord.value.id, customPrice.value)
   message.value = result.message
   messageType.value = result.success ? 'success' : 'error'
-  
+
   if (result.success) {
     setTimeout(() => {
       closeSellModal()
       gameStore.nextCustomer()
-    }, 1500)
+    }, 2000)
   }
 }
 
@@ -118,14 +155,55 @@ onUnmounted(() => {
     <template v-if="gameStore.currentCustomer">
       <div class="customer-card card">
         <div class="customer-header">
-          <div class="customer-avatar">{{ gameStore.currentCustomer.avatar }}</div>
+          <div class="customer-avatar">
+            {{ gameStore.currentCustomer.avatar }}
+            <span v-if="customerMemberInfo" class="avatar-badge" :style="{ background: customerMemberInfo.color }">
+              {{ customerMemberInfo.icon }}
+            </span>
+          </div>
           <div class="customer-info">
-            <h3 class="customer-name">{{ gameStore.currentCustomer.name }}</h3>
+            <div class="customer-name-row">
+              <h3 class="customer-name">{{ gameStore.currentCustomer.name }}</h3>
+              <span v-if="isReturningBadge" class="returning-badge">
+                {{ isReturningBadge }}
+              </span>
+            </div>
             <p class="customer-budget">预算: ¥{{ gameStore.currentCustomer.budget }}</p>
+            <p v-if="customerMemberInfo" class="customer-member" :style="{ color: customerMemberInfo.color }">
+              {{ customerMemberInfo.icon }} {{ customerMemberInfo.levelName }} · 来店{{ customerMemberInfo.visitCount }}次
+            </p>
           </div>
           <div class="customer-index">
             {{ gameStore.currentCustomerIndex + 1 }}/{{ gameStore.customers.length }}
           </div>
+        </div>
+
+        <div v-if="customerMemberInfo" class="member-progress card">
+          <div class="mp-header">
+            <span class="mp-level" :style="{ color: customerMemberInfo.color }">
+              {{ customerMemberInfo.icon }} {{ customerMemberInfo.levelName }}
+            </span>
+            <span class="mp-points">{{ customerMemberInfo.growthPoints }} 成长值</span>
+          </div>
+          <div class="mp-bar">
+            <div 
+              class="mp-fill" 
+              :style="{ 
+                width: customerMemberInfo.progressToNext + '%',
+                background: `linear-gradient(90deg, ${customerMemberInfo.color} 0%, var(--accent-gold) 100%)`
+              }"
+            ></div>
+          </div>
+          <div class="mp-footer">
+            <span v-if="customerMemberInfo.discount > 0" class="mp-benefit">
+              专属折扣 {{ Math.round(customerMemberInfo.discount * 100) }}%
+            </span>
+            <span v-if="customerMemberInfo.nextLevelName" class="mp-next">
+              下一等级: {{ customerMemberInfo.nextLevelName }}
+            </span>
+            <span v-else class="mp-max">已达最高等级</span>
+          </div>
+          <p v-if="customerMemberInfo.notes" class="mp-notes">「{{ customerMemberInfo.notes }}」</p>
         </div>
 
         <div class="customer-preferences">
@@ -148,9 +226,12 @@ onUnmounted(() => {
         <div v-if="recommendations.length > 0 && recommendations[0]?.score >= 60" class="recommendation">
           <span class="rec-icon">💡</span>
           <span class="rec-text">
-            这位顾客可能喜欢 
+            这位{{ customerMemberInfo ? customerMemberInfo.levelName + '会员' : (gameStore.currentCustomer?.isReturningCustomer ? '回头客' : '新顾客') }}可能喜欢 
             <strong>{{ recommendations[0]?.item.record.title }}</strong>
             （匹配度 {{ Math.round(recommendations[0]?.score || 0) }}%）
+            <span v-if="customerMemberInfo && customerMemberInfo.discount > 0" class="discount-hint">
+              · 会员价可省 ¥{{ Math.round(recommendations[0]?.item.record.marketPrice * customerMemberInfo.discount) }}
+            </span>
           </span>
         </div>
       </div>
@@ -246,11 +327,18 @@ onUnmounted(() => {
           </div>
 
           <div class="modal-body">
-            <RecordCard 
-              :record="selectedRecord" 
+            <RecordCard
+              :record="selectedRecord"
               :show-price="true"
               :match-score="gameStore.currentCustomer ? calculateMatchScore(gameStore.currentCustomer, selectedRecord) : 0"
             />
+
+            <div v-if="customerMemberInfo" class="member-discount-info">
+              <span class="mdi-icon">{{ customerMemberInfo.icon }}</span>
+              <span class="mdi-text" :style="{ color: customerMemberInfo.color }">
+                {{ customerMemberInfo.levelName }}专属: 立减 {{ Math.round(customerMemberInfo.discount * 100) }}%
+              </span>
+            </div>
 
             <div class="price-editor">
               <span class="pe-label">出价</span>
@@ -269,6 +357,14 @@ onUnmounted(() => {
             <div class="price-hint">
               <span>建议售价: ¥{{ selectedRecord.marketPrice }}</span>
               <span>进价: ¥{{ selectedRecord.costPrice }}</span>
+            </div>
+
+            <div v-if="customerMemberInfo && customerMemberInfo.discount > 0" class="member-price-preview">
+              <span class="mpp-label">{{ customerMemberInfo.icon }} 会员实付</span>
+              <span class="mpp-value">
+                ¥{{ Math.floor(customPrice * (1 - customerMemberInfo.discount)) }}
+                <span class="mpp-save">省 ¥{{ Math.floor(customPrice * customerMemberInfo.discount) }}</span>
+              </span>
             </div>
 
             <div class="profit-preview">
@@ -397,10 +493,176 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   font-size: 28px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.avatar-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border: 2px solid var(--bg-card);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .customer-info {
   flex: 1;
+  min-width: 0;
+}
+
+.customer-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.returning-badge {
+  background: linear-gradient(135deg, rgba(72, 187, 120, 0.2) 0%, rgba(56, 178, 172, 0.2) 100%);
+  color: var(--success);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.customer-member {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.member-progress {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.08) 0%, rgba(233, 69, 96, 0.08) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.mp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.mp-level {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mp-points {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.mp-bar {
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.mp-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.mp-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+}
+
+.mp-benefit {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.mp-next {
+  color: var(--text-muted);
+}
+
+.mp-max {
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+.mp-notes {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(246, 224, 94, 0.2);
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.discount-hint {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.member-discount-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.1) 0%, rgba(233, 69, 96, 0.1) 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(246, 224, 94, 0.2);
+}
+
+.mdi-icon {
+  font-size: 16px;
+}
+
+.mdi-text {
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.member-price-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(72, 187, 120, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(72, 187, 120, 0.2);
+}
+
+.mpp-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.mpp-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.mpp-save {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--success);
+  opacity: 0.8;
+  margin-left: 6px;
 }
 
 .customer-name {

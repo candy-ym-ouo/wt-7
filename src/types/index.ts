@@ -1,5 +1,52 @@
 export type Genre = 'Jazz' | 'Rock' | 'Soul' | 'Funk' | 'Disco' | 'Classical' | 'Blues' | 'Pop' | 'Electronic' | 'Folk'
 
+export type MemberLevel = 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond'
+
+export interface MemberProfile {
+  id: string
+  name: string
+  avatar: string
+  level: MemberLevel
+  growthPoints: number
+  totalSpent: number
+  visitCount: number
+  purchaseCount: number
+  lastVisitDate: number
+  joinDate: number
+  favoriteGenres: Genre[]
+  priceRange: [number, number]
+  preferredRarity: number[]
+  preferenceStrength: number
+  isReturning: boolean
+  notes: string
+}
+
+export interface MemberBenefit {
+  level: MemberLevel
+  levelName: string
+  minGrowthPoints: number
+  discountRate: number
+  bonusGrowthRate: number
+  priorityBoost: number
+  priceRangeExpand: number
+  description: string
+}
+
+export interface MemberStats {
+  totalMembers: number
+  byLevel: { [key in MemberLevel]: number }
+  newMembersToday: number
+  returningCustomersToday: number
+  totalMemberSpent: number
+  avgMemberSatisfaction: number
+}
+
+export interface LevelMemberTarget {
+  targetNewMembers: number
+  targetReturningVisits: number
+  targetMemberSalesRatio: number
+}
+
 export interface Record {
   id: string
   title: string
@@ -42,6 +89,9 @@ export interface Customer {
   budget: number
   patience: number
   satisfaction: number
+  memberProfile: MemberProfile | null
+  isReturningCustomer: boolean
+  memberDiscount: number
 }
 
 export interface SaleRecord {
@@ -51,6 +101,10 @@ export interface SaleRecord {
   profit: number
   timestamp: number
   customerSatisfaction: number
+  memberId: string | null
+  memberLevel: MemberLevel | null
+  growthPointsEarned: number
+  isMemberPurchase: boolean
 }
 
 export interface DailyStats {
@@ -61,6 +115,11 @@ export interface DailyStats {
   salesCount: number
   customersServed: number
   avgSatisfaction: number
+  newMembers: number
+  returningCustomers: number
+  memberSalesCount: number
+  memberRevenue: number
+  totalGrowthPointsEarned: number
 }
 
 export interface LevelConfig {
@@ -75,6 +134,7 @@ export interface LevelConfig {
   displaySlots: number
   initialBudget: number
   days: number
+  memberTargets: LevelMemberTarget
 }
 
 export interface CollectionItem {
@@ -103,4 +163,8 @@ export interface GameState {
   shopReputation: number
   isPlaying: boolean
   currentPlayingRecord: Record | null
+  members: MemberProfile[]
+  currentLevelNewMembers: number
+  currentLevelReturningVisits: number
+  currentLevelMemberSales: number
 }

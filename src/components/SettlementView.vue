@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
 import { computed } from 'vue'
+import type { MemberLevel } from '@/types'
+import { memberBenefits, getLevelIcon, getLevelColor } from '@/data/members'
 
 const emit = defineEmits<{
   back: []
@@ -12,10 +14,25 @@ const todayStats = computed(() => {
   return gameStore.dailyStats[gameStore.dailyStats.length - 1]
 })
 
+const memberLevelDistribution = computed(() => {
+  const levels: MemberLevel[] = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond']
+  return levels.map(level => ({
+    level,
+    levelName: memberBenefits.find(b => b.level === level)?.levelName || level,
+    icon: getLevelIcon(level),
+    color: getLevelColor(level),
+    count: gameStore.memberStats.byLevel[level]
+  })).filter(item => item.count > 0)
+})
+
+const memberSalesRatio = computed(() => {
+  if (gameStore.currentLevelSales === 0) return 0
+  return Math.round((gameStore.currentLevelMemberSales / gameStore.currentLevelSales) * 100)
+})
+
 const continueAction = () => {
   if (gameStore.isLastDay) {
     if (gameStore.isLevelComplete) {
-      // 关卡完成，可以选择下一关或返回菜单
     }
   }
   gameStore.advancePhase()
@@ -69,6 +86,49 @@ const backToMenu = () => {
         </div>
       </div>
 
+      <div v-if="todayStats && (todayStats.newMembers > 0 || todayStats.returningCustomers > 0 || gameStore.members.length > 0)" class="member-stats-card card">
+        <h3 class="ms-title">👥 会员运营数据</h3>
+
+        <div class="member-stats-grid">
+          <div v-if="todayStats.newMembers > 0" class="mstat-card success">
+            <span class="mstat-icon">✨</span>
+            <span class="mstat-value">{{ todayStats.newMembers }}</span>
+            <span class="mstat-label">新增会员</span>
+          </div>
+          <div v-if="todayStats.returningCustomers > 0" class="mstat-card info">
+            <span class="mstat-icon">🔄</span>
+            <span class="mstat-value">{{ todayStats.returningCustomers }}</span>
+            <span class="mstat-label">回头客来访</span>
+          </div>
+          <div v-if="todayStats.memberSalesCount > 0" class="mstat-card gold">
+            <span class="mstat-icon">💳</span>
+            <span class="mstat-value">{{ todayStats.memberSalesCount }}</span>
+            <span class="mstat-label">会员订单</span>
+          </div>
+          <div v-if="todayStats.totalGrowthPointsEarned > 0" class="mstat-card purple">
+            <span class="mstat-icon">📈</span>
+            <span class="mstat-value">{{ todayStats.totalGrowthPointsEarned }}</span>
+            <span class="mstat-label">成长值产出</span>
+          </div>
+        </div>
+
+        <div v-if="memberLevelDistribution.length > 0" class="member-distribution">
+          <span class="md-label">会员等级分布</span>
+          <div class="md-list">
+            <div v-for="item in memberLevelDistribution" :key="item.level" class="md-item">
+              <span class="md-icon" :style="{ color: item.color }">{{ item.icon }}</span>
+              <span class="md-name">{{ item.levelName }}</span>
+              <span class="md-count">{{ item.count }}人</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="member-total">
+          <span>会员总数：</span>
+          <span class="member-total-count">{{ gameStore.members.length }} 人</span>
+        </div>
+      </div>
+
       <div class="level-progress-card card">
         <h3 class="lp-title">关卡进度</h3>
         
@@ -110,10 +170,59 @@ const backToMenu = () => {
             </span>
           </div>
           <div class="pi-bar">
-            <div 
-              class="pi-fill warning" 
+            <div
+              class="pi-fill warning"
               :style="{ width: Math.min(100, gameStore.levelProgress.satisfaction) + '%' }"
             ></div>
+          </div>
+        </div>
+
+        <div class="member-targets">
+          <h4 class="mt-title">🎯 会员目标</h4>
+
+          <div class="progress-item">
+            <div class="pi-header">
+              <span class="pi-label">新增会员数</span>
+              <span class="pi-value">
+                {{ gameStore.currentLevelNewMembers }} / {{ gameStore.currentLevelConfig?.memberTargets.targetNewMembers }}
+              </span>
+            </div>
+            <div class="pi-bar">
+              <div
+                class="pi-fill member"
+                :style="{ width: Math.min(100, gameStore.memberLevelProgress.newMembers) + '%' }"
+              ></div>
+            </div>
+          </div>
+
+          <div class="progress-item">
+            <div class="pi-header">
+              <span class="pi-label">回头客来访</span>
+              <span class="pi-value">
+                {{ gameStore.currentLevelReturningVisits }} / {{ gameStore.currentLevelConfig?.memberTargets.targetReturningVisits }}
+              </span>
+            </div>
+            <div class="pi-bar">
+              <div
+                class="pi-fill returning"
+                :style="{ width: Math.min(100, gameStore.memberLevelProgress.returningVisits) + '%' }"
+              ></div>
+            </div>
+          </div>
+
+          <div class="progress-item">
+            <div class="pi-header">
+              <span class="pi-label">会员销售占比</span>
+              <span class="pi-value">
+                {{ memberSalesRatio }}% / {{ Math.round((gameStore.currentLevelConfig?.memberTargets.targetMemberSalesRatio || 0) * 100) }}%
+              </span>
+            </div>
+            <div class="pi-bar">
+              <div
+                class="pi-fill ratio"
+                :style="{ width: Math.min(100, gameStore.memberLevelProgress.memberSalesRatio) + '%' }"
+              ></div>
+            </div>
           </div>
         </div>
       </div>
@@ -138,7 +247,7 @@ const backToMenu = () => {
 
       <div class="final-stats">
         <h3 class="fs-title">最终成绩</h3>
-        
+
         <div class="fs-grid">
           <div class="fs-item">
             <span class="fs-label">总利润</span>
@@ -155,6 +264,47 @@ const backToMenu = () => {
           <div class="fs-item">
             <span class="fs-label">店铺声望</span>
             <span class="fs-value">{{ gameStore.shopReputation }}</span>
+          </div>
+        </div>
+
+        <div v-if="gameStore.members.length > 0" class="member-summary card">
+          <h4 class="ms-header">🏆 会员运营成果</h4>
+          <div class="member-summary-grid">
+            <div class="ms-item">
+              <span class="ms-icon">👥</span>
+              <span class="ms-value">{{ gameStore.members.length }}</span>
+              <span class="ms-label">会员总数</span>
+            </div>
+            <div class="ms-item">
+              <span class="ms-icon">✨</span>
+              <span class="ms-value">{{ gameStore.currentLevelNewMembers }}</span>
+              <span class="ms-label">新增会员</span>
+            </div>
+            <div class="ms-item">
+              <span class="ms-icon">🔄</span>
+              <span class="ms-value">{{ gameStore.currentLevelReturningVisits }}</span>
+              <span class="ms-label">回头客来访</span>
+            </div>
+            <div class="ms-item">
+              <span class="ms-icon">💳</span>
+              <span class="ms-value">{{ memberSalesRatio }}%</span>
+              <span class="ms-label">会员销售占比</span>
+            </div>
+          </div>
+
+          <div v-if="memberLevelDistribution.length > 0" class="member-summary-dist">
+            <span class="msd-label">等级构成</span>
+            <div class="msd-bars">
+              <div
+                v-for="item in memberLevelDistribution"
+                :key="item.level"
+                class="msd-bar"
+                :style="{ background: `linear-gradient(90deg, ${item.color}40 0%, ${item.color}80 100%)` }"
+              >
+                <span class="msd-icon">{{ item.icon }}</span>
+                <span class="msd-count">{{ item.count }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -335,6 +485,236 @@ const backToMenu = () => {
 
 .pi-fill.warning {
   background: linear-gradient(90deg, var(--warning) 0%, var(--accent-orange) 100%);
+}
+
+.pi-fill.member {
+  background: linear-gradient(90deg, #f6e05e 0%, #ecc94b 100%);
+}
+
+.pi-fill.returning {
+  background: linear-gradient(90deg, #38b2ac 0%, #319795 100%);
+}
+
+.pi-fill.ratio {
+  background: linear-gradient(90deg, #9f7aea 0%, #805ad5 100%);
+}
+
+.member-targets {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.mt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.member-stats-card {
+  margin: 0 16px;
+}
+
+.ms-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.member-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.mstat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.mstat-card.success {
+  background: rgba(72, 187, 120, 0.1);
+  border: 1px solid rgba(72, 187, 120, 0.2);
+}
+
+.mstat-card.info {
+  background: rgba(56, 178, 172, 0.1);
+  border: 1px solid rgba(56, 178, 172, 0.2);
+}
+
+.mstat-card.gold {
+  background: rgba(246, 224, 94, 0.1);
+  border: 1px solid rgba(246, 224, 94, 0.2);
+}
+
+.mstat-card.purple {
+  background: rgba(159, 122, 234, 0.1);
+  border: 1px solid rgba(159, 122, 234, 0.2);
+}
+
+.mstat-icon {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.mstat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.mstat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.member-distribution {
+  margin-bottom: 12px;
+}
+
+.md-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.md-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.md-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  font-size: 11px;
+}
+
+.md-icon {
+  font-size: 12px;
+}
+
+.md-name {
+  color: var(--text-secondary);
+}
+
+.md-count {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.member-total {
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.member-total-count {
+  font-weight: 700;
+  color: var(--accent-gold);
+  font-size: 14px;
+}
+
+.member-summary {
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.ms-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.member-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ms-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  background: linear-gradient(135deg, rgba(233, 69, 96, 0.08) 0%, rgba(243, 156, 18, 0.08) 100%);
+  border-radius: 10px;
+  border: 1px solid rgba(246, 224, 94, 0.15);
+}
+
+.ms-icon {
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+.ms-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  line-height: 1.2;
+}
+
+.ms-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.member-summary-dist {
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.msd-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.msd-bars {
+  display: flex;
+  gap: 6px;
+}
+
+.msd-bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  border-radius: 8px;
+  min-height: 50px;
+  justify-content: center;
+}
+
+.msd-icon {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.msd-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .action-bar {

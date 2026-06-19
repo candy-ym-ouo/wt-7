@@ -1,12 +1,22 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { 
-  GamePhase, Record, InventoryItem, DisplaySlot, 
-  Customer, SaleRecord, DailyStats, CollectionItem 
+import type {
+  GamePhase, Record, InventoryItem, DisplaySlot,
+  Customer, SaleRecord, DailyStats, CollectionItem,
+  MemberProfile, MemberLevel, MemberStats
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
-import { generateDailyCustomers, calculateMatchScore } from '@/data/customers'
+import { generateDailyCustomers, calculateMatchScore, createMemberProfile } from '@/data/customers'
+import {
+  updateMemberAfterPurchase,
+  calculateGrowthPoints,
+  calculateMemberDiscount,
+  getMemberBenefit,
+  getNextLevelInfo,
+  shouldCustomerBecomeMember,
+  generateMemberNoteIdeas
+} from '@/data/members'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -32,6 +42,17 @@ export const useGameStore = defineStore('game', () => {
   const dailyServedCustomers = ref(0)
   const dailySatisfactionSum = ref(0)
   const currentCustomerIndex = ref(0)
+
+  const members = ref<MemberProfile[]>([])
+  const currentLevelNewMembers = ref(0)
+  const currentLevelReturningVisits = ref(0)
+  const currentLevelMemberSales = ref(0)
+
+  const dailyNewMembers = ref(0)
+  const dailyReturningCustomers = ref(0)
+  const dailyMemberSalesCount = ref(0)
+  const dailyMemberRevenue = ref(0)
+  const dailyGrowthPointsEarned = ref(0)
 
   const currentLevelConfig = computed(() => getLevelById(currentLevel.value))
   const availableRecords = computed(() => {
@@ -66,6 +87,59 @@ export const useGameStore = defineStore('game', () => {
         return false
     }
   })
+
+  const memberStats = computed<MemberStats>(() => {
+    const byLevel: { [key in MemberLevel]: number } = {
+      Bronze: 0, Silver: 0, Gold: 0, Platinum: 0, Diamond: 0
+    }
+    let totalMemberSpent = 0
+    let totalSatisfaction = 0
+    let memberSaleCount = 0
+
+    members.value.forEach(m => {
+      byLevel[m.level]++
+      totalMemberSpent += m.totalSpent
+    })
+
+    salesHistory.value.forEach(s => {
+      if (s.isMemberPurchase) {
+        totalSatisfaction += s.customerSatisfaction
+        memberSaleCount++
+      }
+    })
+
+    return {
+      totalMembers: members.value.length,
+      byLevel,
+      newMembersToday: dailyNewMembers.value,
+      returningCustomersToday: dailyReturningCustomers.value,
+      totalMemberSpent,
+      avgMemberSatisfaction: memberSaleCount > 0 ? totalSatisfaction / memberSaleCount : 0
+    }
+  })
+
+  const memberLevelProgress = computed(() => {
+    const config = currentLevelConfig.value
+    if (!config) return { newMembers: 0, returningVisits: 0, memberSalesRatio: 0 }
+
+    const memberSalesRatio = currentLevelSales.value > 0
+      ? currentLevelMemberSales.value / currentLevelSales.value
+      : 0
+
+    return {
+      newMembers: Math.min(100, (currentLevelNewMembers.value / config.memberTargets.targetNewMembers) * 100),
+      returningVisits: Math.min(100, (currentLevelReturningVisits.value / Math.max(1, config.memberTargets.targetReturningVisits)) * 100),
+      memberSalesRatio: Math.min(100, (memberSalesRatio / config.memberTargets.targetMemberSalesRatio) * 100)
+    }
+  })
+
+  const isMemberTargetsComplete = computed(() => {
+    const progress = memberLevelProgress.value
+    return progress.newMembers >= 100 &&
+           progress.returningVisits >= 100 &&
+           progress.memberSalesRatio >= 100
+  })
+
   const levelProgress = computed(() => {
     const config = currentLevelConfig.value
     if (!config) return { profit: 0, sales: 0, satisfaction: 0 }
@@ -111,6 +185,10 @@ export const useGameStore = defineStore('game', () => {
     currentLevelProfit.value = 0
     currentLevelSales.value = 0
     currentCustomerIndex.value = 0
+    currentLevelNewMembers.value = 0
+    currentLevelReturningVisits.value = 0
+    currentLevelMemberSales.value = 0
+    members.value = []
     initializeDisplaySlots(config.displaySlots)
     resetDailyStats()
   }
@@ -121,6 +199,11 @@ export const useGameStore = defineStore('game', () => {
     dailySalesCount.value = 0
     dailyServedCustomers.value = 0
     dailySatisfactionSum.value = 0
+    dailyNewMembers.value = 0
+    dailyReturningCustomers.value = 0
+    dailyMemberSalesCount.value = 0
+    dailyMemberRevenue.value = 0
+    dailyGrowthPointsEarned.value = 0
   }
 
   const purchaseRecord = (record: Record, quantity: number = 1) => {
@@ -146,7 +229,7 @@ export const useGameStore = defineStore('game', () => {
   const placeToDisplay = (inventoryId: string, slotId: number) => {
     const slot = displaySlots.value.find(s => s.id === slotId)
     const invItem = inventory.value.find(i => i.record.id === inventoryId)
-    
+
     if (!slot || !invItem || invItem.quantity <= 0) return false
     if (slot.inventoryId) {
       removeFromDisplay(slotId)
@@ -175,7 +258,12 @@ export const useGameStore = defineStore('game', () => {
       currentLevelConfig.value.maxCustomers,
       5 + Math.floor(Math.random() * 4)
     )
-    customers.value = generateDailyCustomers(customerCount, currentDay.value)
+    const result = generateDailyCustomers(customerCount, currentDay.value, members.value)
+    customers.value = result.customers
+
+    dailyReturningCustomers.value = customers.value.filter(c => c.isReturningCustomer).length
+    currentLevelReturningVisits.value += dailyReturningCustomers.value
+
     currentCustomerIndex.value = 0
     phase.value = 'business'
   }
@@ -204,6 +292,31 @@ export const useGameStore = defineStore('game', () => {
     return scored
   }
 
+  const findOrCreateMember = (customer: Customer, salePrice: number, satisfaction: number): MemberProfile | null => {
+    if (customer.memberProfile) {
+      return customer.memberProfile
+    }
+
+    const existingMember = members.value.find(m => m.name === customer.name && m.avatar === customer.avatar)
+    if (existingMember) {
+      return existingMember
+    }
+
+    const memberVisits = salesHistory.value.filter(s => {
+      const cust = customers.value.find(c => c.id === s.customerId)
+      return cust && cust.name === customer.name
+    }).length
+
+    if (shouldCustomerBecomeMember(satisfaction, memberVisits)) {
+      const newMember = createMemberProfile(customer, salePrice)
+      newMember.notes = generateMemberNoteIdeas(newMember.level, customer.preference.favoriteGenres)
+      newMember.purchaseCount = 1
+      return newMember
+    }
+
+    return null
+  }
+
   const trySellToCustomer = (inventoryId: string, customPrice?: number) => {
     const customer = currentCustomer.value
     if (!customer) return { success: false, message: '没有顾客' }
@@ -213,7 +326,12 @@ export const useGameStore = defineStore('game', () => {
     if (!slot || !invItem) return { success: false, message: '唱片不存在' }
 
     const record = invItem.record
-    const salePrice = customPrice || record.marketPrice
+    let salePrice = customPrice || record.marketPrice
+
+    if (customer.memberDiscount > 0) {
+      salePrice = Math.floor(salePrice * (1 - customer.memberDiscount))
+    }
+
     const score = calculateMatchScore(customer, record)
     const finalScore = currentPlayingRecord.value?.id === record.id ? score + 15 : score
 
@@ -227,14 +345,17 @@ export const useGameStore = defineStore('game', () => {
     if (salePrice < record.marketPrice * 0.7) {
       buyChance *= 1.2
     }
+    if (customer.isReturningCustomer) {
+      buyChance *= 1.15
+    }
 
     const success = Math.random() < buyChance
 
     if (success) {
       const profit = salePrice - record.costPrice
-      const satisfaction = Math.max(30, Math.min(100, 
-        50 + finalScore * 0.5 - (salePrice > record.marketPrice ? 20 : 0)
-      ))
+      const baseSatisfaction = 50 + finalScore * 0.5 - (salePrice > record.marketPrice ? 20 : 0)
+      const memberBonus = customer.isReturningCustomer ? 5 : 0
+      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus))
 
       budget.value += salePrice
       dailyRevenue.value += salePrice
@@ -245,13 +366,50 @@ export const useGameStore = defineStore('game', () => {
       currentLevelSales.value += 1
       totalProfit.value += profit
 
+      const memberProfile = customer.memberProfile || findOrCreateMember(customer, salePrice, satisfaction)
+      let growthPointsEarned = 0
+      let isMemberPurchase = false
+
+      if (memberProfile) {
+        const updatedMember = updateMemberAfterPurchase(memberProfile, salePrice, satisfaction)
+        const memberIndex = members.value.findIndex(m => m.id === updatedMember.id)
+        if (memberIndex >= 0) {
+          const wasNewLevel = members.value[memberIndex].level !== updatedMember.level
+          members.value[memberIndex] = updatedMember
+          if (wasNewLevel) {
+            shopReputation.value = Math.min(100, shopReputation.value + 2)
+          }
+        } else {
+          members.value.push(updatedMember)
+          dailyNewMembers.value += 1
+          currentLevelNewMembers.value += 1
+          shopReputation.value = Math.min(100, shopReputation.value + 3)
+        }
+
+        growthPointsEarned = calculateGrowthPoints(
+          salePrice,
+          satisfaction,
+          memberProfile.level,
+          customer.isReturningCustomer
+        )
+        isMemberPurchase = true
+        dailyMemberSalesCount.value += 1
+        dailyMemberRevenue.value += salePrice
+        dailyGrowthPointsEarned.value += growthPointsEarned
+        currentLevelMemberSales.value += 1
+      }
+
       salesHistory.value.push({
         recordId: record.id,
         customerId: customer.id,
         salePrice,
         profit,
         timestamp: Date.now(),
-        customerSatisfaction: satisfaction
+        customerSatisfaction: satisfaction,
+        memberId: memberProfile?.id || null,
+        memberLevel: memberProfile?.level || null,
+        growthPointsEarned,
+        isMemberPurchase
       })
 
       slot.inventoryId = null
@@ -262,19 +420,22 @@ export const useGameStore = defineStore('game', () => {
 
       shopReputation.value = Math.min(100, shopReputation.value + (satisfaction > 60 ? 1 : -1))
 
-      return { 
-        success: true, 
-        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！`,
+      return {
+        success: true,
+        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}`,
         satisfaction,
-        profit
+        profit,
+        growthPoints: growthPointsEarned,
+        isMemberPurchase,
+        memberLevel: memberProfile?.level || null
       }
     } else {
       dailyServedCustomers.value += 1
       dailySatisfactionSum.value += 30
       shopReputation.value = Math.max(0, shopReputation.value - 1)
-      return { 
-        success: false, 
-        message: `${customer.name} 考虑了一下，还是没有买...` 
+      return {
+        success: false,
+        message: `${customer.name} 考虑了一下，还是没有买...`
       }
     }
   }
@@ -293,8 +454,8 @@ export const useGameStore = defineStore('game', () => {
   }
 
   const endDay = () => {
-    const avgSatisfaction = dailyServedCustomers.value > 0 
-      ? dailySatisfactionSum.value / dailyServedCustomers.value 
+    const avgSatisfaction = dailyServedCustomers.value > 0
+      ? dailySatisfactionSum.value / dailyServedCustomers.value
       : 50
 
     const stats: DailyStats = {
@@ -304,7 +465,12 @@ export const useGameStore = defineStore('game', () => {
       profit: dailyRevenue.value - dailyCost.value,
       salesCount: dailySalesCount.value,
       customersServed: dailyServedCustomers.value,
-      avgSatisfaction
+      avgSatisfaction,
+      newMembers: dailyNewMembers.value,
+      returningCustomers: dailyReturningCustomers.value,
+      memberSalesCount: dailyMemberSalesCount.value,
+      memberRevenue: dailyMemberRevenue.value,
+      totalGrowthPointsEarned: dailyGrowthPointsEarned.value
     }
     dailyStats.value.push(stats)
 
@@ -341,7 +507,7 @@ export const useGameStore = defineStore('game', () => {
 
   const addToCollection = (record: Record, purchasePrice: number) => {
     if (collection.value.some(c => c.record.id === record.id)) return
-    
+
     collection.value.push({
       record,
       acquiredDate: Date.now(),
@@ -362,6 +528,13 @@ export const useGameStore = defineStore('game', () => {
     const item = collection.value.find(c => c.record.id === recordId)
     if (item) {
       item.notes = notes
+    }
+  }
+
+  const updateMemberNotes = (memberId: string, notes: string) => {
+    const member = members.value.find(m => m.id === memberId)
+    if (member) {
+      member.notes = notes
     }
   }
 
@@ -399,6 +572,15 @@ export const useGameStore = defineStore('game', () => {
     dailyCost,
     dailySalesCount,
     dailyServedCustomers,
+    members,
+    currentLevelNewMembers,
+    currentLevelReturningVisits,
+    currentLevelMemberSales,
+    dailyNewMembers,
+    dailyReturningCustomers,
+    dailyMemberSalesCount,
+    dailyMemberRevenue,
+    dailyGrowthPointsEarned,
     currentLevelConfig,
     availableRecords,
     shopRecordsForPurchase,
@@ -408,6 +590,9 @@ export const useGameStore = defineStore('game', () => {
     canAdvancePhase,
     levelProgress,
     isLevelComplete,
+    memberStats,
+    memberLevelProgress,
+    isMemberTargetsComplete,
     startLevel,
     purchaseRecord,
     placeToDisplay,
@@ -422,8 +607,12 @@ export const useGameStore = defineStore('game', () => {
     addToCollection,
     toggleFavorite,
     updateCollectionNotes,
+    updateMemberNotes,
     goToNextLevel,
     restartLevel,
-    getRecordById
+    getRecordById,
+    getMemberBenefit,
+    getNextLevelInfo,
+    calculateMemberDiscount
   }
 })

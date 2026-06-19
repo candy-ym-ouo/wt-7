@@ -1,4 +1,10 @@
-import type { Customer, Genre } from '@/types'
+import type { Customer, Genre, MemberProfile } from '@/types'
+import {
+  createMemberProfile,
+  updateMemberOnVisit,
+  calculateMemberDiscount,
+  getMemberBenefit
+} from './members'
 
 const customerNames = [
   '老爵士王', '摇滚青年', '灵魂歌者', '放克达人', '迪斯科女王',
@@ -12,7 +18,7 @@ const avatars = ['👨‍🎤', '👩‍🎨', '👴', '👵', '🧑', '👨‍�
 const genreBundles: { genres: Genre[], name: string }[] = [
   { genres: ['Jazz', 'Blues'], name: '爵士布鲁斯迷' },
   { genres: ['Rock', 'Funk'], name: '摇滚放克党' },
-  { genres: ['Soul', 'R&B' as Genre, 'Pop'], name: '灵魂流行派' },
+  { genres: ['Soul', 'Pop'], name: '灵魂流行派' },
   { genres: ['Disco', 'Electronic'], name: '电子跳舞族' },
   { genres: ['Classical', 'Folk'], name: '古典民谣党' },
   { genres: ['Jazz', 'Classical'], name: '高雅音乐派' },
@@ -48,33 +54,103 @@ const generatePreference = () => {
   }
 }
 
-export const generateCustomer = (id: string): Customer => {
-  const nameIndex = Math.floor(Math.random() * customerNames.length)
-  const avatarIndex = Math.floor(Math.random() * avatars.length)
-  const preference = generatePreference()
-  const baseBudget = preference.priceRange[1] * (1.5 + Math.random())
-  const patience = 30 + Math.floor(Math.random() * 40)
+export const generateCustomer = (
+  id: string,
+  memberProfile: MemberProfile | null = null
+): Customer => {
+  let preference
+  let name
+  let avatar
+  let budget
+  let patience
+  let memberDiscount = 0
 
-  return {
-    id,
-    name: customerNames[nameIndex],
-    avatar: avatars[avatarIndex],
-    preference,
-    budget: Math.floor(baseBudget),
-    patience,
-    satisfaction: 50
+  if (memberProfile) {
+    const updatedMember = updateMemberOnVisit(memberProfile)
+    preference = {
+      favoriteGenres: updatedMember.favoriteGenres,
+      priceRange: updatedMember.priceRange,
+      preferredRarity: updatedMember.preferredRarity,
+      preferenceStrength: updatedMember.preferenceStrength
+    }
+    name = updatedMember.name
+    avatar = updatedMember.avatar
+    const baseBudget = preference.priceRange[1] * (1.8 + Math.random() * 0.8)
+    budget = Math.floor(baseBudget * (1 + updatedMember.visitCount * 0.03))
+    patience = 40 + Math.floor(Math.random() * 40) + updatedMember.visitCount
+    memberDiscount = calculateMemberDiscount(updatedMember.level)
+
+    return {
+      id,
+      name,
+      avatar,
+      preference,
+      budget,
+      patience,
+      satisfaction: 50 + Math.floor(updatedMember.visitCount * 2),
+      memberProfile: updatedMember,
+      isReturningCustomer: true,
+      memberDiscount
+    }
+  } else {
+    const nameIndex = Math.floor(Math.random() * customerNames.length)
+    const avatarIndex = Math.floor(Math.random() * avatars.length)
+    preference = generatePreference()
+    name = customerNames[nameIndex]
+    avatar = avatars[avatarIndex]
+    const baseBudget = preference.priceRange[1] * (1.5 + Math.random())
+    budget = Math.floor(baseBudget)
+    patience = 30 + Math.floor(Math.random() * 40)
+
+    return {
+      id,
+      name,
+      avatar,
+      preference,
+      budget,
+      patience,
+      satisfaction: 50,
+      memberProfile: null,
+      isReturningCustomer: false,
+      memberDiscount: 0
+    }
   }
 }
 
-export const generateDailyCustomers = (count: number, day: number): Customer[] => {
+export const generateDailyCustomers = (
+  count: number,
+  day: number,
+  existingMembers: MemberProfile[] = []
+): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
-  for (let i = 0; i < count; i++) {
-    const customer = generateCustomer(`cust-${day}-${i}-${Date.now()}`)
+  const newMemberProfiles: MemberProfile[] = []
+
+  const returningMemberCount = Math.min(
+    existingMembers.length,
+    Math.floor(count * (0.1 + day * 0.05))
+  )
+  const shuffledMembers = [...existingMembers].sort(() => Math.random() - 0.5)
+  const selectedReturningMembers = shuffledMembers.slice(0, returningMemberCount)
+
+  for (let i = 0; i < selectedReturningMembers.length; i++) {
+    const member = selectedReturningMembers[i]
+    const customer = generateCustomer(`cust-${day}-return-${i}-${Date.now()}`, member)
+    customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
+    customers.push(customer)
+  }
+
+  const newCustomerCount = count - selectedReturningMembers.length
+  for (let i = 0; i < newCustomerCount; i++) {
+    const customer = generateCustomer(`cust-${day}-new-${i}-${Date.now()}`)
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customer.patience = Math.floor(customer.patience * (1 - day * 0.02))
     customers.push(customer)
   }
-  return customers
+
+  return {
+    customers: customers.sort(() => Math.random() - 0.5),
+    newMembers: newMemberProfiles
+  }
 }
 
 export const calculateMatchScore = (customer: Customer, record: any): number => {
@@ -84,7 +160,7 @@ export const calculateMatchScore = (customer: Customer, record: any): number => 
     score += 30 * customer.preference.preferenceStrength
   }
 
-  if (record.marketPrice >= customer.preference.priceRange[0] && 
+  if (record.marketPrice >= customer.preference.priceRange[0] &&
       record.marketPrice <= customer.preference.priceRange[1]) {
     score += 25
   } else if (record.marketPrice < customer.preference.priceRange[0]) {
@@ -110,5 +186,13 @@ export const calculateMatchScore = (customer: Customer, record: any): number => 
     score += 10
   }
 
+  if (customer.memberProfile) {
+    const benefit = getMemberBenefit(customer.memberProfile.level)
+    score += benefit.priorityBoost
+    score += Math.min(10, customer.memberProfile.visitCount * 0.5)
+  }
+
   return Math.max(0, Math.min(100, score))
 }
+
+export { createMemberProfile }

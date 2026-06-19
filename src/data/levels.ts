@@ -12,7 +12,12 @@ export const levels: LevelConfig[] = [
     unlockGenres: ['Jazz', 'Rock', 'Pop'],
     displaySlots: 4,
     initialBudget: 2000,
-    days: 3
+    days: 3,
+    memberTargets: {
+      targetNewMembers: 2,
+      targetReturningVisits: 0,
+      targetMemberSalesRatio: 0.2
+    }
   },
   {
     id: 2,
@@ -25,7 +30,12 @@ export const levels: LevelConfig[] = [
     unlockGenres: ['Jazz', 'Rock', 'Pop', 'Soul', 'Funk'],
     displaySlots: 6,
     initialBudget: 3500,
-    days: 4
+    days: 4,
+    memberTargets: {
+      targetNewMembers: 5,
+      targetReturningVisits: 3,
+      targetMemberSalesRatio: 0.35
+    }
   },
   {
     id: 3,
@@ -38,7 +48,12 @@ export const levels: LevelConfig[] = [
     unlockGenres: ['Jazz', 'Rock', 'Pop', 'Soul', 'Funk', 'Disco', 'Blues'],
     displaySlots: 8,
     initialBudget: 5000,
-    days: 5
+    days: 5,
+    memberTargets: {
+      targetNewMembers: 8,
+      targetReturningVisits: 8,
+      targetMemberSalesRatio: 0.45
+    }
   },
   {
     id: 4,
@@ -51,7 +66,12 @@ export const levels: LevelConfig[] = [
     unlockGenres: ['Jazz', 'Rock', 'Pop', 'Soul', 'Funk', 'Disco', 'Blues', 'Classical', 'Folk'],
     displaySlots: 10,
     initialBudget: 7500,
-    days: 6
+    days: 6,
+    memberTargets: {
+      targetNewMembers: 12,
+      targetReturningVisits: 15,
+      targetMemberSalesRatio: 0.55
+    }
   },
   {
     id: 5,
@@ -64,7 +84,12 @@ export const levels: LevelConfig[] = [
     unlockGenres: ['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk'],
     displaySlots: 12,
     initialBudget: 10000,
-    days: 7
+    days: 7,
+    memberTargets: {
+      targetNewMembers: 18,
+      targetReturningVisits: 25,
+      targetMemberSalesRatio: 0.65
+    }
   }
 ]
 
