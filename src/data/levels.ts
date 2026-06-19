@@ -1,0 +1,87 @@
+import type { LevelConfig, Genre } from '@/types'
+
+export const levels: LevelConfig[] = [
+  {
+    id: 1,
+    name: '街角小店',
+    description: '你刚刚开了一家小小的黑胶唱片店，从最基础的品类开始吧！',
+    targetProfit: 800,
+    targetSales: 5,
+    targetSatisfaction: 60,
+    maxCustomers: 8,
+    unlockGenres: ['Jazz', 'Rock', 'Pop'],
+    displaySlots: 4,
+    initialBudget: 2000,
+    days: 3
+  },
+  {
+    id: 2,
+    name: '渐入佳境',
+    description: '你的小店开始有了一些回头客，试试扩展更多品类吧！',
+    targetProfit: 2000,
+    targetSales: 12,
+    targetSatisfaction: 65,
+    maxCustomers: 10,
+    unlockGenres: ['Jazz', 'Rock', 'Pop', 'Soul', 'Funk'],
+    displaySlots: 6,
+    initialBudget: 3500,
+    days: 4
+  },
+  {
+    id: 3,
+    name: '社区名店',
+    description: '你已经是社区里小有名气的唱片店主了，顾客的要求也越来越高。',
+    targetProfit: 4000,
+    targetSales: 20,
+    targetSatisfaction: 70,
+    maxCustomers: 12,
+    unlockGenres: ['Jazz', 'Rock', 'Pop', 'Soul', 'Funk', 'Disco', 'Blues'],
+    displaySlots: 8,
+    initialBudget: 5000,
+    days: 5
+  },
+  {
+    id: 4,
+    name: '城市地标',
+    description: '你的唱片店已经成为城市的文化地标，收藏家们慕名而来。',
+    targetProfit: 7000,
+    targetSales: 30,
+    targetSatisfaction: 75,
+    maxCustomers: 15,
+    unlockGenres: ['Jazz', 'Rock', 'Pop', 'Soul', 'Funk', 'Disco', 'Blues', 'Classical', 'Folk'],
+    displaySlots: 10,
+    initialBudget: 7500,
+    days: 6
+  },
+  {
+    id: 5,
+    name: '传奇老店',
+    description: '恭喜！你的黑胶唱片店已经成为传奇，音乐爱好者的朝圣之地。',
+    targetProfit: 12000,
+    targetSales: 45,
+    targetSatisfaction: 80,
+    maxCustomers: 18,
+    unlockGenres: ['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk'],
+    displaySlots: 12,
+    initialBudget: 10000,
+    days: 7
+  }
+]
+
+export const getLevelById = (id: number): LevelConfig | undefined => {
+  return levels.find(l => l.id === id)
+}
+
+export const getNextLevel = (currentId: number): LevelConfig | undefined => {
+  return levels.find(l => l.id === currentId + 1)
+}
+
+export const isLevelUnlocked = (levelId: number, completedLevels: number[]): boolean => {
+  if (levelId === 1) return true
+  return completedLevels.includes(levelId - 1)
+}
+
+export const getUnlockedGenres = (currentLevel: number): Genre[] => {
+  const level = levels.find(l => l.id === currentLevel)
+  return level?.unlockGenres || ['Jazz', 'Rock', 'Pop']
+}

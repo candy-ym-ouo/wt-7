@@ -1,0 +1,225 @@
+<script setup lang="ts">
+import { useGameStore } from '@/stores/game'
+import { computed } from 'vue'
+
+const emit = defineEmits<{
+  back: []
+  collection: []
+}>()
+
+const gameStore = useGameStore()
+
+const phaseName = computed(() => {
+  const names: Record<string, string> = {
+    purchase: '进货',
+    display: '陈列',
+    business: '营业',
+    settlement: '结算'
+  }
+  return names[gameStore.phase] || ''
+})
+
+const phaseDescription = computed(() => {
+  const descriptions: Record<string, string> = {
+    purchase: '从供应商处采购唱片',
+    display: '将唱片摆上货架',
+    business: '接待顾客销售唱片',
+    settlement: '今日营业结算'
+  }
+  return descriptions[gameStore.phase] || ''
+})
+</script>
+
+<template>
+  <header class="game-header">
+    <div class="header-top">
+      <button class="icon-btn" @click="emit('back')">
+        ←
+      </button>
+      
+      <div class="level-info">
+        <div class="level-name">{{ gameStore.currentLevelConfig?.name || '第 ' + gameStore.currentLevel + ' 关' }}</div>
+        <div class="day-info">第 {{ gameStore.currentDay }} / {{ gameStore.currentLevelConfig?.days }} 天</div>
+      </div>
+
+      <button class="icon-btn" @click="emit('collection')">
+        📚
+      </button>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-item">
+        <span class="stat-icon">💰</span>
+        <span class="stat-value">¥{{ gameStore.budget }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-icon">📈</span>
+        <span class="stat-value">+¥{{ gameStore.currentLevelProfit }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-icon">⭐</span>
+        <span class="stat-value">{{ gameStore.shopReputation }}</span>
+      </div>
+    </div>
+
+    <div class="phase-indicator">
+      <div class="phase-name">{{ phaseName }}</div>
+      <div class="phase-desc">{{ phaseDescription }}</div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-row">
+        <span class="progress-label">利润目标</span>
+        <span class="progress-value">{{ Math.round(gameStore.levelProgress.profit) }}%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: gameStore.levelProgress.profit + '%' }"></div>
+      </div>
+      
+      <div class="progress-row">
+        <span class="progress-label">销售数量</span>
+        <span class="progress-value">{{ gameStore.currentLevelSales }} / {{ gameStore.currentLevelConfig?.targetSales }}</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill success" :style="{ width: gameStore.levelProgress.sales + '%' }"></div>
+      </div>
+    </div>
+  </header>
+</template>
+
+<style scoped>
+.game-header {
+  background: var(--bg-card);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:hover {
+  background: var(--bg-primary);
+}
+
+.level-info {
+  text-align: center;
+  flex: 1;
+}
+
+.level-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.day-info {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat-item {
+  flex: 1;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-icon {
+  font-size: 14px;
+}
+
+.stat-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.phase-indicator {
+  background: linear-gradient(135deg, rgba(233, 69, 96, 0.2) 0%, rgba(243, 156, 18, 0.2) 100%);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.phase-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-gold);
+  margin-bottom: 2px;
+}
+
+.phase-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.progress-value {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.progress-bar {
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-orange) 100%);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-fill.success {
+  background: linear-gradient(90deg, var(--success) 0%, #38b2ac 100%);
+}
+</style>
