@@ -32,6 +32,22 @@ const memberSalesRatio = computed(() => {
 })
 
 const currentWordOfMouth = computed(() => getWordOfMouthTier(gameStore.shopReputation))
+const difficultyClass = computed(() => {
+  const scale = gameStore.difficultyScale
+  if (scale <= 0.85) return 'easy'
+  if (scale <= 0.95) return 'normal'
+  if (scale <= 1.05) return 'normal'
+  if (scale <= 1.15) return 'hard'
+  return 'extreme'
+})
+const difficultyLabel = computed(() => {
+  const scale = gameStore.difficultyScale
+  if (scale <= 0.85) return '新手友好'
+  if (scale <= 0.95) return '略低于标准'
+  if (scale <= 1.05) return '标准难度'
+  if (scale <= 1.15) return '进阶挑战'
+  return '传奇难度'
+})
 const nextWordOfMouth = computed(() => {
   const tiers = [
     { min: 0, name: '默默无闻' },
@@ -193,7 +209,15 @@ const backToMenu = () => {
 
       <div class="level-progress-card card">
         <h3 class="lp-title">关卡进度</h3>
-        
+        <div class="difficulty-badge" :class="difficultyClass">
+          <span class="db-icon">{{ gameStore.wordOfMouthConfig.icon }}</span>
+          <span class="db-text">难度 {{ gameStore.difficultyScale.toFixed(2) }}× · {{ difficultyLabel }}</span>
+        </div>
+        <p class="difficulty-hint">
+          目标随店铺口碑动态变化 · 
+          <span class="base-target">基准目标 ¥{{ gameStore.baseLevelConfig?.targetProfit }}</span>
+        </p>
+
         <div class="progress-item">
           <div class="pi-header">
             <span class="pi-label">目标利润</span>
@@ -580,7 +604,53 @@ const backToMenu = () => {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 16px;
+  margin-bottom: 8px;
+}
+
+.difficulty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.difficulty-badge.easy {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--success);
+}
+
+.difficulty-badge.normal {
+  background: rgba(66, 153, 225, 0.15);
+  color: var(--info);
+}
+
+.difficulty-badge.hard {
+  background: rgba(237, 137, 54, 0.15);
+  color: var(--warning);
+}
+
+.difficulty-badge.extreme {
+  background: rgba(245, 101, 101, 0.15);
+  color: var(--danger);
+}
+
+.db-icon {
+  font-size: 12px;
+}
+
+.difficulty-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.difficulty-hint .base-target {
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .progress-item + .progress-item {

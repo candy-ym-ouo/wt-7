@@ -6,7 +6,7 @@ import type {
   MemberProfile, MemberLevel, MemberStats, LevelReward,
   LevelEvaluation
 } from '@/types'
-import { getLevelById, getNextLevel, getUnlockedGenres } from '@/data/levels'
+import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
 import { generateDailyCustomers, calculateMatchScore, createMemberProfile } from '@/data/customers'
 import {
@@ -73,8 +73,10 @@ export const useGameStore = defineStore('game', () => {
   const dailyConditionDegraded = ref(0)
   const levelStartReputation = ref(50)
 
-  const currentLevelConfig = computed(() => getLevelById(currentLevel.value))
+  const baseLevelConfig = computed(() => getLevelById(currentLevel.value))
+  const currentLevelConfig = computed(() => getScaledLevelConfig(currentLevel.value, shopReputation.value))
   const wordOfMouthConfig = computed(() => getWordOfMouthTier(shopReputation.value))
+  const difficultyScale = computed(() => wordOfMouthConfig.value.difficultyScale)
   const levelEvaluation = computed<LevelEvaluation | null>(() => {
     const config = currentLevelConfig.value
     if (!config) return null
@@ -105,7 +107,7 @@ export const useGameStore = defineStore('game', () => {
       .filter((item): item is { slot: DisplaySlot; item: InventoryItem; conditionScore: number } => item !== null)
   })
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
-  const isLastDay = computed(() => currentLevelConfig.value ? currentDay.value >= currentLevelConfig.value.days : false)
+  const isLastDay = computed(() => baseLevelConfig.value ? currentDay.value >= baseLevelConfig.value.days : false)
   const canAdvancePhase = computed(() => {
     switch (phase.value) {
       case 'purchase':
@@ -302,7 +304,8 @@ export const useGameStore = defineStore('game', () => {
 
   const startLevel = (levelId: number) => {
     const config = getLevelById(levelId)
-    if (!config) return
+    const scaled = getScaledLevelConfig(levelId, shopReputation.value)
+    if (!config || !scaled) return
 
     currentLevel.value = levelId
     currentDay.value = 1
@@ -419,9 +422,9 @@ export const useGameStore = defineStore('game', () => {
   }
 
   const startBusinessPhase = () => {
-    if (!currentLevelConfig.value) return
+    if (!baseLevelConfig.value) return
     const baseCount = Math.min(
-      currentLevelConfig.value.maxCustomers,
+      baseLevelConfig.value.maxCustomers,
       5 + Math.floor(Math.random() * 4)
     )
     const customerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
@@ -894,8 +897,10 @@ export const useGameStore = defineStore('game', () => {
     dailyRenovationCost,
     dailyConditionDegraded,
     levelStartReputation,
+    baseLevelConfig,
     currentLevelConfig,
     wordOfMouthConfig,
+    difficultyScale,
     levelEvaluation,
     availableRecords,
     shopRecordsForPurchase,
