@@ -5,6 +5,7 @@ import type { MemberLevel } from '@/types'
 import { memberBenefits, getLevelIcon, getLevelColor } from '@/data/members'
 import { getGradeColor, getGradeIcon, getTrendIcon, getTrendLabel, getWordOfMouthTier } from '@/data/wordOfMouth'
 import { getTimeSlotConfig } from '@/data/timeSlots'
+import { getEventEffectSummary, getRarityLabel, getRarityColor } from '@/data/events'
 
 const emit = defineEmits<{
   back: []
@@ -72,6 +73,18 @@ const nextWordOfMouth = computed(() => {
   ]
   const next = tiers.find(t => t.min > gameStore.shopReputation)
   return next ? next.name : null
+})
+
+const todayEvents = computed(() => {
+  if (!todayStats.value) return []
+  return todayStats.value.events || []
+})
+
+const levelEventSummary = computed(() => {
+  return gameStore.levelEvents.map(e => ({
+    ...e,
+    summary: getEventEffectSummary(e)
+  }))
 })
 
 const continueAction = () => {
@@ -255,6 +268,25 @@ const backToMenu = () => {
           </div>
         </div>
         <p class="cm-hint">陈列中的唱片品相衰减更快，注意及时翻新维护！</p>
+      </div>
+
+      <div v-if="todayEvents.length > 0" class="event-settlement-card card">
+        <h3 class="es-title">⚡ 今日突发事件</h3>
+        <div class="es-list">
+          <div v-for="(evt, idx) in todayEvents" :key="idx" class="es-item" :class="{ positive: evt.config.isPositive, negative: !evt.config.isPositive }">
+            <div class="esi-header">
+              <span class="esi-icon">{{ evt.config.icon }}</span>
+              <span class="esi-name">{{ evt.config.name }}</span>
+              <span class="esi-rarity" :style="{ color: getRarityColor(evt.config.rarity) }">{{ getRarityLabel(evt.config.rarity) }}</span>
+            </div>
+            <p class="esi-desc">{{ evt.config.description }}</p>
+            <div class="esi-effects">
+              <span v-for="(eff, eIdx) in getEventEffectSummary(evt)" :key="eIdx" class="esi-effect" :class="{ buff: evt.config.isPositive, debuff: !evt.config.isPositive }">
+                {{ eff }}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="word-of-mouth-card card">
@@ -573,6 +605,24 @@ const backToMenu = () => {
               {{ stat.profit >= 0 ? '+' : '' }}¥{{ stat.profit }}
             </span>
             <span class="db-sales">{{ stat.salesCount }} 张</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="levelEventSummary.length > 0" class="level-events-card card">
+        <h3 class="le-title">⚡ 关卡事件回顾</h3>
+        <div class="le-list">
+          <div v-for="(evt, idx) in levelEventSummary" :key="idx" class="le-item" :class="{ positive: evt.config.isPositive, negative: !evt.config.isPositive }">
+            <div class="lei-header">
+              <span class="lei-icon">{{ evt.config.icon }}</span>
+              <span class="lei-name">{{ evt.config.name }}</span>
+              <span class="lei-day">第 {{ evt.day }} 天</span>
+            </div>
+            <div class="lei-effects">
+              <span v-for="(eff, eIdx) in evt.summary" :key="eIdx" class="lei-effect" :class="{ buff: evt.config.isPositive, debuff: !evt.config.isPositive }">
+                {{ eff }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1675,5 +1725,179 @@ const backToMenu = () => {
 .eval-wom-bonus .positive {
   color: var(--success);
   font-weight: 700;
+}
+
+.event-settlement-card {
+  margin: 0 16px;
+}
+
+.es-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-orange);
+  margin-bottom: 14px;
+}
+
+.es-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.es-item {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.es-item.positive {
+  background: rgba(72, 187, 120, 0.08);
+  border-color: rgba(72, 187, 120, 0.25);
+}
+
+.es-item.negative {
+  background: rgba(245, 101, 101, 0.08);
+  border-color: rgba(245, 101, 101, 0.25);
+}
+
+.esi-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.esi-icon {
+  font-size: 18px;
+}
+
+.esi-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.esi-rarity {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+
+.esi-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.esi-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.esi-effect {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.esi-effect.buff {
+  background: rgba(72, 187, 120, 0.12);
+  color: var(--success);
+  border: 1px solid rgba(72, 187, 120, 0.2);
+}
+
+.esi-effect.debuff {
+  background: rgba(245, 101, 101, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(245, 101, 101, 0.2);
+}
+
+.level-events-card {
+  margin: 0 16px;
+}
+
+.le-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-orange);
+  margin-bottom: 14px;
+}
+
+.le-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.le-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.le-item.positive {
+  background: rgba(72, 187, 120, 0.06);
+  border-color: rgba(72, 187, 120, 0.2);
+}
+
+.le-item.negative {
+  background: rgba(245, 101, 101, 0.06);
+  border-color: rgba(245, 101, 101, 0.2);
+}
+
+.lei-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 120px;
+}
+
+.lei-icon {
+  font-size: 16px;
+}
+
+.lei-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.lei-day {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.lei-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lei-effect {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.lei-effect.buff {
+  background: rgba(72, 187, 120, 0.1);
+  color: var(--success);
+}
+
+.lei-effect.debuff {
+  background: rgba(245, 101, 101, 0.1);
+  color: var(--danger);
 }
 </style>

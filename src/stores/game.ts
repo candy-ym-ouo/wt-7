@@ -5,7 +5,8 @@ import type {
   Customer, SaleRecord, DailyStats, CollectionItem,
   MemberProfile, MemberLevel, MemberStats, LevelReward,
   LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
-  TimeSlot, TimeSlotStats, BargainState, BargainRound, Genre
+  TimeSlot, TimeSlotStats, BargainState, BargainRound, Genre,
+  ActiveBusinessEvent
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -71,6 +72,7 @@ import {
   getCollectionValueBonus,
   getFavoriteBonuses
 } from '@/data/album'
+import { rollDailyEvent, getEventEffectSummary } from '@/data/events'
 import {
   calculateThemeMatches,
   getActiveThemes,
@@ -155,6 +157,14 @@ export const useGameStore = defineStore('game', () => {
   })
   const slotSatisfactionSum = ref(0)
   const currentBargain = ref<BargainState | null>(null)
+
+  const dailyEvent = ref<ActiveBusinessEvent | null>(null)
+  const levelEvents = ref<ActiveBusinessEvent[]>([])
+  const eventCustomerCountModifier = ref(0)
+  const eventBudgetModifier = ref(0)
+  const eventBuyChanceModifier = ref(0)
+  const eventSatisfactionModifier = ref(0)
+  const eventConditionPenalty = ref(0)
 
   const albumState = ref<AlbumState>({
     categories: JSON.parse(JSON.stringify(albumCategories)),
@@ -278,6 +288,13 @@ export const useGameStore = defineStore('game', () => {
   })
 
   const allThemes = computed<ThemeConfig[]>(() => themes)
+
+  const activeEventSummary = computed<string[]>(() => {
+    if (!dailyEvent.value) return []
+    return getEventEffectSummary(dailyEvent.value)
+  })
+
+  const hasActiveEvent = computed(() => dailyEvent.value !== null)
 
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
   const isLastDay = computed(() => baseLevelConfig.value ? currentDay.value >= baseLevelConfig.value.days : false)
@@ -518,6 +535,13 @@ export const useGameStore = defineStore('game', () => {
     levelStartReputation.value = shopReputation.value
     initializeDisplaySlots(config.displaySlots)
     resetDailyStats()
+    dailyEvent.value = null
+    levelEvents.value = []
+    eventCustomerCountModifier.value = 0
+    eventBudgetModifier.value = 0
+    eventBuyChanceModifier.value = 0
+    eventSatisfactionModifier.value = 0
+    eventConditionPenalty.value = 0
     
     availableSuppliers.value = getAvailableSuppliersForLevel(levelId, shopReputation.value)
     currentSupplierId.value = availableSuppliers.value.length > 0 ? availableSuppliers.value[0].id : null
@@ -552,6 +576,11 @@ export const useGameStore = defineStore('game', () => {
     nightStats.value = { slot: 'night', revenue: 0, cost: 0, salesCount: 0, customersServed: 0, avgSatisfaction: 0 }
     slotSatisfactionSum.value = 0
     currentBargain.value = null
+    eventCustomerCountModifier.value = 0
+    eventBudgetModifier.value = 0
+    eventBuyChanceModifier.value = 0
+    eventSatisfactionModifier.value = 0
+    eventConditionPenalty.value = 0
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -770,7 +799,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   const applyCustomerBonuses = (customerList: Customer[]): Customer[] => {
-    const budgetMultiplier = 1 + customerBudgetBonus.value
+    const budgetMultiplier = 1 + customerBudgetBonus.value + eventBudgetModifier.value
     return customerList.map(c => ({
       ...c,
       budget: Math.floor(c.budget * budgetMultiplier)
@@ -822,13 +851,57 @@ export const useGameStore = defineStore('game', () => {
     return customers.sort(() => Math.random() - 0.5)
   }
 
+  const triggerDailyEvent = () => {
+    const event = rollDailyEvent(currentLevel.value, currentDay.value, shopReputation.value)
+    if (!event) {
+      dailyEvent.value = null
+      return
+    }
+
+    dailyEvent.value = event
+    levelEvents.value.push(event)
+
+    const e = event.appliedEffects
+    if (e.budgetChange !== 0) {
+      budget.value += e.budgetChange
+      if (e.budgetChange < 0) {
+        dailyCost.value += Math.abs(e.budgetChange)
+      }
+    }
+    if (e.reputationChange !== 0) {
+      shopReputation.value = Math.max(0, Math.min(100, shopReputation.value + e.reputationChange))
+    }
+    if (e.conditionPenalty > 0) {
+      for (const slot of displaySlots.value) {
+        if (slot.conditionScore !== null) {
+          slot.conditionScore = Math.max(10, slot.conditionScore - e.conditionPenalty)
+        }
+      }
+      for (const item of inventory.value) {
+        if (item.quantity > 0) {
+          item.conditionScore = Math.max(10, item.conditionScore - Math.floor(e.conditionPenalty * 0.5))
+        }
+      }
+    }
+
+    eventCustomerCountModifier.value = e.customerCountModifier
+    eventBudgetModifier.value = e.budgetModifier
+    eventBuyChanceModifier.value = e.buyChanceModifier
+    eventSatisfactionModifier.value = e.satisfactionModifier
+    eventConditionPenalty.value = e.conditionPenalty
+  }
+
   const startBusinessPhase = () => {
     if (!baseLevelConfig.value) return
+
+    triggerDailyEvent()
+
     const baseCount = Math.min(
       baseLevelConfig.value.maxCustomers,
       5 + Math.floor(Math.random() * 4)
     )
-    const totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    let totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
     const slotCount = getCustomerCountForSlot(totalCustomerCount, currentTimeSlot.value)
 
     customers.value = generateCustomersWithSpecial(
@@ -865,7 +938,8 @@ export const useGameStore = defineStore('game', () => {
       baseLevelConfig.value.maxCustomers,
       5 + Math.floor(Math.random() * 4)
     )
-    const totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    let totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
     const nightCount = getCustomerCountForSlot(totalCustomerCount, 'night')
 
     customers.value = generateCustomersWithSpecial(
@@ -1171,6 +1245,7 @@ export const useGameStore = defineStore('game', () => {
     buyChance += getBuyChanceBonus(shopReputation.value)
     buyChance += buyChanceBonusFromCollection.value
     buyChance += themeBuyBonus
+    buyChance += eventBuyChanceModifier.value
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (salePrice > customer.budget) {
@@ -1211,7 +1286,7 @@ export const useGameStore = defineStore('game', () => {
         initialAskPrice,
         customer
       )
-      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier + bargainSatisfactionBonus))
+      const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier + bargainSatisfactionBonus + eventSatisfactionModifier.value))
 
       budget.value += salePrice
       dailyRevenue.value += salePrice
@@ -1510,7 +1585,8 @@ export const useGameStore = defineStore('game', () => {
       timeSlotStats: [
         { ...afternoonStats.value },
         { ...nightStats.value }
-      ]
+      ],
+      events: dailyEvent.value ? [{ ...dailyEvent.value }] : []
     }
     dailyStats.value.push(stats)
 
@@ -1843,6 +1919,14 @@ export const useGameStore = defineStore('game', () => {
     updateCollectionBonuses,
     generateSpecialCustomer,
     getSpecialCustomerAppearanceChance,
-    getAlbumBonus
+    getAlbumBonus,
+    dailyEvent,
+    levelEvents,
+    activeEventSummary,
+    hasActiveEvent,
+    eventCustomerCountModifier,
+    eventBudgetModifier,
+    eventBuyChanceModifier,
+    eventSatisfactionModifier
   }
 })

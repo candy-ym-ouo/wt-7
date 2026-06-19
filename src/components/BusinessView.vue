@@ -7,6 +7,7 @@ import { calculateMatchScore } from '@/data/customers'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
 import { getConditionLabel, getConditionColor, getConditionImpactOnSales } from '@/data/condition'
 import { getWordOfMouthTier } from '@/data/wordOfMouth'
+import { getRarityLabel, getRarityColor, getCategoryLabel } from '@/data/events'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -342,6 +343,21 @@ onUnmounted(() => {
           <span class="tsbd-label">冲动消费</span>
           <span class="tsbd-value">{{ timeSlotInfo.impulseBuyChance }}%概率</span>
         </div>
+      </div>
+    </div>
+
+    <div v-if="gameStore.hasActiveEvent && gameStore.dailyEvent" class="event-banner card" :class="{ positive: gameStore.dailyEvent.config.isPositive, negative: !gameStore.dailyEvent.config.isPositive }">
+      <div class="evb-header">
+        <span class="evb-icon">{{ gameStore.dailyEvent.config.icon }}</span>
+        <span class="evb-title">{{ gameStore.dailyEvent.config.name }}</span>
+        <span class="evb-rarity" :style="{ color: getRarityColor(gameStore.dailyEvent.config.rarity) }">{{ getRarityLabel(gameStore.dailyEvent.config.rarity) }}</span>
+        <span class="evb-category">{{ getCategoryLabel(gameStore.dailyEvent.config.category) }}</span>
+      </div>
+      <p class="evb-desc">{{ gameStore.dailyEvent.config.description }}</p>
+      <div class="evb-effects">
+        <span v-for="(eff, idx) in gameStore.activeEventSummary" :key="idx" class="evb-effect" :class="{ buff: gameStore.dailyEvent!.config.isPositive, debuff: !gameStore.dailyEvent!.config.isPositive }">
+          {{ eff }}
+        </span>
       </div>
     </div>
 
@@ -967,6 +983,88 @@ onUnmounted(() => {
 
 .night-switch {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+}
+
+.event-banner {
+  animation: slideUp 0.3s ease-out;
+  border: 2px solid transparent;
+}
+
+.event-banner.positive {
+  background: linear-gradient(135deg, rgba(72, 187, 120, 0.12) 0%, rgba(56, 178, 172, 0.12) 100%);
+  border-color: rgba(72, 187, 120, 0.4);
+}
+
+.event-banner.negative {
+  background: linear-gradient(135deg, rgba(245, 101, 101, 0.12) 0%, rgba(237, 137, 54, 0.12) 100%);
+  border-color: rgba(245, 101, 101, 0.4);
+}
+
+.evb-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.evb-icon {
+  font-size: 22px;
+}
+
+.evb-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.evb-rarity {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+
+.evb-category {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+}
+
+.evb-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.evb-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.evb-effect {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.evb-effect.buff {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.evb-effect.debuff {
+  background: rgba(245, 101, 101, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(245, 101, 101, 0.3);
 }
 
 .customer-card {

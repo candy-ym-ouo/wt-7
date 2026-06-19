@@ -183,6 +183,7 @@ export interface DailyStats {
   renovationCost: number
   conditionDegraded: number
   timeSlotStats: TimeSlotStats[]
+  events: ActiveBusinessEvent[]
 }
 
 export interface LevelConfig {
@@ -373,6 +374,39 @@ export interface ThemeMatchResult {
   buyChanceBonus: number
   layoutBonus: number
   isActive: boolean
+}
+
+export type BusinessEventCategory = 'equipment' | 'weather' | 'market' | 'celebrity' | 'supply' | 'festival'
+
+export type BusinessEventRarity = 'common' | 'uncommon' | 'rare'
+
+export interface BusinessEventEffect {
+  budgetChange: number
+  customerCountModifier: number
+  reputationChange: number
+  satisfactionModifier: number
+  buyChanceModifier: number
+  budgetModifier: number
+  conditionPenalty: number
+}
+
+export interface BusinessEventConfig {
+  id: string
+  name: string
+  icon: string
+  description: string
+  category: BusinessEventCategory
+  rarity: BusinessEventRarity
+  isPositive: boolean
+  baseChance: number
+  minLevel: number
+  effects: BusinessEventEffect
+}
+
+export interface ActiveBusinessEvent {
+  config: BusinessEventConfig
+  day: number
+  appliedEffects: BusinessEventEffect
 }
 
 export interface GameState {
