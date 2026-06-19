@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
 import { computed } from 'vue'
+import { getTimeSlotConfig } from '@/data/timeSlots'
 
 const emit = defineEmits<{
   back: []
@@ -27,6 +28,12 @@ const phaseDescription = computed(() => {
     settlement: '今日营业结算'
   }
   return descriptions[gameStore.phase] || ''
+})
+
+const timeSlotLabel = computed(() => {
+  if (gameStore.phase !== 'business') return ''
+  const config = getTimeSlotConfig(gameStore.currentTimeSlot)
+  return `${config.icon} ${config.name}`
 })
 </script>
 
@@ -66,8 +73,8 @@ const phaseDescription = computed(() => {
       </div>
     </div>
 
-    <div class="phase-indicator">
-      <div class="phase-name">{{ phaseName }}</div>
+    <div class="phase-indicator" :class="{ 'night-phase': gameStore.phase === 'business' && gameStore.currentTimeSlot === 'night' }">
+      <div class="phase-name">{{ phaseName }}{{ timeSlotLabel ? ` · ${timeSlotLabel}` : '' }}</div>
       <div class="phase-desc">{{ phaseDescription }}</div>
     </div>
 
@@ -180,6 +187,10 @@ const phaseDescription = computed(() => {
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 12px;
+}
+
+.phase-indicator.night-phase {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
 }
 
 .phase-name {

@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import type { MemberLevel } from '@/types'
 import { memberBenefits, getLevelIcon, getLevelColor } from '@/data/members'
 import { getGradeColor, getGradeIcon, getTrendIcon, getTrendLabel, getWordOfMouthTier } from '@/data/wordOfMouth'
+import { getTimeSlotConfig } from '@/data/timeSlots'
 
 const emit = defineEmits<{
   back: []
@@ -14,6 +15,19 @@ const gameStore = useGameStore()
 const todayStats = computed(() => {
   return gameStore.dailyStats[gameStore.dailyStats.length - 1]
 })
+
+const afternoonSlotStats = computed(() => {
+  if (!todayStats.value?.timeSlotStats) return null
+  return todayStats.value.timeSlotStats.find(s => s.slot === 'afternoon') || null
+})
+
+const nightSlotStats = computed(() => {
+  if (!todayStats.value?.timeSlotStats) return null
+  return todayStats.value.timeSlotStats.find(s => s.slot === 'night') || null
+})
+
+const afternoonConfig = computed(() => getTimeSlotConfig('afternoon'))
+const nightConfig = computed(() => getTimeSlotConfig('night'))
 
 const memberLevelDistribution = computed(() => {
   const levels: MemberLevel[] = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond']
@@ -113,6 +127,75 @@ const backToMenu = () => {
         <div class="stat-card">
           <span class="stat-label">平均满意度</span>
           <span class="stat-value satisfaction">{{ Math.round(todayStats.avgSatisfaction) }}%</span>
+        </div>
+      </div>
+
+      <div v-if="todayStats && (todayStats.newMembers > 0 || todayStats.returningCustomers > 0 || gameStore.members.length > 0)" class="member-stats-card card">
+
+      <div v-if="afternoonSlotStats || nightSlotStats" class="time-slot-settlement card">
+        <h3 class="tss-title">🕐 时段营业数据</h3>
+        <div class="tss-grid">
+          <div class="tss-slot afternoon-slot">
+            <div class="tss-slot-header">
+              <span class="tss-slot-icon">{{ afternoonConfig.icon }}</span>
+              <span class="tss-slot-name">{{ afternoonConfig.name }}</span>
+            </div>
+            <div class="tss-slot-stats" v-if="afternoonSlotStats">
+              <div class="tss-stat">
+                <span class="tsss-label">营收</span>
+                <span class="tsss-value">¥{{ afternoonSlotStats.revenue }}</span>
+              </div>
+              <div class="tss-stat">
+                <span class="tsss-label">销售</span>
+                <span class="tsss-value">{{ afternoonSlotStats.salesCount }}张</span>
+              </div>
+              <div class="tss-stat">
+                <span class="tsss-label">客流</span>
+                <span class="tsss-value">{{ afternoonSlotStats.customersServed }}人</span>
+              </div>
+              <div class="tss-stat">
+                <span class="tsss-label">满意度</span>
+                <span class="tsss-value">{{ Math.round(afternoonSlotStats.avgSatisfaction) }}%</span>
+              </div>
+            </div>
+            <div v-else class="tss-slot-empty">暂无数据</div>
+          </div>
+          <div class="tss-slot night-slot">
+            <div class="tss-slot-header">
+              <span class="tss-slot-icon">{{ nightConfig.icon }}</span>
+              <span class="tss-slot-name">{{ nightConfig.name }}</span>
+            </div>
+            <div class="tss-slot-stats" v-if="nightSlotStats">
+              <div class="tss-stat">
+                <span class="tsss-label">营收</span>
+                <span class="tsss-value">¥{{ nightSlotStats.revenue }}</span>
+              </div>
+              <div class="tss-stat">
+                <span class="tsss-label">销售</span>
+                <span class="tsss-value">{{ nightSlotStats.salesCount }}张</span>
+              </div>
+              <div class="tss-stat">
+                <span class="tsss-label">客流</span>
+                <span class="tsss-value">{{ nightSlotStats.customersServed }}人</span>
+              </div>
+              <div class="tss-stat">
+                <span class="tsss-label">满意度</span>
+                <span class="tsss-value">{{ Math.round(nightSlotStats.avgSatisfaction) }}%</span>
+              </div>
+            </div>
+            <div v-else class="tss-slot-empty">暂无数据</div>
+          </div>
+        </div>
+        <div v-if="afternoonSlotStats && nightSlotStats && (afternoonSlotStats.revenue > 0 || nightSlotStats.revenue > 0)" class="tss-comparison">
+          <span class="tssc-label">营收对比</span>
+          <div class="tssc-bar">
+            <div class="tssc-fill afternoon-fill" :style="{ width: (afternoonSlotStats.revenue / (afternoonSlotStats.revenue + nightSlotStats.revenue) * 100) + '%' }"></div>
+            <div class="tssc-fill night-fill" :style="{ width: (nightSlotStats.revenue / (afternoonSlotStats.revenue + nightSlotStats.revenue) * 100) + '%' }"></div>
+          </div>
+          <div class="tssc-legend">
+            <span class="tssc-legend-item">{{ afternoonConfig.icon }} {{ Math.round(afternoonSlotStats.revenue / (afternoonSlotStats.revenue + nightSlotStats.revenue) * 100) }}%</span>
+            <span class="tssc-legend-item">{{ nightConfig.icon }} {{ Math.round(nightSlotStats.revenue / (afternoonSlotStats.revenue + nightSlotStats.revenue) * 100) }}%</span>
+          </div>
         </div>
       </div>
 
@@ -1312,6 +1395,132 @@ const backToMenu = () => {
   text-align: center;
   line-height: 1.5;
   font-style: italic;
+}
+
+.time-slot-settlement {
+  margin: 0 16px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(246, 224, 94, 0.08) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.tss-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.tss-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.tss-slot {
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.tss-slot.afternoon-slot {
+  background: rgba(246, 224, 94, 0.1);
+  border: 1px solid rgba(246, 224, 94, 0.25);
+}
+
+.tss-slot.night-slot {
+  background: rgba(102, 126, 234, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+
+.tss-slot-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tss-slot-icon {
+  font-size: 16px;
+}
+
+.tss-slot-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.tss-slot-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.tss-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tsss-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.tsss-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.tss-slot-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
+}
+
+.tss-comparison {
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.tssc-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.tssc-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.tssc-fill {
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+.afternoon-fill {
+  background: linear-gradient(90deg, #f6e05e, #ecc94b);
+}
+
+.night-fill {
+  background: linear-gradient(90deg, #667eea, #764ba2);
+}
+
+.tssc-legend {
+  display: flex;
+  justify-content: space-between;
+}
+
+.tssc-legend-item {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .word-of-mouth-card {

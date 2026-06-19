@@ -134,6 +134,7 @@ export interface SaleRecord {
   memberLevel: MemberLevel | null
   growthPointsEarned: number
   isMemberPurchase: boolean
+  timeSlot: TimeSlot
 }
 
 export interface DailyStats {
@@ -151,6 +152,7 @@ export interface DailyStats {
   totalGrowthPointsEarned: number
   renovationCost: number
   conditionDegraded: number
+  timeSlotStats: TimeSlotStats[]
 }
 
 export interface LevelConfig {
@@ -176,6 +178,31 @@ export interface CollectionItem {
   notes: string
   conditionScore: number
   collectionValue: number
+}
+
+export type TimeSlot = 'afternoon' | 'night'
+
+export interface TimeSlotConfig {
+  slot: TimeSlot
+  name: string
+  icon: string
+  description: string
+  genreAffinity: Genre[]
+  budgetModifier: number
+  customerCountRatio: number
+  priceSensitivity: number
+  playBoost: number
+  impulseBuyChance: number
+  rarityPreferenceBonus: number[]
+}
+
+export interface TimeSlotStats {
+  slot: TimeSlot
+  revenue: number
+  cost: number
+  salesCount: number
+  customersServed: number
+  avgSatisfaction: number
 }
 
 export type GamePhase = 'purchase' | 'display' | 'business' | 'settlement'
@@ -263,4 +290,8 @@ export interface GameState {
   currentSupplierId: string | null
   supplierInventory: SupplierInventoryItem[]
   recordPerformances: RecordPerformance[]
+  currentTimeSlot: TimeSlot
+  afternoonCompleted: boolean
+  afternoonStats: TimeSlotStats
+  nightStats: TimeSlotStats
 }

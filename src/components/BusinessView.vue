@@ -73,6 +73,25 @@ const reputationHint = computed(() => {
   return `口碑${config.tierName}：客流+${Math.round(config.customerCountModifier * 100)}% | 预算×${config.budgetModifier.toFixed(2)}`
 })
 
+const timeSlotInfo = computed(() => {
+  const config = gameStore.currentTimeSlotConfig
+  return {
+    name: config.name,
+    icon: config.icon,
+    description: config.description,
+    genreHint: config.genreAffinity.join('、'),
+    isAfternoon: gameStore.currentTimeSlot === 'afternoon',
+    isNight: gameStore.currentTimeSlot === 'night',
+    playBoost: config.playBoost,
+    priceSensitivity: config.priceSensitivity,
+    impulseBuyChance: Math.round(config.impulseBuyChance * 100)
+  }
+})
+
+const isAfternoonFinished = computed(() => {
+  return gameStore.afternoonCompleted
+})
+
 const openSellModal = (record: Record) => {
   selectedRecord.value = record
   customPrice.value = record.marketPrice
@@ -163,7 +182,37 @@ onUnmounted(() => {
           <span class="np-genre">{{ gameStore.currentPlayingRecord.genre }}</span>
         </div>
       </div>
-      <p class="np-hint">播放中的唱片会提高顾客的购买意愿！</p>
+      <p class="np-hint">播放中的唱片会提高顾客的购买意愿！当前时段试听加成 +{{ timeSlotInfo.playBoost }}</p>
+    </div>
+
+    <div class="time-slot-banner card" :class="{ afternoon: timeSlotInfo.isAfternoon, night: timeSlotInfo.isNight }">
+      <div class="tsb-header">
+        <span class="tsb-icon">{{ timeSlotInfo.icon }}</span>
+        <span class="tsb-name">{{ timeSlotInfo.name }}</span>
+        <div class="tsb-indicators">
+          <span v-if="isAfternoonFinished" class="tsb-past">☀️ 午后已结束</span>
+          <span v-if="timeSlotInfo.isNight" class="tsb-current-night">🌙 夜场营业中</span>
+        </div>
+      </div>
+      <p class="tsb-desc">{{ timeSlotInfo.description }}</p>
+      <div class="tsb-details">
+        <div class="tsb-detail">
+          <span class="tsbd-label">偏好风格</span>
+          <span class="tsbd-value">{{ timeSlotInfo.genreHint }}</span>
+        </div>
+        <div class="tsb-detail">
+          <span class="tsbd-label">试听加成</span>
+          <span class="tsbd-value">+{{ timeSlotInfo.playBoost }}</span>
+        </div>
+        <div class="tsb-detail">
+          <span class="tsbd-label">价格敏感度</span>
+          <span class="tsbd-value">{{ timeSlotInfo.priceSensitivity > 1 ? '较高' : '较低' }}（×{{ timeSlotInfo.priceSensitivity }}）</span>
+        </div>
+        <div v-if="timeSlotInfo.impulseBuyChance > 0" class="tsb-detail">
+          <span class="tsbd-label">冲动消费</span>
+          <span class="tsbd-value">{{ timeSlotInfo.impulseBuyChance }}%概率</span>
+        </div>
+      </div>
     </div>
 
     <template v-if="gameStore.currentCustomer">
@@ -329,6 +378,22 @@ onUnmounted(() => {
           跳过顾客
         </button>
         <button 
+          v-if="gameStore.canSwitchToNight"
+          class="btn-primary action-btn night-switch"
+          @click="gameStore.advancePhase()"
+        >
+          🌙 进入夜场 →
+        </button>
+        <button 
+          v-else-if="gameStore.currentTimeSlot === 'night'"
+          class="btn-primary action-btn"
+          :disabled="gameStore.currentCustomerIndex < gameStore.customers.length - 1"
+          @click="endDay"
+        >
+          {{ gameStore.currentCustomerIndex >= gameStore.customers.length - 1 ? '结束营业' : '还有顾客...' }}
+        </button>
+        <button 
+          v-else
           class="btn-primary action-btn"
           :disabled="gameStore.currentCustomerIndex < gameStore.customers.length - 1"
           @click="endDay"
@@ -340,10 +405,21 @@ onUnmounted(() => {
 
     <template v-else>
       <div class="no-customers card">
-        <div class="nc-icon">🎉</div>
-        <h3>今日顾客已全部接待完毕</h3>
-        <p>点击下方按钮进行今日结算</p>
-        <button class="btn-primary" @click="endDay">
+        <div class="nc-icon">{{ gameStore.currentTimeSlot === 'afternoon' ? '☀️' : '🌙' }}</div>
+        <h3>{{ gameStore.canSwitchToNight ? '午后时光结束' : '今日顾客已全部接待完毕' }}</h3>
+        <p>{{ gameStore.canSwitchToNight ? '夜场客群即将登场，准备好迎接不同的顾客吧！' : '点击下方按钮进行今日结算' }}</p>
+        <button 
+          v-if="gameStore.canSwitchToNight"
+          class="btn-primary night-switch"
+          @click="gameStore.advancePhase()"
+        >
+          🌙 进入夜场 →
+        </button>
+        <button 
+          v-else
+          class="btn-primary"
+          @click="endDay"
+        >
           查看今日结算 →
         </button>
       </div>
@@ -502,6 +578,97 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
+}
+
+.time-slot-banner {
+  animation: slideUp 0.3s ease-out;
+}
+
+.time-slot-banner.afternoon {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.12) 0%, rgba(237, 137, 54, 0.12) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.35);
+}
+
+.time-slot-banner.night {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.35);
+}
+
+.tsb-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tsb-icon {
+  font-size: 20px;
+}
+
+.tsb-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.tsb-indicators {
+  display: flex;
+  gap: 6px;
+}
+
+.tsb-past {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(246, 224, 94, 0.15);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.tsb-current-night {
+  font-size: 10px;
+  color: #667eea;
+  background: rgba(102, 126, 234, 0.15);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.tsb-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.tsb-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.tsb-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+}
+
+.tsbd-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.tsbd-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.night-switch {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
 }
 
 .customer-card {

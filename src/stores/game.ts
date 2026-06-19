@@ -4,7 +4,8 @@ import type {
   GamePhase, Record, InventoryItem, DisplaySlot,
   Customer, SaleRecord, DailyStats, CollectionItem,
   MemberProfile, MemberLevel, MemberStats, LevelReward,
-  LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance
+  LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
+  TimeSlot, TimeSlotStats
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -44,6 +45,13 @@ import {
   calculateInventoryRiskScore,
   generatePurchaseRecommendation
 } from '@/data/performance'
+import {
+  getTimeSlotConfig,
+  getCustomerCountForSlot,
+  getPlayBoostForSlot,
+  getImpulseBuyChance,
+  adjustPriceSensitivity
+} from '@/data/timeSlots'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -92,10 +100,31 @@ export const useGameStore = defineStore('game', () => {
   const totalInventoryPurchased = ref<Map<string, number>>(new Map())
   const supplierPurchaseHistory = ref<Map<string, { totalSpent: number; totalItems: number }>>(new Map())
 
+  const currentTimeSlot = ref<TimeSlot>('afternoon')
+  const afternoonCompleted = ref(false)
+  const afternoonStats = ref<TimeSlotStats>({
+    slot: 'afternoon',
+    revenue: 0,
+    cost: 0,
+    salesCount: 0,
+    customersServed: 0,
+    avgSatisfaction: 0
+  })
+  const nightStats = ref<TimeSlotStats>({
+    slot: 'night',
+    revenue: 0,
+    cost: 0,
+    salesCount: 0,
+    customersServed: 0,
+    avgSatisfaction: 0
+  })
+  const slotSatisfactionSum = ref(0)
+
   const baseLevelConfig = computed(() => getLevelById(currentLevel.value))
   const currentLevelConfig = computed(() => getScaledLevelConfig(currentLevel.value, shopReputation.value))
   const wordOfMouthConfig = computed(() => getWordOfMouthTier(shopReputation.value))
   const difficultyScale = computed(() => wordOfMouthConfig.value.difficultyScale)
+  const currentTimeSlotConfig = computed(() => getTimeSlotConfig(currentTimeSlot.value))
   const levelEvaluation = computed<LevelEvaluation | null>(() => {
     const config = currentLevelConfig.value
     if (!config) return null
@@ -166,6 +195,13 @@ export const useGameStore = defineStore('game', () => {
       default:
         return false
     }
+  })
+
+  const canSwitchToNight = computed(() => {
+    return phase.value === 'business' &&
+           currentTimeSlot.value === 'afternoon' &&
+           !afternoonCompleted.value &&
+           currentCustomerIndex.value >= customers.value.length
   })
 
   const memberStats = computed<MemberStats>(() => {
@@ -396,6 +432,11 @@ export const useGameStore = defineStore('game', () => {
     dailyGrowthPointsEarned.value = 0
     dailyRenovationCost.value = 0
     dailyConditionDegraded.value = 0
+    currentTimeSlot.value = 'afternoon'
+    afternoonCompleted.value = false
+    afternoonStats.value = { slot: 'afternoon', revenue: 0, cost: 0, salesCount: 0, customersServed: 0, avgSatisfaction: 0 }
+    nightStats.value = { slot: 'night', revenue: 0, cost: 0, salesCount: 0, customersServed: 0, avgSatisfaction: 0 }
+    slotSatisfactionSum.value = 0
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -618,14 +659,16 @@ export const useGameStore = defineStore('game', () => {
       baseLevelConfig.value.maxCustomers,
       5 + Math.floor(Math.random() * 4)
     )
-    const customerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    const totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    const slotCount = getCustomerCountForSlot(totalCustomerCount, currentTimeSlot.value)
     const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
     const result = generateDailyCustomers(
-      customerCount,
+      slotCount,
       currentDay.value,
       members.value,
       shopReputation.value,
-      inventoryGenres
+      inventoryGenres,
+      currentTimeSlot.value
     )
     customers.value = result.customers
 
@@ -634,6 +677,49 @@ export const useGameStore = defineStore('game', () => {
 
     currentCustomerIndex.value = 0
     phase.value = 'business'
+  }
+
+  const switchToNightSlot = () => {
+    const stats = getCurrentSlotStats()
+    stats.revenue = dailyRevenue.value - (afternoonCompleted.value ? afternoonStats.value.revenue : 0)
+    stats.salesCount = dailySalesCount.value - (afternoonCompleted.value ? afternoonStats.value.salesCount : 0)
+    stats.customersServed = dailyServedCustomers.value - (afternoonCompleted.value ? afternoonStats.value.customersServed : 0)
+    if (stats.customersServed > 0) {
+      stats.avgSatisfaction = slotSatisfactionSum.value / stats.customersServed
+    }
+
+    afternoonStats.value = { ...stats, slot: 'afternoon' }
+    afternoonCompleted.value = true
+    currentTimeSlot.value = 'night'
+    slotSatisfactionSum.value = 0
+
+    stopPlaying()
+
+    if (!baseLevelConfig.value) return
+    const baseCount = Math.min(
+      baseLevelConfig.value.maxCustomers,
+      5 + Math.floor(Math.random() * 4)
+    )
+    const totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
+    const nightCount = getCustomerCountForSlot(totalCustomerCount, 'night')
+    const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
+    const result = generateDailyCustomers(
+      nightCount,
+      currentDay.value,
+      members.value,
+      shopReputation.value,
+      inventoryGenres,
+      'night'
+    )
+    customers.value = result.customers
+    dailyReturningCustomers.value += customers.value.filter(c => c.isReturningCustomer).length
+    currentLevelReturningVisits.value += customers.value.filter(c => c.isReturningCustomer).length
+    currentCustomerIndex.value = 0
+  }
+
+  const getCurrentSlotStats = (): TimeSlotStats => {
+    if (currentTimeSlot.value === 'afternoon') return afternoonStats.value
+    return nightStats.value
   }
 
   const playRecord = (record: Record) => {
@@ -648,12 +734,13 @@ export const useGameStore = defineStore('game', () => {
 
   const getCustomerRecommendations = (customer: Customer) => {
     const displayed = displayedRecords.value
+    const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
     type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number }
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
       let finalScore = score
       if (currentPlayingRecord.value?.id === d.item.record.id) {
-        finalScore += 15
+        finalScore += playBoost
       }
       const conditionImpact = getConditionImpactOnSales(d.conditionScore)
       finalScore += conditionImpact.buyChanceModifier * 100
@@ -707,22 +794,30 @@ export const useGameStore = defineStore('game', () => {
     }
 
     const score = calculateMatchScore(customer, record, shopReputation.value)
-    const finalScore = currentPlayingRecord.value?.id === record.id ? score + 15 : score
+    const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
+    const finalScore = currentPlayingRecord.value?.id === record.id ? score + playBoost : score
 
     let buyChance = finalScore / 100
     buyChance += conditionImpact.buyChanceModifier
     buyChance += getBuyChanceBonus(shopReputation.value)
+
+    const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (salePrice > customer.budget) {
-      buyChance *= 0.3
+      buyChance *= Math.max(0.1, 0.3 / priceSensitivity)
     }
     if (salePrice > record.marketPrice * 1.3) {
-      buyChance *= 0.5
+      buyChance *= Math.max(0.1, 0.5 / priceSensitivity)
     }
     if (salePrice < record.marketPrice * 0.7) {
-      buyChance *= 1.2
+      buyChance *= Math.min(2.0, 1.2 * priceSensitivity)
     }
     if (customer.isReturningCustomer) {
       buyChance *= 1.15
+    }
+
+    const impulseChance = getImpulseBuyChance(currentTimeSlot.value)
+    if (Math.random() < impulseChance) {
+      buyChance = Math.min(1.0, buyChance * 1.3)
     }
 
     const success = Math.random() < buyChance
@@ -738,6 +833,7 @@ export const useGameStore = defineStore('game', () => {
       dailySalesCount.value += 1
       dailyServedCustomers.value += 1
       dailySatisfactionSum.value += satisfaction
+      slotSatisfactionSum.value += satisfaction
       currentLevelProfit.value += profit
       currentLevelSales.value += 1
       totalProfit.value += profit
@@ -785,7 +881,8 @@ export const useGameStore = defineStore('game', () => {
         memberId: memberProfile?.id || null,
         memberLevel: memberProfile?.level || null,
         growthPointsEarned,
-        isMemberPurchase
+        isMemberPurchase,
+        timeSlot: currentTimeSlot.value
       }
       
       salesHistory.value.push(saleRecord)
@@ -814,10 +911,11 @@ export const useGameStore = defineStore('game', () => {
       shopReputation.value = Math.min(100, shopReputation.value + (satisfaction > 60 ? 1 : -1))
 
       const conditionLabel = getConditionLabel(slotConditionScore)
+      const slotLabel = currentTimeSlot.value === 'afternoon' ? '午后' : '夜场'
 
       return {
         success: true,
-        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}`,
+        message: `${customer.name} 以 ¥${salePrice} 购买了《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}【${slotLabel}】`,
         satisfaction,
         profit,
         growthPoints: growthPointsEarned,
@@ -827,6 +925,7 @@ export const useGameStore = defineStore('game', () => {
     } else {
       dailyServedCustomers.value += 1
       dailySatisfactionSum.value += 30
+      slotSatisfactionSum.value += 30
       shopReputation.value = Math.max(0, shopReputation.value - 1)
       return {
         success: false,
@@ -964,6 +1063,25 @@ export const useGameStore = defineStore('game', () => {
   const endDay = () => {
     degradeAllRecords()
 
+    const currentSlotStats = getCurrentSlotStats()
+    if (currentTimeSlot.value === 'afternoon') {
+      currentSlotStats.revenue = dailyRevenue.value
+      currentSlotStats.salesCount = dailySalesCount.value
+      currentSlotStats.customersServed = dailyServedCustomers.value
+      if (currentSlotStats.customersServed > 0) {
+        currentSlotStats.avgSatisfaction = slotSatisfactionSum.value / currentSlotStats.customersServed
+      }
+      afternoonStats.value = { ...currentSlotStats, slot: 'afternoon' }
+    } else {
+      currentSlotStats.revenue = dailyRevenue.value - afternoonStats.value.revenue
+      currentSlotStats.salesCount = dailySalesCount.value - afternoonStats.value.salesCount
+      currentSlotStats.customersServed = dailyServedCustomers.value - afternoonStats.value.customersServed
+      if (currentSlotStats.customersServed > 0) {
+        currentSlotStats.avgSatisfaction = slotSatisfactionSum.value / currentSlotStats.customersServed
+      }
+      nightStats.value = { ...currentSlotStats, slot: 'night' }
+    }
+
     const avgSatisfaction = dailyServedCustomers.value > 0
       ? dailySatisfactionSum.value / dailyServedCustomers.value
       : 50
@@ -982,7 +1100,11 @@ export const useGameStore = defineStore('game', () => {
       memberRevenue: dailyMemberRevenue.value,
       totalGrowthPointsEarned: dailyGrowthPointsEarned.value,
       renovationCost: dailyRenovationCost.value,
-      conditionDegraded: dailyConditionDegraded.value
+      conditionDegraded: dailyConditionDegraded.value,
+      timeSlotStats: [
+        { ...afternoonStats.value },
+        { ...nightStats.value }
+      ]
     }
     dailyStats.value.push(stats)
 
@@ -998,7 +1120,11 @@ export const useGameStore = defineStore('game', () => {
         startBusinessPhase()
         break
       case 'business':
-        endDay()
+        if (canSwitchToNight.value) {
+          switchToNightSlot()
+        } else {
+          endDay()
+        }
         break
       case 'settlement':
         if (isLastDay.value) {
@@ -1131,12 +1257,18 @@ export const useGameStore = defineStore('game', () => {
     currentCustomer,
     isLastDay,
     canAdvancePhase,
+    canSwitchToNight,
     levelProgress,
     isLevelComplete,
     memberStats,
     memberLevelProgress,
     isMemberTargetsComplete,
     supplierStats,
+    currentTimeSlot,
+    afternoonCompleted,
+    afternoonStats,
+    nightStats,
+    currentTimeSlotConfig,
     startLevel,
     selectSupplier,
     refreshSupplierInventory,
@@ -1152,6 +1284,7 @@ export const useGameStore = defineStore('game', () => {
     stopPlaying,
     getCustomerRecommendations,
     advancePhase,
+    switchToNightSlot,
     addToCollection,
     toggleFavorite,
     updateCollectionNotes,

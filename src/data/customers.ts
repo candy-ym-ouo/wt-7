@@ -1,4 +1,4 @@
-import type { Customer, Genre, MemberProfile } from '@/types'
+import type { Customer, Genre, MemberProfile, TimeSlot } from '@/types'
 import {
   createMemberProfile,
   updateMemberOnVisit,
@@ -10,6 +10,11 @@ import {
   alignPreferencesWithInventory,
   getMatchScoreBonus
 } from './wordOfMouth'
+import {
+  adjustGenrePreferences,
+  adjustPriceRange,
+  getTimeSlotConfig
+} from './timeSlots'
 
 const customerNames = [
   '老爵士王', '摇滚青年', '灵魂歌者', '放克达人', '迪斯科女王',
@@ -63,7 +68,8 @@ export const generateCustomer = (
   id: string,
   memberProfile: MemberProfile | null = null,
   reputation: number = 50,
-  inventoryGenres: Genre[] = []
+  inventoryGenres: Genre[] = [],
+  timeSlot: TimeSlot = 'afternoon'
 ): Customer => {
   let preference
   let name
@@ -74,16 +80,25 @@ export const generateCustomer = (
 
   if (memberProfile) {
     const updatedMember = updateMemberOnVisit(memberProfile)
+    let memberGenres = updatedMember.favoriteGenres
+    if (inventoryGenres.length > 0) {
+      const slotAdjusted = adjustGenrePreferences(memberGenres, timeSlot)
+      const hasMatch = memberGenres.some(g => slotAdjusted.includes(g))
+      if (!hasMatch || Math.random() < 0.5) {
+        memberGenres = [...new Set([...slotAdjusted, ...memberGenres.slice(0, 1)])]
+      }
+    }
     preference = {
-      favoriteGenres: updatedMember.favoriteGenres,
-      priceRange: updatedMember.priceRange,
+      favoriteGenres: memberGenres,
+      priceRange: adjustPriceRange(updatedMember.priceRange, timeSlot),
       preferredRarity: updatedMember.preferredRarity,
       preferenceStrength: updatedMember.preferenceStrength
     }
     name = updatedMember.name
     avatar = updatedMember.avatar
+    const slotConfig = getTimeSlotConfig(timeSlot)
     const baseBudget = preference.priceRange[1] * (1.8 + Math.random() * 0.8)
-    budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * (1 + updatedMember.visitCount * 0.03))
+    budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * slotConfig.budgetModifier * (1 + updatedMember.visitCount * 0.03))
     patience = 40 + Math.floor(Math.random() * 40) + updatedMember.visitCount
     memberDiscount = calculateMemberDiscount(updatedMember.level)
 
@@ -105,6 +120,13 @@ export const generateCustomer = (
     preference = generatePreference()
     name = customerNames[nameIndex]
     avatar = avatars[avatarIndex]
+    const slotConfig = getTimeSlotConfig(timeSlot)
+    preference.favoriteGenres = adjustGenrePreferences(preference.favoriteGenres, timeSlot)
+    preference.priceRange = adjustPriceRange(preference.priceRange, timeSlot)
+    const slotRarity = slotConfig.rarityPreferenceBonus
+    if (slotRarity.length > 0 && Math.random() < 0.4) {
+      preference.preferredRarity = slotRarity
+    }
     const baseBudget = preference.priceRange[1] * (1.5 + Math.random())
     budget = getBudgetWithReputation(Math.floor(baseBudget), reputation)
     patience = 30 + Math.floor(Math.random() * 40)
@@ -137,7 +159,8 @@ export const generateDailyCustomers = (
   day: number,
   existingMembers: MemberProfile[] = [],
   reputation: number = 50,
-  inventoryGenres: Genre[] = []
+  inventoryGenres: Genre[] = [],
+  timeSlot: TimeSlot = 'afternoon'
 ): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
   const newMemberProfiles: MemberProfile[] = []
@@ -151,14 +174,14 @@ export const generateDailyCustomers = (
 
   for (let i = 0; i < selectedReturningMembers.length; i++) {
     const member = selectedReturningMembers[i]
-    const customer = generateCustomer(`cust-${day}-return-${i}-${Date.now()}`, member, reputation, inventoryGenres)
+    const customer = generateCustomer(`cust-${day}-return-${i}-${Date.now()}`, member, reputation, inventoryGenres, timeSlot)
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customers.push(customer)
   }
 
   const newCustomerCount = count - selectedReturningMembers.length
   for (let i = 0; i < newCustomerCount; i++) {
-    const customer = generateCustomer(`cust-${day}-new-${i}-${Date.now()}`, null, reputation, inventoryGenres)
+    const customer = generateCustomer(`cust-${day}-new-${i}-${Date.now()}`, null, reputation, inventoryGenres, timeSlot)
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customer.patience = Math.floor(customer.patience * (1 - day * 0.02))
     customers.push(customer)
