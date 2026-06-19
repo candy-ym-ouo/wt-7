@@ -2,11 +2,13 @@
 import type { Record as VinylRecordType } from '@/types'
 import VinylRecord from './VinylRecord.vue'
 import { getConditionLabel, getConditionColor } from '@/data/condition'
+import { computed } from 'vue'
 
 interface Props {
   record: VinylRecordType
   showPrice?: boolean
   showCost?: boolean
+  customCost?: number
   quantity?: number
   highlight?: boolean
   matchScore?: number
@@ -16,10 +18,15 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   showPrice: true,
   showCost: false,
+  customCost: 0,
   quantity: 0,
   highlight: false,
   matchScore: 0,
   conditionScore: -1
+})
+
+const effectiveCost = computed(() => {
+  return props.customCost > 0 ? props.customCost : props.record.costPrice
 })
 
 const emit = defineEmits<{
@@ -94,7 +101,7 @@ const getConditionScoreFromLabel = (label: string): number => {
       <div class="price-section">
         <div v-if="showCost" class="price-row">
           <span class="price-label">进价</span>
-          <span class="cost-price">¥{{ record.costPrice }}</span>
+          <span class="cost-price">¥{{ effectiveCost }}</span>
         </div>
         <div v-if="showPrice" class="price-row">
           <span class="price-label">售价</span>
@@ -102,7 +109,7 @@ const getConditionScoreFromLabel = (label: string): number => {
         </div>
         <div v-if="showPrice && showCost" class="profit-row">
           <span class="profit-label">利润</span>
-          <span class="profit-value">+¥{{ record.marketPrice - record.costPrice }}</span>
+          <span class="profit-value">+¥{{ record.marketPrice - effectiveCost }}</span>
         </div>
       </div>
     </div>

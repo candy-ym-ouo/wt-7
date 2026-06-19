@@ -4,7 +4,7 @@ import type {
   GamePhase, Record, InventoryItem, DisplaySlot,
   Customer, SaleRecord, DailyStats, CollectionItem,
   MemberProfile, MemberLevel, MemberStats, LevelReward,
-  LevelEvaluation
+  LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -32,6 +32,18 @@ import {
   getBuyChanceBonus,
   calculateLevelEvaluation
 } from '@/data/wordOfMouth'
+import {
+  getAvailableSuppliersForLevel,
+  generateSupplierInventory,
+  getSupplierById
+} from '@/data/suppliers'
+import {
+  updatePerformanceAfterSale,
+  updateSellThroughRates,
+  createEmptyPerformance,
+  calculateInventoryRiskScore,
+  generatePurchaseRecommendation
+} from '@/data/performance'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -73,6 +85,13 @@ export const useGameStore = defineStore('game', () => {
   const dailyConditionDegraded = ref(0)
   const levelStartReputation = ref(50)
 
+  const availableSuppliers = ref<Supplier[]>([])
+  const currentSupplierId = ref<string | null>(null)
+  const supplierInventory = ref<SupplierInventoryItem[]>([])
+  const recordPerformances = ref<RecordPerformance[]>([])
+  const totalInventoryPurchased = ref<Map<string, number>>(new Map())
+  const supplierPurchaseHistory = ref<Map<string, { totalSpent: number; totalItems: number }>>(new Map())
+
   const baseLevelConfig = computed(() => getLevelById(currentLevel.value))
   const currentLevelConfig = computed(() => getScaledLevelConfig(currentLevel.value, shopReputation.value))
   const wordOfMouthConfig = computed(() => getWordOfMouthTier(shopReputation.value))
@@ -94,8 +113,34 @@ export const useGameStore = defineStore('game', () => {
     const unlocked = getUnlockedGenres(currentLevel.value)
     return allRecords.filter(r => unlocked.includes(r.genre))
   })
+  const currentSupplier = computed<Supplier | null>(() => {
+    if (!currentSupplierId.value) return null
+    return getSupplierById(currentSupplierId.value) || null
+  })
+
+  const currentSupplierInventory = computed(() => {
+    return supplierInventory.value
+  })
+
   const shopRecordsForPurchase = computed(() => {
+    if (supplierInventory.value.length > 0) {
+      return supplierInventory.value.map(item => item.record)
+    }
     return getRandomRecords(8, inventory.value.map(i => i.record.id))
+  })
+
+  const inventoryRiskScore = computed(() => {
+    return calculateInventoryRiskScore(inventory.value, recordPerformances.value, currentDay.value)
+  })
+
+  const purchaseRecommendations = computed(() => {
+    return generatePurchaseRecommendation(recordPerformances.value, inventory.value, budget.value)
+  })
+
+  const supplierStats = computed(() => {
+    return (supplierId: string) => {
+      return supplierPurchaseHistory.value.get(supplierId) || { totalSpent: 0, totalItems: 0 }
+    }
   })
   const displayedRecords = computed(() => {
     return displaySlots.value
@@ -326,6 +371,16 @@ export const useGameStore = defineStore('game', () => {
     levelStartReputation.value = shopReputation.value
     initializeDisplaySlots(config.displaySlots)
     resetDailyStats()
+    
+    availableSuppliers.value = getAvailableSuppliersForLevel(levelId, shopReputation.value)
+    currentSupplierId.value = availableSuppliers.value.length > 0 ? availableSuppliers.value[0].id : null
+    recordPerformances.value = []
+    totalInventoryPurchased.value = new Map()
+    supplierPurchaseHistory.value = new Map()
+    
+    if (currentSupplierId.value) {
+      refreshSupplierInventory()
+    }
   }
 
   const resetDailyStats = () => {
@@ -343,7 +398,121 @@ export const useGameStore = defineStore('game', () => {
     dailyConditionDegraded.value = 0
   }
 
+  const selectSupplier = (supplierId: string) => {
+    const supplier = getSupplierById(supplierId)
+    if (!supplier) return false
+    
+    currentSupplierId.value = supplierId
+    refreshSupplierInventory()
+    return true
+  }
+
+  const refreshSupplierInventory = () => {
+    if (!currentSupplierId.value) return
+    
+    const supplier = getSupplierById(currentSupplierId.value)
+    if (!supplier) return
+    
+    const unlockedGenres = getUnlockedGenres(currentLevel.value)
+    const excludeIds = inventory.value.map(i => i.record.id)
+    
+    supplierInventory.value = generateSupplierInventory(
+      supplier,
+      unlockedGenres,
+      recordPerformances.value,
+      excludeIds,
+      8
+    )
+  }
+
+  const getSupplierInventoryItem = (recordId: string): SupplierInventoryItem | undefined => {
+    return supplierInventory.value.find(item => item.record.id === recordId)
+  }
+
+  const purchaseFromSupplier = (supplierItem: SupplierInventoryItem, quantity: number = 1) => {
+    const actualQty = Math.min(quantity, supplierItem.quantityAvailable)
+    const totalCost = supplierItem.adjustedCostPrice * actualQty
+    
+    if (budget.value < totalCost) return { success: false, message: '预算不足！' }
+    
+    const supplier = getSupplierById(supplierItem.supplierId)
+    if (supplier && totalCost < supplier.minOrderAmount) {
+      return { success: false, message: `未达到最低订货金额 ¥${supplier.minOrderAmount}！` }
+    }
+    
+    const existing = inventory.value.find(i => i.record.id === supplierItem.record.id)
+    if (existing) {
+      const totalQtyBefore = existing.quantity
+      const totalScoreBefore = existing.conditionScore * totalQtyBefore
+      const newScore = getConditionScoreFromLabel(supplierItem.record.condition)
+      existing.quantity += actualQty
+      existing.conditionScore = Math.round((totalScoreBefore + newScore * actualQty) / existing.quantity)
+    } else {
+      inventory.value.push({
+        record: supplierItem.record,
+        quantity: actualQty,
+        purchaseDate: currentDay.value,
+        conditionScore: getConditionScoreFromLabel(supplierItem.record.condition)
+      })
+    }
+    
+    const currentTotal = totalInventoryPurchased.value.get(supplierItem.record.id) || 0
+    totalInventoryPurchased.value.set(supplierItem.record.id, currentTotal + actualQty)
+    
+    const supplierHistory = supplierPurchaseHistory.value.get(supplierItem.supplierId) || { totalSpent: 0, totalItems: 0 }
+    supplierPurchaseHistory.value.set(supplierItem.supplierId, {
+      totalSpent: supplierHistory.totalSpent + totalCost,
+      totalItems: supplierHistory.totalItems + actualQty
+    })
+    
+    const invItemIndex = supplierInventory.value.findIndex(i => i.record.id === supplierItem.record.id)
+    if (invItemIndex >= 0) {
+      supplierInventory.value[invItemIndex].quantityAvailable -= actualQty
+      if (supplierInventory.value[invItemIndex].quantityAvailable <= 0) {
+        supplierInventory.value.splice(invItemIndex, 1)
+      }
+    }
+    
+    budget.value -= totalCost
+    dailyCost.value += totalCost
+    
+    const perfIndex = recordPerformances.value.findIndex(p => p.recordId === supplierItem.record.id)
+    if (perfIndex < 0) {
+      recordPerformances.value.push(createEmptyPerformance(supplierItem.record.id))
+    }
+    
+    recordPerformances.value = updateSellThroughRates(
+      recordPerformances.value,
+      inventory.value,
+      totalInventoryPurchased.value
+    )
+    
+    const riskApplied = Math.random() < supplierItem.riskFactor * 0.3
+    let finalMessage = `成功购入 ${actualQty} 张《${supplierItem.record.title}》！`
+    if (riskApplied) {
+      const invItem = inventory.value.find(i => i.record.id === supplierItem.record.id)
+      if (invItem) {
+        const damage = Math.floor(5 + Math.random() * 15)
+        invItem.conditionScore = Math.max(10, invItem.conditionScore - damage)
+        finalMessage += ` 注意：运输中品相下降了 ${damage} 分！`
+      }
+    }
+    
+    return { 
+      success: true, 
+      message: finalMessage,
+      totalCost,
+      quantity: actualQty
+    }
+  }
+
   const purchaseRecord = (record: Record, quantity: number = 1) => {
+    const supplierItem = getSupplierInventoryItem(record.id)
+    if (supplierItem) {
+      const result = purchaseFromSupplier(supplierItem, quantity)
+      return result.success
+    }
+    
     const totalCost = record.costPrice * quantity
     if (budget.value < totalCost) return false
 
@@ -354,13 +523,28 @@ export const useGameStore = defineStore('game', () => {
       inventory.value.push({
         record,
         quantity,
-        purchaseDate: Date.now(),
+        purchaseDate: currentDay.value,
         conditionScore: getConditionScoreFromLabel(record.condition)
       })
     }
 
+    const currentTotal = totalInventoryPurchased.value.get(record.id) || 0
+    totalInventoryPurchased.value.set(record.id, currentTotal + quantity)
+    
     budget.value -= totalCost
     dailyCost.value += totalCost
+    
+    const perfIndex = recordPerformances.value.findIndex(p => p.recordId === record.id)
+    if (perfIndex < 0) {
+      recordPerformances.value.push(createEmptyPerformance(record.id))
+    }
+    
+    recordPerformances.value = updateSellThroughRates(
+      recordPerformances.value,
+      inventory.value,
+      totalInventoryPurchased.value
+    )
+    
     return true
   }
 
@@ -584,7 +768,7 @@ export const useGameStore = defineStore('game', () => {
         currentLevelMemberSales.value += 1
       }
 
-      salesHistory.value.push({
+      const saleRecord: SaleRecord = {
         recordId: record.id,
         customerId: customer.id,
         salePrice,
@@ -595,7 +779,24 @@ export const useGameStore = defineStore('game', () => {
         memberLevel: memberProfile?.level || null,
         growthPointsEarned,
         isMemberPurchase
-      })
+      }
+      
+      salesHistory.value.push(saleRecord)
+      
+      const invItem = inventory.value.find(i => i.record.id === record.id)
+      const daysInStock = invItem ? currentDay.value - invItem.purchaseDate : 1
+      recordPerformances.value = updatePerformanceAfterSale(
+        recordPerformances.value,
+        saleRecord,
+        daysInStock,
+        currentDay.value
+      )
+      
+      recordPerformances.value = updateSellThroughRates(
+        recordPerformances.value,
+        inventory.value,
+        totalInventoryPurchased.value
+      )
 
       slot.inventoryId = null
       slot.conditionScore = null
@@ -808,6 +1009,14 @@ export const useGameStore = defineStore('game', () => {
           resetDailyStats()
           phase.value = 'purchase'
           stopPlaying()
+          
+          availableSuppliers.value = getAvailableSuppliersForLevel(currentLevel.value, shopReputation.value)
+          if (currentSupplierId.value && !availableSuppliers.value.some(s => s.id === currentSupplierId.value)) {
+            currentSupplierId.value = availableSuppliers.value.length > 0 ? availableSuppliers.value[0].id : null
+          }
+          if (currentSupplierId.value) {
+            refreshSupplierInventory()
+          }
         }
         break
     }
@@ -897,6 +1106,14 @@ export const useGameStore = defineStore('game', () => {
     dailyRenovationCost,
     dailyConditionDegraded,
     levelStartReputation,
+    availableSuppliers,
+    currentSupplierId,
+    currentSupplier,
+    supplierInventory,
+    currentSupplierInventory,
+    recordPerformances,
+    inventoryRiskScore,
+    purchaseRecommendations,
     baseLevelConfig,
     currentLevelConfig,
     wordOfMouthConfig,
@@ -913,7 +1130,12 @@ export const useGameStore = defineStore('game', () => {
     memberStats,
     memberLevelProgress,
     isMemberTargetsComplete,
+    supplierStats,
     startLevel,
+    selectSupplier,
+    refreshSupplierInventory,
+    getSupplierInventoryItem,
+    purchaseFromSupplier,
     purchaseRecord,
     placeToDisplay,
     removeFromDisplay,

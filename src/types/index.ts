@@ -192,6 +192,49 @@ export interface LevelReward {
   evaluation: LevelEvaluation | null
 }
 
+export type SupplierType = 'wholesaler' | 'specialist' | 'collector' | 'importer' | 'discount'
+
+export interface Supplier {
+  id: string
+  name: string
+  type: SupplierType
+  icon: string
+  description: string
+  reputation: number
+  priceModifier: number
+  rarityDistribution: number[]
+  genreFocus: Genre[]
+  stockRiskModifier: number
+  deliveryDays: number
+  minOrderAmount: number
+  specialOfferChance: number
+}
+
+export interface SupplierInventoryItem {
+  record: Record
+  supplierId: string
+  adjustedCostPrice: number
+  stockRisk: 'low' | 'medium' | 'high'
+  riskFactor: number
+  expectedTurnoverRate: number
+  historicalProfitMargin: number
+  salePerformanceScore: number
+  quantityAvailable: number
+  isSpecialOffer: boolean
+  discountPercent: number
+}
+
+export interface RecordPerformance {
+  recordId: string
+  totalSold: number
+  totalRevenue: number
+  totalProfit: number
+  avgDaysInStock: number
+  sellThroughRate: number
+  customerSatisfaction: number
+  lastSaleDate: number | null
+}
+
 export interface GameState {
   currentLevel: number
   currentDay: number
@@ -215,4 +258,8 @@ export interface GameState {
   lastLevelReward: LevelReward | null
   dailyRenovationCost: number
   dailyConditionDegraded: number
+  availableSuppliers: Supplier[]
+  currentSupplierId: string | null
+  supplierInventory: SupplierInventoryItem[]
+  recordPerformances: RecordPerformance[]
 }
