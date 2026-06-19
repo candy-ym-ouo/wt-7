@@ -2,9 +2,10 @@
 import { useGameStore } from '@/stores/game'
 import { ref, computed } from 'vue'
 import VinylRecord from './VinylRecord.vue'
-import type { CollectionItem, MemberProfile, MemberLevel } from '@/types'
+import type { CollectionItem, MemberProfile, MemberLevel, AlbumEntry, AlbumCategory, SpecialCustomerConfig } from '@/types'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
 import { getConditionLabel, getConditionColor, getConditionDescription, getRenovationOptions } from '@/data/condition'
+import { checkAlbumActivation } from '@/data/album'
 
 const emit = defineEmits<{
   close: []
@@ -13,11 +14,13 @@ const emit = defineEmits<{
 const gameStore = useGameStore()
 const selectedItem = ref<CollectionItem | null>(null)
 const selectedMember = ref<MemberProfile | null>(null)
+const selectedAlbum = ref<AlbumEntry | null>(null)
 const filterGenre = ref<string>('all')
 const sortBy = ref<'date' | 'price' | 'rarity' | 'value'>('date')
-const activeTab = ref<'records' | 'members'>('records')
+const activeTab = ref<'records' | 'members' | 'album'>('records')
 const memberSortBy = ref<'level' | 'visits' | 'spent'>('level')
 const memberLevelFilter = ref<MemberLevel | 'all'>('all')
+const selectedAlbumCategory = ref<string | null>(null)
 
 const genres = computed(() => {
   const gs = new Set(gameStore.collection.map(c => c.record.genre))
@@ -189,6 +192,72 @@ const levelNameMap: Record<MemberLevel, string> = {
   Platinum: '铂金会员',
   Diamond: '钻石会员'
 }
+
+const albumStats = computed(() => {
+  return gameStore.albumState
+})
+
+const filteredAlbumCategories = computed(() => {
+  if (!selectedAlbumCategory.value) {
+    return gameStore.albumState.categories
+  }
+  return gameStore.albumState.categories.filter(c => c.id === selectedAlbumCategory.value)
+})
+
+const getAlbumEntryProgress = (entry: AlbumEntry): number => {
+  if (entry.isActivated) return 100
+  const total = entry.requiredRecordIds.length
+  const collected = entry.requiredRecordIds.filter(id => {
+    const item = gameStore.collection.find(c => c.record.id === id)
+    return item && item.conditionScore >= entry.requiredMinCondition && item.record.rarity >= entry.requiredMinRarity
+  }).length
+  return Math.round((collected / total) * 100)
+}
+
+const isAlbumEntryAvailable = (entry: AlbumEntry): boolean => {
+  return checkAlbumActivation(entry, gameStore.collection)
+}
+
+const getRecordById = (id: string) => {
+  return gameStore.collection.find(c => c.record.id === id)?.record
+}
+
+const openAlbumDetail = (entry: AlbumEntry) => {
+  selectedAlbum.value = entry
+}
+
+const closeAlbumDetail = () => {
+  selectedAlbum.value = null
+}
+
+const selectCategory = (categoryId: string | null) => {
+  selectedAlbumCategory.value = categoryId
+}
+
+const unlockedSpecialCustomers = computed(() => {
+  return gameStore.specialCustomersState.filter(sc => sc.isUnlocked)
+})
+
+const getBonusTypeLabel = (type: string): string => {
+  const labels: Record<string, string> = {
+    'reputation': '声望',
+    'match_score': '匹配度',
+    'customer_budget': '顾客预算',
+    'buy_chance': '购买概率',
+    'level_reward': '关卡奖励',
+    'special_customer': '特殊顾客',
+    'price_bonus': '售价加成',
+    'record_unlock': '稀有唱片'
+  }
+  return labels[type] || type
+}
+
+const formatBonusValue = (type: string, value: number): string => {
+  if (type === 'reputation' || type === 'match_score') {
+    return `+${value}`
+  }
+  return `+${Math.round(value * 100)}%`
+}
 </script>
 
 <template>
@@ -209,6 +278,14 @@ const levelNameMap: Record<MemberLevel, string> = {
       >
         📀 唱片收藏
         <span class="tab-count">{{ gameStore.collection.length }}</span>
+      </button>
+      <button
+        class="cv-tab"
+        :class="{ active: activeTab === 'album' }"
+        @click="activeTab = 'album'"
+      >
+        📖 收藏图鉴
+        <span class="tab-count">{{ albumStats.totalActivated }}/{{ albumStats.totalAvailable }}</span>
       </button>
       <button
         class="cv-tab"
@@ -398,6 +475,119 @@ const levelNameMap: Record<MemberLevel, string> = {
         <div class="ec-icon">👥</div>
         <h3>还没有会员</h3>
         <p>让顾客满意，他们会成为你的忠实会员！高满意度的顾客更容易加入会员。</p>
+      </div>
+    </template>
+
+    <template v-else-if="activeTab === 'album'">
+      <div class="album-stats-card">
+        <div class="asc-grid">
+          <div class="asc-item">
+            <span class="asc-icon">📖</span>
+            <div class="asc-info">
+              <span class="asc-value">{{ albumStats.totalActivated }}/{{ albumStats.totalAvailable }}</span>
+              <span class="asc-label">已激活图鉴</span>
+            </div>
+          </div>
+          <div class="asc-item">
+            <span class="asc-icon">✨</span>
+            <div class="asc-info">
+              <span class="asc-value">{{ activatedAlbumBonuses.length }}</span>
+              <span class="asc-label">激活加成</span>
+            </div>
+          </div>
+          <div class="asc-item">
+            <span class="asc-icon">🎭</span>
+            <div class="asc-info">
+              <span class="asc-value">{{ unlockedSpecialCustomers.length }}/{{ gameStore.specialCustomersState.length }}</span>
+              <span class="asc-label">特殊顾客</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="gameStore.collectionBonuses.length > 0" class="active-bonuses-card">
+        <h4 class="abc-title">🎁 当前生效的收藏加成</h4>
+        <div class="abc-list">
+          <div v-for="(bonus, index) in gameStore.collectionBonuses" :key="index" class="abc-item">
+            <span class="abc-bonus">{{ bonus.description }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cv-toolbar">
+        <div class="filter-group">
+          <button
+            class="filter-btn"
+            :class="{ active: selectedAlbumCategory === null }"
+            @click="selectCategory(null)"
+          >
+            全部分类
+          </button>
+          <button
+            v-for="category in albumStats.categories"
+            :key="category.id"
+            class="filter-btn"
+            :class="{ active: selectedAlbumCategory === category.id }"
+            @click="selectCategory(category.id)"
+          >
+            {{ category.icon }} {{ category.name }}
+          </button>
+        </div>
+      </div>
+
+      <div class="album-categories">
+        <div v-for="category in filteredAlbumCategories" :key="category.id" class="album-category">
+          <div class="ac-header">
+            <span class="ac-icon">{{ category.icon }}</span>
+            <div class="ac-info">
+              <h3 class="ac-name">{{ category.name }}</h3>
+              <p class="ac-desc">{{ category.description }}</p>
+            </div>
+          </div>
+
+          <div class="album-entries">
+            <div
+              v-for="entry in category.entries"
+              :key="entry.id"
+              class="album-entry"
+              :class="{ 
+                activated: entry.isActivated, 
+                available: isAlbumEntryAvailable(entry) && !entry.isActivated 
+              }"
+              @click="openAlbumDetail(entry)"
+            >
+              <div class="ae-icon">{{ entry.icon }}</div>
+              <div class="ae-info">
+                <h4 class="ae-name">
+                  {{ entry.name }}
+                  <span v-if="entry.isActivated" class="ae-activated-badge">✓ 已激活</span>
+                </h4>
+                <p class="ae-desc">{{ entry.description }}</p>
+                <div class="ae-progress">
+                  <div class="ae-progress-bar">
+                    <div 
+                      class="ae-progress-fill" 
+                      :style="{ 
+                        width: getAlbumEntryProgress(entry) + '%',
+                        background: entry.isActivated ? 'var(--success)' : 'var(--accent-gold)'
+                      }"
+                    ></div>
+                  </div>
+                  <span class="ae-progress-text">{{ getAlbumEntryProgress(entry) }}%</span>
+                </div>
+                <div class="ae-bonuses">
+                  <span 
+                    v-for="(bonus, idx) in entry.bonuses" 
+                    :key="idx" 
+                    class="ae-bonus-tag"
+                  >
+                    {{ getBonusTypeLabel(bonus.type) }} {{ formatBonusValue(bonus.type, bonus.value) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -689,6 +879,86 @@ const levelNameMap: Record<MemberLevel, string> = {
             <p v-if="renovateMessage" class="renovate-message" :class="renovateMessageType">
               {{ renovateMessage }}
             </p>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="selectedAlbum" class="modal-overlay" @click.self="closeAlbumDetail">
+        <div class="modal-content animate-slide-up">
+          <div class="modal-header">
+            <h3>📖 图鉴详情</h3>
+            <button class="close-btn" @click="closeAlbumDetail">✕</button>
+          </div>
+
+          <div class="modal-body">
+            <div class="album-detail-header">
+              <div class="adh-icon">{{ selectedAlbum.icon }}</div>
+              <div class="adh-info">
+                <h2 class="adh-name">
+                  {{ selectedAlbum.name }}
+                  <span v-if="selectedAlbum.isActivated" class="adh-activated">✓ 已激活</span>
+                </h2>
+                <p class="adh-desc">{{ selectedAlbum.description }}</p>
+                <div class="adh-progress">
+                  <div class="adh-progress-bar">
+                    <div 
+                      class="adh-progress-fill" 
+                      :style="{ 
+                        width: getAlbumEntryProgress(selectedAlbum) + '%',
+                        background: selectedAlbum.isActivated ? 'var(--success)' : 'var(--accent-gold)'
+                      }"
+                    ></div>
+                  </div>
+                  <span class="adh-progress-text">{{ getAlbumEntryProgress(selectedAlbum) }}% 完成</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="album-requirements card">
+              <h4 class="ar-title">📋 激活条件</h4>
+              <div class="ar-info">
+                <span>最低品相：{{ getConditionLabel(selectedAlbum.requiredMinCondition) }}</span>
+                <span>最低稀有度：{{ selectedAlbum.requiredMinRarity }} 星</span>
+              </div>
+              <div class="ar-records">
+                <div 
+                  v-for="recordId in selectedAlbum.requiredRecordIds" 
+                  :key="recordId"
+                  class="ar-record-item"
+                  :class="{ collected: getRecordById(recordId) }"
+                >
+                  <span class="arr-icon">
+                    {{ getRecordById(recordId) ? '✓' : '○' }}
+                  </span>
+                  <span class="arr-title">
+                    {{ getRecordById(recordId)?.title || '未收集' }}
+                  </span>
+                  <span v-if="getRecordById(recordId)" class="arr-rarity">
+                    {{ rarityStars(getRecordById(recordId)!.rarity) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="album-bonuses card">
+              <h4 class="ab-title">🎁 激活加成</h4>
+              <div class="ab-list">
+                <div 
+                  v-for="(bonus, idx) in selectedAlbum.bonuses" 
+                  :key="idx"
+                  class="ab-item"
+                  :class="{ active: selectedAlbum.isActivated }"
+                >
+                  <span class="ab-icon">✨</span>
+                  <span class="ab-type">{{ getBonusTypeLabel(bonus.type) }}</span>
+                  <span class="ab-value">{{ formatBonusValue(bonus.type, bonus.value) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedAlbum.activatedDate" class="album-activated-date">
+              激活时间：{{ formatDate(selectedAlbum.activatedDate) }}
+            </div>
           </div>
         </div>
       </div>
@@ -1719,5 +1989,437 @@ const levelNameMap: Record<MemberLevel, string> = {
 .renovate-message.error {
   color: var(--danger);
   background: rgba(245, 101, 101, 0.1);
+}
+
+.album-stats-card {
+  margin: 12px 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.1) 0%, rgba(233, 69, 96, 0.1) 100%);
+  border: 1px solid rgba(246, 224, 94, 0.3);
+  border-radius: 12px;
+}
+
+.asc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.asc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  background: var(--bg-card);
+  border-radius: 8px;
+}
+
+.asc-icon {
+  font-size: 20px;
+}
+
+.asc-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.asc-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  line-height: 1.1;
+}
+
+.asc-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.active-bonuses-card {
+  margin: 0 16px 12px;
+  padding: 14px;
+  background: rgba(72, 187, 120, 0.08);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+  border-radius: 12px;
+}
+
+.abc-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.abc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.abc-item {
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.album-categories {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.album-category {
+  background: var(--bg-card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.ac-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: linear-gradient(90deg, rgba(246, 224, 94, 0.08) 0%, transparent 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.ac-icon {
+  font-size: 28px;
+}
+
+.ac-info h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.ac-info p {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.album-entries {
+  display: flex;
+  flex-direction: column;
+}
+
+.album-entry {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.6;
+}
+
+.album-entry:last-child {
+  border-bottom: none;
+}
+
+.album-entry.available {
+  opacity: 0.9;
+  background: rgba(246, 224, 94, 0.05);
+}
+
+.album-entry.activated {
+  opacity: 1;
+  background: rgba(72, 187, 120, 0.08);
+}
+
+.album-entry:hover {
+  background: rgba(246, 224, 94, 0.1);
+  transform: translateX(4px);
+}
+
+.ae-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.ae-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ae-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ae-activated-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--success);
+  background: rgba(72, 187, 120, 0.2);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.ae-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ae-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ae-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ae-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.ae-progress-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 40px;
+  text-align: right;
+}
+
+.ae-bonuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ae-bonus-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-gold);
+  background: rgba(246, 224, 94, 0.15);
+  padding: 3px 8px;
+  border-radius: 8px;
+}
+
+.album-detail-header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.adh-icon {
+  font-size: 56px;
+  flex-shrink: 0;
+}
+
+.adh-info {
+  flex: 1;
+}
+
+.adh-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adh-activated {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--success);
+  background: rgba(72, 187, 120, 0.2);
+  padding: 3px 8px;
+  border-radius: 8px;
+}
+
+.adh-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.adh-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.adh-progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.adh-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.adh-progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-gold);
+  white-space: nowrap;
+}
+
+.album-requirements {
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.ar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.ar-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.ar-records {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ar-record-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.ar-record-item.collected {
+  opacity: 1;
+  background: rgba(72, 187, 120, 0.1);
+}
+
+.arr-icon {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.ar-record-item.collected .arr-icon {
+  color: var(--success);
+}
+
+.arr-title {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.ar-record-item.collected .arr-title {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.arr-rarity {
+  font-size: 10px;
+  color: var(--accent-gold);
+}
+
+.album-bonuses {
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.ab-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.ab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ab-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  opacity: 0.5;
+  transition: all 0.2s;
+}
+
+.ab-item.active {
+  opacity: 1;
+  background: rgba(246, 224, 94, 0.1);
+  border: 1px solid rgba(246, 224, 94, 0.3);
+}
+
+.ab-icon {
+  font-size: 16px;
+}
+
+.ab-type {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ab-item.active .ab-type {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ab-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-gold);
+}
+
+.album-activated-date {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
 }
 </style>

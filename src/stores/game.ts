@@ -5,7 +5,7 @@ import type {
   Customer, SaleRecord, DailyStats, CollectionItem,
   MemberProfile, MemberLevel, MemberStats, LevelReward,
   LevelEvaluation, Supplier, SupplierInventoryItem, RecordPerformance,
-  TimeSlot, TimeSlotStats, BargainState, BargainRound
+  TimeSlot, TimeSlotStats, BargainState, BargainRound, Genre
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -38,7 +38,8 @@ import {
   getWordOfMouthTier,
   getCustomerCountWithReputation,
   getBuyChanceBonus,
-  calculateLevelEvaluation
+  calculateLevelEvaluation,
+  getBudgetWithReputation
 } from '@/data/wordOfMouth'
 import {
   getAvailableSuppliersForLevel,
@@ -59,6 +60,23 @@ import {
   getImpulseBuyChance,
   adjustPriceSensitivity
 } from '@/data/timeSlots'
+import {
+  albumCategories,
+  specialCustomers,
+  checkAlbumActivation,
+  activateAlbum,
+  getActivatedBonuses,
+  getTotalAlbumStats,
+  calculateTotalAlbumBonus,
+  getCollectionValueBonus,
+  getFavoriteBonuses
+} from '@/data/album'
+import type {
+  AlbumState,
+  SpecialCustomerConfig,
+  CollectionBonus,
+  AlbumBonusType
+} from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -127,6 +145,46 @@ export const useGameStore = defineStore('game', () => {
   })
   const slotSatisfactionSum = ref(0)
   const currentBargain = ref<BargainState | null>(null)
+
+  const albumState = ref<AlbumState>({
+    categories: JSON.parse(JSON.stringify(albumCategories)),
+    activatedBonuses: [],
+    totalActivated: 0,
+    totalAvailable: getTotalAlbumStats(albumCategories).totalAvailable
+  })
+
+  const specialCustomersState = ref<SpecialCustomerConfig[]>(JSON.parse(JSON.stringify(specialCustomers)))
+  const collectionBonuses = ref<CollectionBonus[]>([])
+  const recentlyActivatedAlbums = ref<string[]>([])
+
+  const totalCollectionValue = computed(() => {
+    return collection.value.reduce((sum, item) => sum + item.collectionValue, 0)
+  })
+
+  const favoriteCount = computed(() => {
+    return collection.value.filter(c => c.isFavorite).length
+  })
+
+  const activatedAlbumBonuses = computed(() => {
+    return getActivatedBonuses(albumState.value.categories)
+  })
+
+  const getAlbumBonus = (bonusType: AlbumBonusType): number => {
+    const albumValue = calculateTotalAlbumBonus(activatedAlbumBonuses.value, bonusType)
+    const collectionValue = collectionBonuses.value
+      .filter(b => b.bonusType === bonusType)
+      .reduce((sum, b) => sum + b.value, 0)
+    return albumValue + collectionValue
+  }
+
+  const reputationBonusFromCollection = computed(() => getAlbumBonus('reputation'))
+  const customerBudgetBonus = computed(() => getAlbumBonus('customer_budget'))
+  const matchScoreBonusFromCollection = computed(() => getAlbumBonus('match_score'))
+  const buyChanceBonusFromCollection = computed(() => getAlbumBonus('buy_chance'))
+  const levelRewardBonus = computed(() => getAlbumBonus('level_reward'))
+  const specialCustomerBonus = computed(() => getAlbumBonus('special_customer'))
+  const priceBonusFromCollection = computed(() => getAlbumBonus('price_bonus'))
+  const recordUnlockBonus = computed(() => getAlbumBonus('record_unlock'))
 
   const baseLevelConfig = computed(() => getLevelById(currentLevel.value))
   const currentLevelConfig = computed(() => getScaledLevelConfig(currentLevel.value, shopReputation.value))
@@ -301,26 +359,28 @@ export const useGameStore = defineStore('game', () => {
 
     if (!config) return reward
 
-    reward.baseReward = Math.floor(currentLevelProfit.value * 0.2) + config.id * 200
+    const levelRewardMultiplier = 1 + levelRewardBonus.value
+
+    reward.baseReward = Math.floor((currentLevelProfit.value * 0.2 + config.id * 200) * levelRewardMultiplier)
 
     const memberTargetRatio = currentLevelNewMembers.value / config.memberTargets.targetNewMembers
     reward.newMembersReward = Math.floor(
-      Math.min(1, memberTargetRatio) * config.memberTargets.targetNewMembers * 50
+      Math.min(1, memberTargetRatio) * config.memberTargets.targetNewMembers * 50 * levelRewardMultiplier
     )
 
     const returningRatio = currentLevelReturningVisits.value / Math.max(1, config.memberTargets.targetReturningVisits)
     reward.returningVisitsReward = Math.floor(
-      Math.min(1, returningRatio) * Math.max(1, config.memberTargets.targetReturningVisits) * 40
+      Math.min(1, returningRatio) * Math.max(1, config.memberTargets.targetReturningVisits) * 40 * levelRewardMultiplier
     )
 
     const actualMemberSalesRatio = currentLevelSales.value > 0
       ? currentLevelMemberSales.value / currentLevelSales.value
       : 0
     const ratioProgress = Math.min(1, actualMemberSalesRatio / config.memberTargets.targetMemberSalesRatio)
-    reward.memberRatioReward = Math.floor(ratioProgress * 300)
+    reward.memberRatioReward = Math.floor(ratioProgress * 300 * levelRewardMultiplier)
 
     if (isMemberTargetsComplete.value) {
-      reward.memberTargetsCompletedBonus = config.id * 500
+      reward.memberTargetsCompletedBonus = Math.floor(config.id * 500 * levelRewardMultiplier)
       reward.reputationBonus = 10 + config.id * 2
       reward.unlockedBonus.push('会员专属成就')
     }
@@ -338,6 +398,12 @@ export const useGameStore = defineStore('game', () => {
       reward.reputationBonus += 10
     }
 
+    const collectionRepBonus = reputationBonusFromCollection.value
+    if (collectionRepBonus > 0) {
+      reward.reputationBonus += collectionRepBonus
+      reward.unlockedBonus.push(`收藏图鉴声望 +${collectionRepBonus}`)
+    }
+
     const evaluation = calculateLevelEvaluation(
       currentLevelProfit.value,
       config.targetProfit,
@@ -348,13 +414,17 @@ export const useGameStore = defineStore('game', () => {
       levelStartReputation.value
     )
     reward.evaluation = evaluation
-    reward.wordOfMouthBonus = evaluation.wordOfMouthBonus
+    reward.wordOfMouthBonus = Math.floor(evaluation.wordOfMouthBonus * levelRewardMultiplier)
 
     if (evaluation.grade === 'S') {
       reward.unlockedBonus.push('完美通关！S级评价')
       reward.reputationBonus += 8
     } else if (evaluation.grade === 'A') {
       reward.reputationBonus += 3
+    }
+
+    if (levelRewardBonus.value > 0) {
+      reward.unlockedBonus.push(`图鉴关卡奖励 +${Math.floor(levelRewardBonus.value * 100)}%`)
     }
 
     reward.totalReward = reward.baseReward +
@@ -421,6 +491,9 @@ export const useGameStore = defineStore('game', () => {
     recordPerformances.value = []
     totalInventoryPurchased.value = new Map()
     supplierPurchaseHistory.value = new Map()
+    
+    checkAndActivateAlbums()
+    updateCollectionBonuses()
     
     if (currentSupplierId.value) {
       refreshSupplierInventory()
@@ -662,6 +735,59 @@ export const useGameStore = defineStore('game', () => {
     invItem.conditionScore = Math.round(totalScore / totalPieces)
   }
 
+  const applyCustomerBonuses = (customerList: Customer[]): Customer[] => {
+    const budgetMultiplier = 1 + customerBudgetBonus.value
+    return customerList.map(c => ({
+      ...c,
+      budget: Math.floor(c.budget * budgetMultiplier)
+    }))
+  }
+
+  const generateCustomersWithSpecial = (
+    count: number,
+    day: number,
+    timeSlot: TimeSlot
+  ): Customer[] => {
+    const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
+    const result = generateDailyCustomers(
+      count,
+      day,
+      members.value,
+      shopReputation.value,
+      inventoryGenres,
+      timeSlot
+    )
+
+    let customers = applyCustomerBonuses(result.customers)
+
+    const unlockedSpecialCustomers = specialCustomersState.value.filter(sc => sc.isUnlocked)
+    const specialCustomersToAdd: Customer[] = []
+
+    for (const sc of unlockedSpecialCustomers) {
+      const chance = getSpecialCustomerAppearanceChance(sc)
+      if (Math.random() < chance) {
+        const specialCustomer = generateSpecialCustomer(
+          sc.id,
+          sc,
+          shopReputation.value,
+          inventoryGenres,
+          timeSlot
+        )
+        specialCustomersToAdd.push(specialCustomer)
+      }
+    }
+
+    if (specialCustomersToAdd.length > 0) {
+      const slotsToReplace = Math.min(specialCustomersToAdd.length, Math.floor(customers.length * 0.3))
+      for (let i = 0; i < slotsToReplace && i < specialCustomersToAdd.length; i++) {
+        const replaceIndex = Math.floor(Math.random() * customers.length)
+        customers[replaceIndex] = specialCustomersToAdd[i]
+      }
+    }
+
+    return customers.sort(() => Math.random() - 0.5)
+  }
+
   const startBusinessPhase = () => {
     if (!baseLevelConfig.value) return
     const baseCount = Math.min(
@@ -670,16 +796,12 @@ export const useGameStore = defineStore('game', () => {
     )
     const totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
     const slotCount = getCustomerCountForSlot(totalCustomerCount, currentTimeSlot.value)
-    const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
-    const result = generateDailyCustomers(
+
+    customers.value = generateCustomersWithSpecial(
       slotCount,
       currentDay.value,
-      members.value,
-      shopReputation.value,
-      inventoryGenres,
       currentTimeSlot.value
     )
-    customers.value = result.customers
 
     dailyReturningCustomers.value = customers.value.filter(c => c.isReturningCustomer).length
     currentLevelReturningVisits.value += dailyReturningCustomers.value
@@ -711,16 +833,13 @@ export const useGameStore = defineStore('game', () => {
     )
     const totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
     const nightCount = getCustomerCountForSlot(totalCustomerCount, 'night')
-    const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
-    const result = generateDailyCustomers(
+
+    customers.value = generateCustomersWithSpecial(
       nightCount,
       currentDay.value,
-      members.value,
-      shopReputation.value,
-      inventoryGenres,
       'night'
     )
-    customers.value = result.customers
+
     dailyReturningCustomers.value += customers.value.filter(c => c.isReturningCustomer).length
     currentLevelReturningVisits.value += customers.value.filter(c => c.isReturningCustomer).length
     currentCustomerIndex.value = 0
@@ -744,16 +863,17 @@ export const useGameStore = defineStore('game', () => {
   const getCustomerRecommendations = (customer: Customer) => {
     const displayed = displayedRecords.value
     const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
+    const collectionMatchBonus = matchScoreBonusFromCollection.value
     type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number }
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
-      let finalScore = score
+      let finalScore = score + collectionMatchBonus
       if (currentPlayingRecord.value?.id === d.item.record.id) {
         finalScore += playBoost
       }
       const conditionImpact = getConditionImpactOnSales(d.conditionScore)
       finalScore += conditionImpact.buyChanceModifier * 100
-      return { slot: d.slot, item: d.item, conditionScore: d.conditionScore, score: finalScore } as ScoredRecord
+      return { slot: d.slot, item: d.item, conditionScore: d.conditionScore, score: Math.min(100, finalScore) } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
   }
@@ -987,13 +1107,19 @@ export const useGameStore = defineStore('game', () => {
       salePrice = Math.floor(salePrice * (1 - customer.memberDiscount))
     }
 
+    if (priceBonusFromCollection.value > 0) {
+      salePrice = Math.floor(salePrice * (1 + priceBonusFromCollection.value))
+    }
+
     const score = calculateMatchScore(customer, record, shopReputation.value)
     const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
-    const finalScore = currentPlayingRecord.value?.id === record.id ? score + playBoost : score
+    const collectionMatchBonus = matchScoreBonusFromCollection.value
+    const finalScore = Math.min(100, (currentPlayingRecord.value?.id === record.id ? score + playBoost : score) + collectionMatchBonus)
 
     let buyChance = finalScore / 100
     buyChance += conditionImpact.buyChanceModifier
     buyChance += getBuyChanceBonus(shopReputation.value)
+    buyChance += buyChanceBonusFromCollection.value
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (salePrice > customer.budget) {
@@ -1250,7 +1376,7 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  const renovateCollectionItem = (recordId: string, targetScore: number): { success: boolean; cost: number; message: string } => {
+  const renovateCollectionItem = (recordId: string, targetScore: number): { success: boolean; cost: number; message: string; newlyActivated?: string[] } => {
     const item = collection.value.find(c => c.record.id === recordId)
     if (!item) return { success: false, cost: 0, message: '收藏品不存在' }
 
@@ -1269,10 +1395,19 @@ export const useGameStore = defineStore('game', () => {
     dailyRenovationCost.value += cost
     dailyCost.value += cost
 
+    const newlyActivated = checkAndActivateAlbums()
+    updateCollectionBonuses()
+
+    let message = `翻新成功！《${item.record.title}》品相提升至 ${getConditionLabel(targetScore)}，收藏价值 ¥${item.collectionValue}`
+    if (newlyActivated.length > 0) {
+      message += ` 🎉 激活 ${newlyActivated.length} 个新图鉴！`
+    }
+
     return {
       success: true,
       cost,
-      message: `翻新成功！《${item.record.title}》品相提升至 ${getConditionLabel(targetScore)}，收藏价值 ¥${item.collectionValue}`
+      message,
+      newlyActivated
     }
   }
 
@@ -1388,12 +1523,18 @@ export const useGameStore = defineStore('game', () => {
       conditionScore,
       collectionValue: collValue
     })
+
+    const newlyActivated = checkAndActivateAlbums()
+    updateCollectionBonuses()
+
+    return newlyActivated
   }
 
   const toggleFavorite = (recordId: string) => {
     const item = collection.value.find(c => c.record.id === recordId)
     if (item) {
       item.isFavorite = !item.isFavorite
+      updateCollectionBonuses()
     }
   }
 
@@ -1409,6 +1550,107 @@ export const useGameStore = defineStore('game', () => {
     if (member) {
       member.notes = notes
     }
+  }
+
+  const checkAndActivateAlbums = () => {
+    const newlyActivated: string[] = []
+    const reputationGains: number[] = []
+
+    for (let i = 0; i < albumState.value.categories.length; i++) {
+      const category = albumState.value.categories[i]
+      for (let j = 0; j < category.entries.length; j++) {
+        const entry = category.entries[j]
+        if (!entry.isActivated && checkAlbumActivation(entry, collection.value)) {
+          albumState.value.categories[i].entries[j] = activateAlbum(entry)
+          newlyActivated.push(entry.id)
+          recentlyActivatedAlbums.value.push(entry.id)
+
+          const repBonus = entry.bonuses.find(b => b.type === 'reputation')
+          if (repBonus) {
+            reputationGains.push(repBonus.value)
+          }
+        }
+      }
+    }
+
+    if (newlyActivated.length > 0) {
+      const stats = getTotalAlbumStats(albumState.value.categories)
+      albumState.value.totalActivated = stats.totalActivated
+      albumState.value.activatedBonuses = getActivatedBonuses(albumState.value.categories)
+
+      const totalRepGain = reputationGains.reduce((sum, val) => sum + val, 0)
+      if (totalRepGain > 0) {
+        shopReputation.value = Math.min(100, shopReputation.value + totalRepGain)
+      }
+
+      updateSpecialCustomersUnlock()
+      updateCollectionBonuses()
+    }
+
+    return newlyActivated
+  }
+
+  const updateSpecialCustomersUnlock = () => {
+    const activatedAlbumIds = new Set<string>()
+    for (const category of albumState.value.categories) {
+      for (const entry of category.entries) {
+        if (entry.isActivated) {
+          activatedAlbumIds.add(entry.id)
+        }
+      }
+    }
+
+    for (let i = 0; i < specialCustomersState.value.length; i++) {
+      const sc = specialCustomersState.value[i]
+      if (!sc.isUnlocked) {
+        const allRequired = sc.requiredAlbumIds.every(id => activatedAlbumIds.has(id))
+        if (allRequired) {
+          specialCustomersState.value[i].isUnlocked = true
+        }
+      }
+    }
+  }
+
+  const updateCollectionBonuses = () => {
+    const valueBonuses = getCollectionValueBonus(totalCollectionValue.value)
+    const favBonuses = getFavoriteBonuses(favoriteCount.value)
+    collectionBonuses.value = [...valueBonuses, ...favBonuses]
+  }
+
+  const generateSpecialCustomer = (baseId: string, config: SpecialCustomerConfig, reputation: number, _inventoryGenres: Genre[], timeSlot: TimeSlot): Customer => {
+    const preference = {
+      favoriteGenres: (['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk'] as Genre[]).sort(() => Math.random() - 0.5).slice(0, 3),
+      priceRange: [300, 800] as [number, number],
+      preferredRarity: [4, 5],
+      preferenceStrength: 0.8 + Math.random() * 0.2
+    }
+
+    const slotConfig = getTimeSlotConfig(timeSlot)
+    const baseBudget = preference.priceRange[1] * (2.5 + Math.random() * 1.5)
+    const budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * slotConfig.budgetModifier * config.budgetMultiplier)
+
+    return {
+      id: `cust-special-${baseId}-${Date.now()}`,
+      name: config.name,
+      avatar: config.avatar,
+      preference,
+      budget,
+      patience: 60 + Math.floor(Math.random() * 40),
+      satisfaction: 70 + config.satisfactionBonus,
+      memberProfile: null,
+      isReturningCustomer: false,
+      memberDiscount: 0,
+      bargainAggressiveness: 0.1 + Math.random() * 0.3,
+      bargainToughness: 0.2 + Math.random() * 0.3,
+      willBargain: Math.random() < 0.2
+    }
+  }
+
+  const getSpecialCustomerAppearanceChance = (config: SpecialCustomerConfig): number => {
+    if (!config.isUnlocked) return 0
+    const baseChance = config.baseAppearanceChance
+    const albumMultiplier = 1 + specialCustomerBonus.value
+    return baseChance * config.albumBonusMultiplier * albumMultiplier
   }
 
   const goToNextLevel = () => {
@@ -1524,6 +1766,26 @@ export const useGameStore = defineStore('game', () => {
     calculateLevelReward,
     degradeAllRecords,
     renovateInventoryRecord,
-    renovateCollectionItem
+    renovateCollectionItem,
+    albumState,
+    specialCustomersState,
+    collectionBonuses,
+    totalCollectionValue,
+    favoriteCount,
+    activatedAlbumBonuses,
+    reputationBonusFromCollection,
+    customerBudgetBonus,
+    matchScoreBonusFromCollection,
+    buyChanceBonusFromCollection,
+    levelRewardBonus,
+    specialCustomerBonus,
+    priceBonusFromCollection,
+    recordUnlockBonus,
+    checkAndActivateAlbums,
+    updateSpecialCustomersUnlock,
+    updateCollectionBonuses,
+    generateSpecialCustomer,
+    getSpecialCustomerAppearanceChance,
+    getAlbumBonus
   }
 })

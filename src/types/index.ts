@@ -210,6 +210,65 @@ export interface CollectionItem {
   collectionValue: number
 }
 
+export type AlbumBonusType = 'record_unlock' | 'reputation' | 'special_customer' | 'level_reward' | 'price_bonus' | 'customer_budget' | 'match_score' | 'buy_chance'
+
+export interface AlbumBonus {
+  type: AlbumBonusType
+  value: number
+  description: string
+}
+
+export interface AlbumEntry {
+  id: string
+  name: string
+  description: string
+  icon: string
+  requiredRecordIds: string[]
+  requiredMinCondition: number
+  requiredMinRarity: number
+  bonuses: AlbumBonus[]
+  isActivated: boolean
+  activatedDate: number | null
+}
+
+export interface AlbumCategory {
+  id: string
+  name: string
+  description: string
+  icon: string
+  entries: AlbumEntry[]
+}
+
+export interface AlbumState {
+  categories: AlbumCategory[]
+  activatedBonuses: AlbumBonus[]
+  totalActivated: number
+  totalAvailable: number
+}
+
+export interface SpecialCustomerConfig {
+  id: string
+  name: string
+  avatar: string
+  description: string
+  baseAppearanceChance: number
+  albumBonusMultiplier: number
+  budgetMultiplier: number
+  satisfactionBonus: number
+  requiredAlbumIds: string[]
+  isUnlocked: boolean
+}
+
+export type CollectionBonusSource = 'album' | 'favorite' | 'high_value'
+
+export interface CollectionBonus {
+  source: CollectionBonusSource
+  sourceId: string
+  bonusType: AlbumBonusType
+  value: number
+  description: string
+}
+
 export type TimeSlot = 'afternoon' | 'night'
 
 export interface TimeSlotConfig {
@@ -325,4 +384,9 @@ export interface GameState {
   afternoonStats: TimeSlotStats
   nightStats: TimeSlotStats
   currentBargain: BargainState | null
+  albumState: AlbumState
+  specialCustomers: SpecialCustomerConfig[]
+  collectionBonuses: CollectionBonus[]
+  levelStartReputation: number
+  completedLevels: number[]
 }
