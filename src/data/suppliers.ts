@@ -1,6 +1,7 @@
-import type { Supplier, SupplierType, Genre, Record, RecordPerformance, SupplierInventoryItem } from '@/types'
+import type { Supplier, SupplierType, Genre, Record, RecordPerformance, SupplierInventoryItem, GenreMarketHeat } from '@/types'
 import { allRecords } from './records'
 import { getConditionScoreFromLabel } from './condition'
+import { getGenreMarketHeat } from './marketHeat'
 
 export const suppliers: Supplier[] = [
   {
@@ -203,6 +204,7 @@ export const generateSupplierInventory = (
   supplier: Supplier,
   unlockedGenres: Genre[],
   performances: RecordPerformance[],
+  marketHeatMap: Map<Genre, GenreMarketHeat>,
   excludeRecordIds: string[] = [],
   count: number = 8,
   rarityBonus: number = 0
@@ -219,7 +221,9 @@ export const generateSupplierInventory = (
     if (record.rarity >= 4 && rarityBonus > 0) {
       weight = weight * (1 + rarityBonus)
     }
-    return { record, weight: weight * genreBoost }
+    const genreHeat = getGenreMarketHeat(marketHeatMap, record.genre)
+    const heatBoost = 0.7 + genreHeat.heatValue * 0.8
+    return { record, weight: weight * genreBoost * heatBoost }
   })
   
   const totalWeight = weightedRecords.reduce((sum, item) => sum + item.weight, 0)
@@ -246,15 +250,25 @@ export const generateSupplierInventory = (
   }
   
   return selected.map(record => {
+    const genreHeat = getGenreMarketHeat(marketHeatMap, record.genre)
+    
     const basePrice = record.costPrice * supplier.priceModifier
+    const heatAdjustedBasePrice = basePrice * genreHeat.priceModifier
     const isSpecialOffer = Math.random() < supplier.specialOfferChance
     const discountPercent = isSpecialOffer ? Math.floor(10 + Math.random() * 20) : 0
-    const adjustedCostPrice = Math.round(isSpecialOffer ? basePrice * (1 - discountPercent / 100) : basePrice)
+    const adjustedCostPrice = Math.round(isSpecialOffer ? heatAdjustedBasePrice * (1 - discountPercent / 100) : heatAdjustedBasePrice)
     
     const stockRisk = calculateStockRisk(record, supplier, performances)
-    const expectedTurnoverRate = calculateExpectedTurnoverRate(record, performances)
-    const historicalProfitMargin = calculateHistoricalProfitMargin(record, performances, adjustedCostPrice)
-    const salePerformanceScore = calculateSalePerformanceScore(record, performances, adjustedCostPrice)
+    const baseTurnover = calculateExpectedTurnoverRate(record, performances)
+    const heatAdjustedTurnover = Math.max(0.05, Math.min(0.98, baseTurnover * genreHeat.demandModifier))
+    const baseProfitMargin = calculateHistoricalProfitMargin(record, performances, adjustedCostPrice)
+    const heatAdjustedProfitMargin = Math.max(0.05, baseProfitMargin * genreHeat.profitMarginModifier)
+    const basePerformance = calculateSalePerformanceScore(record, performances, adjustedCostPrice)
+    const heatPerformanceBonus = Math.round(genreHeat.heatValue * 15 - 7)
+    const salePerformanceScore = Math.max(0, Math.min(100, basePerformance + heatPerformanceBonus))
+    
+    const heatQuantityBoost = genreHeat.heatValue > 0.7 ? 1 : genreHeat.heatValue < 0.35 ? -1 : 0
+    const quantityAvailable = Math.max(1, Math.floor(1 + Math.random() * 5) + heatQuantityBoost)
     
     return {
       record,
@@ -262,12 +276,16 @@ export const generateSupplierInventory = (
       adjustedCostPrice,
       stockRisk: stockRisk.risk,
       riskFactor: stockRisk.factor,
-      expectedTurnoverRate,
-      historicalProfitMargin,
+      expectedTurnoverRate: heatAdjustedTurnover,
+      historicalProfitMargin: heatAdjustedProfitMargin,
       salePerformanceScore,
-      quantityAvailable: Math.floor(1 + Math.random() * 5),
+      quantityAvailable,
       isSpecialOffer,
-      discountPercent
+      discountPercent,
+      marketHeat: genreHeat.heatLevel,
+      marketHeatValue: genreHeat.heatValue,
+      marketPriceModifier: genreHeat.priceModifier,
+      marketTrend: genreHeat.trend
     }
   })
 }

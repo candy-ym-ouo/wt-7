@@ -133,6 +133,13 @@ import {
   getPromotionBuyChanceBoost,
   getAvailablePromotionsForLevel
 } from '@/data/promotions'
+import {
+  generateDailyMarketHeat,
+  getGenreMarketHeat,
+  getHottestGenres,
+  getColdestGenres
+} from '@/data/marketHeat'
+import type { GenreMarketHeat } from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -240,6 +247,9 @@ export const useGameStore = defineStore('game', () => {
   const dailyPromotionDiscountGiven = ref(0)
   const promotionHistory = ref<Map<string, ActivePromotion>>(new Map())
   const pendingBuyGiftPurchases = ref<Map<string, number>>(new Map())
+
+  const genreMarketHeat = ref<Map<Genre, GenreMarketHeat>>(new Map())
+  const previousDayHotGenres = ref<HotGenre[]>([])
 
   const totalCollectionValue = computed(() => {
     return collection.value.reduce((sum, item) => sum + item.collectionValue, 0)
@@ -358,7 +368,14 @@ export const useGameStore = defineStore('game', () => {
   })
 
   const purchaseRecommendations = computed(() => {
-    return generatePurchaseRecommendation(recordPerformances.value, inventory.value, budget.value)
+    const simplifiedRecords = allRecords.map(r => ({ id: r.id, genre: r.genre as Genre }))
+    return generatePurchaseRecommendation(
+      recordPerformances.value,
+      inventory.value,
+      budget.value,
+      genreMarketHeat.value,
+      simplifiedRecords
+    )
   })
 
   const supplierStats = computed(() => {
@@ -366,6 +383,13 @@ export const useGameStore = defineStore('game', () => {
       return supplierPurchaseHistory.value.get(supplierId) || { totalSpent: 0, totalItems: 0 }
     }
   })
+
+  const hottestGenresToday = computed(() => getHottestGenres(genreMarketHeat.value, 3))
+  const coldestGenresToday = computed(() => getColdestGenres(genreMarketHeat.value, 3))
+
+  const getGenreHeat = (genre: Genre): GenreMarketHeat => {
+    return getGenreMarketHeat(genreMarketHeat.value, genre)
+  }
   const displayedRecords = computed(() => {
     return displaySlots.value
       .filter(s => s.inventoryId && s.conditionScore !== null)
@@ -844,6 +868,9 @@ export const useGameStore = defineStore('game', () => {
     activePromotions.value = []
     promotionHistory.value.clear()
     
+    genreMarketHeat.value = generateDailyMarketHeat(1, new Map(), [])
+    previousDayHotGenres.value = []
+    
     availableSuppliers.value = getAvailableSuppliersForLevel(levelId, shopReputation.value)
     currentSupplierId.value = availableSuppliers.value.length > 0 ? availableSuppliers.value[0].id : null
     recordPerformances.value = []
@@ -919,6 +946,7 @@ export const useGameStore = defineStore('game', () => {
       supplier,
       unlockedGenres,
       recordPerformances.value,
+      genreMarketHeat.value,
       excludeIds,
       8,
       recordUnlockBonus.value
@@ -1146,7 +1174,8 @@ export const useGameStore = defineStore('game', () => {
       shopReputation.value,
       inventoryGenres,
       timeSlot,
-      activatedAlbumIds
+      activatedAlbumIds,
+      genreMarketHeat.value
     )
 
     let customers = applyCustomerBonuses(result.customers)
@@ -1552,7 +1581,7 @@ export const useGameStore = defineStore('game', () => {
     type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; atmosphereBoost: number; urgencyHint: string | null; overstockStatus: OverstockStatus | null }
     const overstockMap = new Map(overstockInfos.value.map(i => [i.recordId, i]))
     const scored = displayed.map(d => {
-      const score = calculateMatchScore(customer, d.item.record, shopReputation.value)
+      const score = calculateMatchScore(customer, d.item.record, shopReputation.value, genreMarketHeat.value)
       let finalScore = score + collectionMatchBonus + themeBonus
 
       const isGenreMatch = customer.preference.favoriteGenres.includes(d.item.record.genre)
@@ -1865,7 +1894,7 @@ export const useGameStore = defineStore('game', () => {
       salePrice = 0
     }
 
-    const score = calculateMatchScore(customer, record, shopReputation.value)
+    const score = calculateMatchScore(customer, record, shopReputation.value, genreMarketHeat.value)
     const playBoost = getPlayBoostForSlot(currentTimeSlot.value)
     const collectionMatchBonus = matchScoreBonusFromCollection.value
     const themeBonus = themeMatchScoreBonus.value
@@ -2789,6 +2818,7 @@ export const useGameStore = defineStore('game', () => {
       : 50
 
     const review = calculateDailyBusinessReview()
+    previousDayHotGenres.value = review.hotGenres
 
     const stats: DailyStats = {
       day: currentDay.value,
@@ -2847,6 +2877,12 @@ export const useGameStore = defineStore('game', () => {
           resetDailyStats()
           phase.value = 'purchase'
           stopPlaying()
+          
+          genreMarketHeat.value = generateDailyMarketHeat(
+            currentDay.value,
+            genreMarketHeat.value,
+            previousDayHotGenres.value
+          )
           
           availableSuppliers.value = getAvailableSuppliersForLevel(currentLevel.value, shopReputation.value)
           if (currentSupplierId.value && !availableSuppliers.value.some(s => s.id === currentSupplierId.value)) {
@@ -3093,6 +3129,10 @@ export const useGameStore = defineStore('game', () => {
     memberLevelProgress,
     isMemberTargetsComplete,
     supplierStats,
+    genreMarketHeat,
+    hottestGenresToday,
+    coldestGenresToday,
+    getGenreHeat,
     currentTimeSlot,
     afternoonCompleted,
     afternoonStats,

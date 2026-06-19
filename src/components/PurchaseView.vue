@@ -12,6 +12,16 @@ import {
   getPerformanceLabel,
   getPerformanceColor
 } from '@/data/suppliers'
+import {
+  getHeatLabel,
+  getHeatIcon,
+  getHeatColor,
+  getTrendIcon,
+  getTrendLabel,
+  getHeatLevelInfo,
+  formatHeatValue
+} from '@/data/marketHeat'
+import type { MarketHeatLevel } from '@/types'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -26,6 +36,8 @@ const supplierInventory = computed(() => gameStore.currentSupplierInventory)
 const availableSuppliers = computed(() => gameStore.availableSuppliers)
 const inventoryRiskScore = computed(() => gameStore.inventoryRiskScore)
 const purchaseRecommendations = computed(() => gameStore.purchaseRecommendations)
+const hottestGenresToday = computed(() => gameStore.hottestGenresToday)
+const coldestGenresToday = computed(() => gameStore.coldestGenresToday)
 
 const getSupplierStats = (supplierId: string) => {
   return gameStore.supplierStats(supplierId)
@@ -93,6 +105,19 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
   const icons = { low: '✅', medium: '⚠️', high: '🚨' }
   return icons[risk]
 }
+
+const getMarketHeatInfo = (level: MarketHeatLevel) => getHeatLevelInfo(level)
+
+const shouldShowHeatBadge = (heat: MarketHeatLevel) => {
+  return heat !== 'normal'
+}
+
+const formatPriceModifier = (mod: number) => {
+  const pct = Math.round((mod - 1) * 100)
+  if (pct > 0) return `+${pct}%`
+  if (pct < 0) return `${pct}%`
+  return '持平'
+}
 </script>
 
 <template>
@@ -114,6 +139,43 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
         >
           {{ Math.round(inventoryRiskScore * 100) }}%
         </span>
+      </div>
+    </div>
+
+    <div v-if="hottestGenresToday.length > 0 || coldestGenresToday.length > 0" class="market-heat-card card">
+      <div class="heat-header">
+        <span class="heat-icon">📊</span>
+        <span class="heat-title">今日市场热度</span>
+      </div>
+      <div class="heat-content">
+        <div v-if="hottestGenresToday.length > 0" class="heat-section">
+          <span class="heat-section-label hot">🔥 热门</span>
+          <div class="heat-tags">
+            <span 
+              v-for="gh in hottestGenresToday" 
+              :key="gh.genre" 
+              class="heat-tag"
+              :style="{ background: getHeatColor(gh.heatLevel) + '25', color: getHeatColor(gh.heatLevel), borderColor: getHeatColor(gh.heatLevel) + '60' }"
+            >
+              {{ getHeatIcon(gh.heatLevel) }} {{ gh.genre }}
+              <span class="heat-trend">{{ getTrendIcon(gh.trend) }}</span>
+            </span>
+          </div>
+        </div>
+        <div v-if="coldestGenresToday.length > 0" class="heat-section">
+          <span class="heat-section-label cold">🧊 冷门</span>
+          <div class="heat-tags">
+            <span 
+              v-for="gh in coldestGenresToday" 
+              :key="gh.genre" 
+              class="heat-tag"
+              :style="{ background: getHeatColor(gh.heatLevel) + '25', color: getHeatColor(gh.heatLevel), borderColor: getHeatColor(gh.heatLevel) + '60' }"
+            >
+              {{ getHeatIcon(gh.heatLevel) }} {{ gh.genre }}
+              <span class="heat-trend">{{ getTrendIcon(gh.trend) }}</span>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -265,6 +327,14 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
             </div>
             
             <div 
+              v-if="shouldShowHeatBadge(supplierItem.marketHeat)" 
+              class="market-heat-badge"
+              :style="{ background: getHeatColor(supplierItem.marketHeat), color: '#fff' }"
+            >
+              {{ getHeatIcon(supplierItem.marketHeat) }} {{ getHeatLabel(supplierItem.marketHeat) }} {{ getTrendIcon(supplierItem.marketTrend) }}
+            </div>
+            
+            <div 
               v-if="getRecommendationForRecord(supplierItem.record.id)" 
               class="recommendation-badge"
               :class="getRecommendationForRecord(supplierItem.record.id)?.priority"
@@ -288,9 +358,22 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
                   :class="{ discounted: supplierItem.isSpecialOffer }"
                 >
                   ¥{{ supplierItem.adjustedCostPrice }}
+                  <span v-if="!supplierItem.isSpecialOffer && supplierItem.marketPriceModifier !== 1" class="heat-price-mod" :style="{ color: getHeatColor(supplierItem.marketHeat) }">
+                    ({{ formatPriceModifier(supplierItem.marketPriceModifier) }})
+                  </span>
                   <span v-if="supplierItem.isSpecialOffer" class="original-price">
                     ¥{{ Math.round(supplierItem.record.costPrice * currentSupplier.priceModifier) }}
                   </span>
+                </span>
+              </div>
+
+              <div class="meta-item">
+                <span class="meta-label">市场热度</span>
+                <span 
+                  class="meta-value"
+                  :style="{ color: getHeatColor(supplierItem.marketHeat) }"
+                >
+                  {{ getHeatIcon(supplierItem.marketHeat) }} {{ getHeatLabel(supplierItem.marketHeat) }}
                 </span>
               </div>
 
@@ -429,6 +512,24 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
               <span class="supplier-small-icon">{{ currentSupplier?.icon }}</span>
               <span class="supplier-small-name">{{ currentSupplier?.name }}</span>
               <span class="min-order">最低 ¥{{ currentSupplier?.minOrderAmount }}</span>
+            </div>
+
+            <div 
+              v-if="shouldShowHeatBadge(selectedSupplierItem.marketHeat)"
+              class="market-heat-row"
+              :style="{ borderColor: getHeatColor(selectedSupplierItem.marketHeat) + '50', background: getHeatColor(selectedSupplierItem.marketHeat) + '10' }"
+            >
+              <span class="mh-icon">{{ getHeatIcon(selectedSupplierItem.marketHeat) }}</span>
+              <div class="mh-info">
+                <span class="mh-label" :style="{ color: getHeatColor(selectedSupplierItem.marketHeat) }">
+                  {{ getHeatLabel(selectedSupplierItem.marketHeat) }} · {{ getTrendLabel(selectedSupplierItem.marketTrend) }} {{ getTrendIcon(selectedSupplierItem.marketTrend) }}
+                </span>
+                <span class="mh-desc">
+                  热度值 {{ formatHeatValue(selectedSupplierItem.marketHeatValue) }}
+                  · 价格{{ formatPriceModifier(selectedSupplierItem.marketPriceModifier) }}
+                  · 需求×{{ selectedSupplierItem.marketHeat && getMarketHeatInfo(selectedSupplierItem.marketHeat) ? (getMarketHeatInfo(selectedSupplierItem.marketHeat)!.demandModifier[0] + getMarketHeatInfo(selectedSupplierItem.marketHeat)!.demandModifier[1]) / 2 : 1 }}
+                </span>
+              </div>
             </div>
 
             <div class="performance-preview">
@@ -1277,6 +1378,141 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
 
 .modal-footer button {
   flex: 1;
+}
+
+.market-heat-card {
+  margin: 0 16px;
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(246, 173, 85, 0.08) 0%, rgba(99, 179, 237, 0.08) 100%);
+  border: 1px solid rgba(246, 173, 85, 0.2);
+}
+
+.heat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.heat-icon {
+  font-size: 18px;
+}
+
+.heat-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.heat-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heat-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.heat-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 50px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.heat-section-label.hot {
+  background: rgba(246, 173, 85, 0.2);
+  color: #dd6b20;
+}
+
+.heat-section-label.cold {
+  background: rgba(99, 179, 237, 0.2);
+  color: #2b6cb0;
+}
+
+.heat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.heat-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 500;
+}
+
+.heat-trend {
+  font-size: 10px;
+}
+
+.supplier-record-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.market-heat-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.heat-price-mod {
+  font-size: 10px;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.market-heat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.mh-icon {
+  font-size: 22px;
+}
+
+.mh-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mh-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mh-desc {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .inventory-section .section-header {

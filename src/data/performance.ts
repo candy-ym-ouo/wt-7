@@ -1,4 +1,4 @@
-import type { RecordPerformance, SaleRecord, InventoryItem, OverstockStatus, OverstockInfo, OverstockConfig } from '@/types'
+import type { RecordPerformance, SaleRecord, InventoryItem, OverstockStatus, OverstockInfo, OverstockConfig, GenreMarketHeat, Genre } from '@/types'
 
 export const createEmptyPerformance = (recordId: string): RecordPerformance => ({
   recordId,
@@ -402,40 +402,72 @@ export const generatePurchaseRiskWarning = (
 export const generatePurchaseRecommendation = (
   performances: RecordPerformance[],
   currentInventory: InventoryItem[],
-  _budget: number
+  _budget: number,
+  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map(),
+  allRecords: { id: string; genre: Genre }[] = []
 ): { recordId: string; reason: string; priority: 'high' | 'medium' | 'low' }[] => {
   const recommendations: { recordId: string; reason: string; priority: 'high' | 'medium' | 'low' }[] = []
+  
+  const getGenreHeat = (genre: Genre): GenreMarketHeat | undefined => {
+    return marketHeatMap.get(genre)
+  }
   
   performances.forEach(perf => {
     const inInventory = currentInventory.find(i => i.record.id === perf.recordId)
     const inStock = inInventory ? inInventory.quantity : 0
+    const record = allRecords.find(r => r.id === perf.recordId)
+    const genreHeat = record ? getGenreHeat(record.genre) : undefined
+    const heatBonusHighPriority = genreHeat && (genreHeat.heatLevel === 'hot' || genreHeat.heatLevel === 'scorching')
+    const heatBonusMedium = genreHeat && genreHeat.heatLevel === 'warm'
+    const heatWarning = genreHeat && (genreHeat.heatLevel === 'cold' || genreHeat.heatLevel === 'ice_cold')
     
-    if (perf.sellThroughRate > 0.7 && inStock < 2) {
+    if ((perf.sellThroughRate > 0.7 && inStock < 2) || (heatBonusHighPriority && perf.sellThroughRate > 0.5 && inStock < 3)) {
+      const heatReason = heatBonusHighPriority ? `，市场${genreHeat!.heatLevel === 'scorching' ? '爆火' : '热门'}${genreHeat!.trend === 'rising' ? '📈' : ''}` : ''
       recommendations.push({
         recordId: perf.recordId,
-        reason: `热销商品，售罄率${Math.round(perf.sellThroughRate * 100)}%，建议补货`,
+        reason: `热销商品，售罄率${Math.round(perf.sellThroughRate * 100)}%${heatReason}，建议补货`,
         priority: 'high'
       })
-    } else if (perf.totalProfit > 500 && perf.sellThroughRate > 0.5 && inStock < 3) {
+    } else if ((perf.totalProfit > 500 && perf.sellThroughRate > 0.5 && inStock < 3) || (heatBonusMedium && perf.sellThroughRate > 0.4 && inStock < 2)) {
+      const heatReason = heatBonusMedium ? `，市场偏热${genreHeat!.trend === 'rising' ? '📈' : ''}` : ''
       recommendations.push({
         recordId: perf.recordId,
-        reason: `高利润商品，累计利润¥${perf.totalProfit}，建议增加库存`,
+        reason: `高利润商品，累计利润¥${perf.totalProfit}${heatReason}，建议增加库存`,
         priority: 'high'
       })
     } else if (perf.sellThroughRate > 0.4 && inStock < 1) {
+      const heatReason = heatBonusMedium ? `，趋势向好` : ''
       recommendations.push({
         recordId: perf.recordId,
-        reason: `表现良好，售罄率${Math.round(perf.sellThroughRate * 100)}%，可考虑补货`,
+        reason: `表现良好，售罄率${Math.round(perf.sellThroughRate * 100)}%${heatReason}，可考虑补货`,
         priority: 'medium'
       })
-    } else if (perf.sellThroughRate < 0.2 && inStock > 2) {
+    } else if ((perf.sellThroughRate < 0.2 && inStock > 2) || (heatWarning && inStock > 1)) {
+      const heatReason = heatWarning ? `，市场${genreHeat!.heatLevel === 'ice_cold' ? '极冷' : '冷门'}${genreHeat!.trend === 'falling' ? '📉' : ''}` : ''
       recommendations.push({
         recordId: perf.recordId,
-        reason: `滞销商品，售罄率仅${Math.round(perf.sellThroughRate * 100)}%，建议暂停补货`,
+        reason: `滞销商品，售罄率仅${Math.round(perf.sellThroughRate * 100)}%${heatReason}，建议暂停补货`,
         priority: 'low'
       })
     }
   })
+  
+  for (const [genre, heat] of marketHeatMap.entries()) {
+    if (heat.heatLevel === 'scorching' || (heat.heatLevel === 'hot' && heat.trend === 'rising')) {
+      const heatRecords = allRecords.filter(r => r.genre === genre)
+      const stockedIds = new Set(performances.map(p => p.recordId))
+      const unstockedHot = heatRecords.filter(r => !stockedIds.has(r.id)).slice(0, 2)
+      for (const rec of unstockedHot) {
+        if (!recommendations.find(r => r.recordId === rec.id)) {
+          recommendations.push({
+            recordId: rec.id,
+            reason: `${genre}市场${heat.heatLevel === 'scorching' ? '爆火🌋' : '热门🔥'}${heat.trend === 'rising' ? '上升中📈' : ''}，建议进货抢占商机`,
+            priority: heat.heatLevel === 'scorching' ? 'high' : 'medium'
+          })
+        }
+      }
+    }
+  }
   
   return recommendations.sort((a, b) => {
     const priorityOrder = { high: 0, medium: 1, low: 2 }

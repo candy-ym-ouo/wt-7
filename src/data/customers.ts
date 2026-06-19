@@ -15,6 +15,8 @@ import {
   adjustPriceRange,
   getTimeSlotConfig
 } from './timeSlots'
+import { getGenreMarketHeat } from './marketHeat'
+import type { GenreMarketHeat } from '@/types'
 
 const customerNames = [
   '老爵士王', '摇滚青年', '灵魂歌者', '放克达人', '迪斯科女王',
@@ -187,8 +189,10 @@ export const generateIdentityTag = (
   return availableConfigs[0].tag
 }
 
-const generatePreference = (identityTag: CustomerIdentityTag | null = null) => {
-  const bundle = genreBundles[Math.floor(Math.random() * genreBundles.length)]
+const generatePreference = (
+  identityTag: CustomerIdentityTag | null = null,
+  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map()
+) => {
   const priceRanges: [number, number][] = [
     [100, 250],
     [200, 400],
@@ -206,7 +210,40 @@ const generatePreference = (identityTag: CustomerIdentityTag | null = null) => {
   ][Math.floor(Math.random() * 6)] as number[]
 
   let preferenceStrength = 0.4 + Math.random() * 0.6
-  let favoriteGenres = [...bundle.genres]
+  const allGenreList: Genre[] = ['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk']
+
+  const heatWeights = allGenreList.map(genre => {
+    const heat = getGenreMarketHeat(marketHeatMap, genre)
+    return { genre, weight: 0.4 + heat.demandModifier * 0.6 }
+  })
+
+  const pickWeightedGenre = (exclude: Genre[]): Genre | null => {
+    const candidates = heatWeights.filter(hw => !exclude.includes(hw.genre))
+    if (candidates.length === 0) return null
+    let r = Math.random() * candidates.reduce((s, c) => s + c.weight, 0)
+    for (const c of candidates) {
+      r -= c.weight
+      if (r <= 0) return c.genre
+    }
+    return candidates[0].genre
+  }
+
+  let favoriteGenres: Genre[] = []
+  const bundleHeatScores = genreBundles.map(b => ({
+    bundle: b,
+    score: b.genres.reduce((s, g) => s + (getGenreMarketHeat(marketHeatMap, g).demandModifier), 0)
+  }))
+  const totalBundleScore = bundleHeatScores.reduce((s, b) => s + b.score, 0)
+  let rb = Math.random() * totalBundleScore
+  let selectedBundle = bundleHeatScores[0].bundle
+  for (const bs of bundleHeatScores) {
+    rb -= bs.score
+    if (rb <= 0) {
+      selectedBundle = bs.bundle
+      break
+    }
+  }
+  favoriteGenres = [...selectedBundle.genres]
 
   if (identityTag) {
     const identityConfig = getIdentityConfig(identityTag)
@@ -228,13 +265,16 @@ const generatePreference = (identityTag: CustomerIdentityTag | null = null) => {
     const targetGenreCount = Math.floor(genreCountMin + Math.random() * (genreCountMax - genreCountMin + 1))
 
     if (targetGenreCount > favoriteGenres.length) {
-      const allGenres: Genre[] = ['Jazz', 'Rock', 'Soul', 'Funk', 'Disco', 'Classical', 'Blues', 'Pop', 'Electronic', 'Folk']
-      const availableGenres = allGenres.filter(g => !favoriteGenres.includes(g))
-      const shuffled = availableGenres.sort(() => Math.random() - 0.5)
-      const additionalGenres = shuffled.slice(0, targetGenreCount - favoriteGenres.length)
-      favoriteGenres = [...favoriteGenres, ...additionalGenres]
+      const toAdd = targetGenreCount - favoriteGenres.length
+      for (let i = 0; i < toAdd; i++) {
+        const g = pickWeightedGenre(favoriteGenres)
+        if (g) favoriteGenres.push(g)
+      }
     } else if (targetGenreCount < favoriteGenres.length) {
-      favoriteGenres = favoriteGenres.slice(0, targetGenreCount)
+      const sortedByHeat = [...favoriteGenres].sort((a, b) =>
+        getGenreMarketHeat(marketHeatMap, b).heatValue - getGenreMarketHeat(marketHeatMap, a).heatValue
+      )
+      favoriteGenres = sortedByHeat.slice(0, targetGenreCount)
     }
 
     const rarityBias = identityConfig.rarityBias
@@ -418,7 +458,8 @@ export const generateCustomer = (
   inventoryGenres: Genre[] = [],
   timeSlot: TimeSlot = 'afternoon',
   arrivalOrder: number = 0,
-  identityTag: CustomerIdentityTag | null = null
+  identityTag: CustomerIdentityTag | null = null,
+  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map()
 ): Customer => {
   let preference
   let name
@@ -494,7 +535,7 @@ export const generateCustomer = (
   } else {
     const nameIndex = Math.floor(Math.random() * customerNames.length)
     const avatarIndex = Math.floor(Math.random() * avatars.length)
-    preference = generatePreference(identityTag)
+    preference = generatePreference(identityTag, marketHeatMap)
     name = customerNames[nameIndex]
     avatar = avatars[avatarIndex]
     const slotConfig = getTimeSlotConfig(timeSlot)
@@ -571,7 +612,8 @@ export const generateDailyCustomers = (
   reputation: number = 50,
   inventoryGenres: Genre[] = [],
   timeSlot: TimeSlot = 'afternoon',
-  unlockedAlbumIds: string[] = []
+  unlockedAlbumIds: string[] = [],
+  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map()
 ): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
   const newMemberProfiles: MemberProfile[] = []
@@ -594,7 +636,8 @@ export const generateDailyCustomers = (
       inventoryGenres,
       timeSlot,
       arrivalCounter++,
-      memberIdentityTag
+      memberIdentityTag,
+      marketHeatMap
     )
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     customers.push(customer)
@@ -610,7 +653,8 @@ export const generateDailyCustomers = (
       inventoryGenres,
       timeSlot,
       arrivalCounter++,
-      identityTag
+      identityTag,
+      marketHeatMap
     )
     customer.budget = Math.floor(customer.budget * (1 + day * 0.05))
     const dayPatienceMod = Math.max(0.7, 1 - day * 0.02)
@@ -634,12 +678,21 @@ export const generateDailyCustomers = (
   }
 }
 
-export const calculateMatchScore = (customer: Customer, record: any, reputation: number = 50): number => {
+export const calculateMatchScore = (
+  customer: Customer,
+  record: any,
+  reputation: number = 50,
+  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map()
+): number => {
   let score = 0
 
   if (customer.preference.favoriteGenres.includes(record.genre)) {
     score += 30 * customer.preference.preferenceStrength
   }
+
+  const genreHeat = getGenreMarketHeat(marketHeatMap, record.genre as Genre)
+  const heatMatchBonus = (genreHeat.heatValue - 0.5) * 12
+  score += heatMatchBonus
 
   if (record.marketPrice >= customer.preference.priceRange[0] &&
       record.marketPrice <= customer.preference.priceRange[1]) {

@@ -422,6 +422,20 @@ export interface LevelReward {
 
 export type SupplierType = 'wholesaler' | 'specialist' | 'collector' | 'importer' | 'discount'
 
+export type MarketHeatLevel = 'ice_cold' | 'cold' | 'cool' | 'normal' | 'warm' | 'hot' | 'scorching'
+export type MarketHeatTrend = 'rising' | 'falling' | 'stable'
+
+export interface GenreMarketHeat {
+  genre: Genre
+  heatLevel: MarketHeatLevel
+  heatValue: number
+  priceModifier: number
+  demandModifier: number
+  profitMarginModifier: number
+  trend: MarketHeatTrend
+  trendStrength: number
+}
+
 export interface Supplier {
   id: string
   name: string
@@ -450,6 +464,10 @@ export interface SupplierInventoryItem {
   quantityAvailable: number
   isSpecialOffer: boolean
   discountPercent: number
+  marketHeat: MarketHeatLevel
+  marketHeatValue: number
+  marketPriceModifier: number
+  marketTrend: MarketHeatTrend
 }
 
 export interface RecordPerformance {
