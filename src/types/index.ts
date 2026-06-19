@@ -93,6 +93,7 @@ export interface InventoryItem {
   quantity: number
   purchaseDate: number
   conditionScore: number
+  actualCostPrice: number
 }
 
 export interface DisplaySlot {

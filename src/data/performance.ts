@@ -151,7 +151,7 @@ export const calculateInventoryRiskScore = (
   
   inventory.forEach(item => {
     const perf = performances.find(p => p.recordId === item.record.id)
-    const value = item.record.costPrice * item.quantity
+    const value = item.actualCostPrice * item.quantity
     totalValue += value
     
     let risk = 0.3

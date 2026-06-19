@@ -444,15 +444,18 @@ export const useGameStore = defineStore('game', () => {
     if (existing) {
       const totalQtyBefore = existing.quantity
       const totalScoreBefore = existing.conditionScore * totalQtyBefore
+      const totalCostBefore = existing.actualCostPrice * totalQtyBefore
       const newScore = getConditionScoreFromLabel(supplierItem.record.condition)
       existing.quantity += actualQty
       existing.conditionScore = Math.round((totalScoreBefore + newScore * actualQty) / existing.quantity)
+      existing.actualCostPrice = Math.round((totalCostBefore + supplierItem.adjustedCostPrice * actualQty) / existing.quantity)
     } else {
       inventory.value.push({
         record: supplierItem.record,
         quantity: actualQty,
         purchaseDate: currentDay.value,
-        conditionScore: getConditionScoreFromLabel(supplierItem.record.condition)
+        conditionScore: getConditionScoreFromLabel(supplierItem.record.condition),
+        actualCostPrice: supplierItem.adjustedCostPrice
       })
     }
     
@@ -518,13 +521,17 @@ export const useGameStore = defineStore('game', () => {
 
     const existing = inventory.value.find(i => i.record.id === record.id)
     if (existing) {
+      const totalQtyBefore = existing.quantity
+      const totalCostBefore = existing.actualCostPrice * totalQtyBefore
       existing.quantity += quantity
+      existing.actualCostPrice = Math.round((totalCostBefore + record.costPrice * quantity) / existing.quantity)
     } else {
       inventory.value.push({
         record,
         quantity,
         purchaseDate: currentDay.value,
-        conditionScore: getConditionScoreFromLabel(record.condition)
+        conditionScore: getConditionScoreFromLabel(record.condition),
+        actualCostPrice: record.costPrice
       })
     }
 
@@ -721,7 +728,7 @@ export const useGameStore = defineStore('game', () => {
     const success = Math.random() < buyChance
 
     if (success) {
-      const profit = salePrice - record.costPrice
+      const profit = salePrice - invItem.actualCostPrice
       const baseSatisfaction = 50 + finalScore * 0.5 - (salePrice > record.marketPrice ? 20 : 0)
       const memberBonus = customer.isReturningCustomer ? 5 : 0
       const satisfaction = Math.max(30, Math.min(100, baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier))
@@ -783,7 +790,6 @@ export const useGameStore = defineStore('game', () => {
       
       salesHistory.value.push(saleRecord)
       
-      const invItem = inventory.value.find(i => i.record.id === record.id)
       const daysInStock = invItem ? currentDay.value - invItem.purchaseDate : 1
       recordPerformances.value = updatePerformanceAfterSale(
         recordPerformances.value,
@@ -802,7 +808,7 @@ export const useGameStore = defineStore('game', () => {
       slot.conditionScore = null
 
       if (satisfaction >= 80 && Math.random() < 0.3) {
-        addToCollection(record, salePrice, slotConditionScore)
+        addToCollection(record, invItem.actualCostPrice, slotConditionScore)
       }
 
       shopReputation.value = Math.min(100, shopReputation.value + (satisfaction > 60 ? 1 : -1))

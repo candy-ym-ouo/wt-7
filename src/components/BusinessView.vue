@@ -80,6 +80,12 @@ const openSellModal = (record: Record) => {
   showSellModal.value = true
 }
 
+const selectedRecordCostPrice = computed(() => {
+  if (!selectedRecord.value) return 0
+  const invItem = gameStore.inventory.find(i => i.record.id === selectedRecord.value!.id)
+  return invItem ? invItem.actualCostPrice : selectedRecord.value.costPrice
+})
+
 const closeSellModal = () => {
   showSellModal.value = false
   selectedRecord.value = null
@@ -368,12 +374,12 @@ onUnmounted(() => {
             <div class="price-editor">
               <span class="pe-label">出价</span>
               <div class="pe-controls">
-                <button class="pe-btn" @click="customPrice = Math.max(selectedRecord.costPrice, customPrice - 10)">-10</button>
+                <button class="pe-btn" @click="customPrice = Math.max(selectedRecordCostPrice, customPrice - 10)">-10</button>
                 <input 
                   type="number" 
                   v-model.number="customPrice"
                   class="pe-input"
-                  :min="selectedRecord.costPrice"
+                  :min="selectedRecordCostPrice"
                 />
                 <button class="pe-btn" @click="customPrice = customPrice + 10">+10</button>
               </div>
@@ -381,7 +387,7 @@ onUnmounted(() => {
 
             <div class="price-hint">
               <span>建议售价: ¥{{ selectedRecord.marketPrice }}</span>
-              <span>进价: ¥{{ selectedRecord.costPrice }}</span>
+              <span>进价: ¥{{ selectedRecordCostPrice }}</span>
             </div>
 
             <div v-if="customerMemberInfo && customerMemberInfo.discount > 0" class="member-price-preview">
@@ -394,8 +400,8 @@ onUnmounted(() => {
 
             <div class="profit-preview">
               <span class="pp-label">预计利润</span>
-              <span class="pp-value" :class="{ positive: customPrice > selectedRecord.costPrice }">
-                {{ customPrice > selectedRecord.costPrice ? '+' : '' }}¥{{ customPrice - selectedRecord.costPrice }}
+              <span class="pp-value" :class="{ positive: customPrice > selectedRecordCostPrice }">
+                {{ customPrice > selectedRecordCostPrice ? '+' : '' }}¥{{ customPrice - selectedRecordCostPrice }}
               </span>
             </div>
 
@@ -408,7 +414,7 @@ onUnmounted(() => {
             <button class="btn-secondary" @click="closeSellModal">取消</button>
             <button 
               class="btn-primary"
-              :disabled="customPrice < selectedRecord.costPrice"
+              :disabled="customPrice < selectedRecordCostPrice"
               @click="handleSell"
             >
               确认出价

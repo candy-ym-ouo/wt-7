@@ -366,6 +366,7 @@ const getRiskIcon = (risk: 'low' | 'medium' | 'high') => {
           :quantity="item.quantity"
           :show-cost="true"
           :show-price="true"
+          :custom-cost="item.actualCostPrice"
         />
       </div>
       <div v-if="gameStore.inventory.length === 0" class="empty-state">

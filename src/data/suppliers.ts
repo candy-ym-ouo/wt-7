@@ -164,7 +164,8 @@ const calculateExpectedTurnoverRate = (
 
 const calculateHistoricalProfitMargin = (
   record: Record,
-  performances: RecordPerformance[]
+  performances: RecordPerformance[],
+  adjustedCostPrice?: number
 ): number => {
   const performance = performances.find(p => p.recordId === record.id)
   
@@ -172,17 +173,20 @@ const calculateHistoricalProfitMargin = (
     return performance.totalProfit / performance.totalRevenue
   }
   
-  return (record.marketPrice - record.costPrice) / record.marketPrice
+  const costBasis = adjustedCostPrice ?? record.costPrice
+  return (record.marketPrice - costBasis) / record.marketPrice
 }
 
 const calculateSalePerformanceScore = (
   record: Record,
-  performances: RecordPerformance[]
+  performances: RecordPerformance[],
+  adjustedCostPrice?: number
 ): number => {
   const performance = performances.find(p => p.recordId === record.id)
   
   if (!performance || performance.totalSold === 0) {
-    const margin = (record.marketPrice - record.costPrice) / record.costPrice
+    const costBasis = adjustedCostPrice ?? record.costPrice
+    const margin = (record.marketPrice - costBasis) / costBasis
     const rarityScore = record.rarity * 10
     const conditionScore = getConditionScoreFromLabel(record.condition)
     return Math.round((margin * 50 + rarityScore + conditionScore / 2) / 3)
@@ -245,8 +249,8 @@ export const generateSupplierInventory = (
     
     const stockRisk = calculateStockRisk(record, supplier, performances)
     const expectedTurnoverRate = calculateExpectedTurnoverRate(record, performances)
-    const historicalProfitMargin = calculateHistoricalProfitMargin(record, performances)
-    const salePerformanceScore = calculateSalePerformanceScore(record, performances)
+    const historicalProfitMargin = calculateHistoricalProfitMargin(record, performances, adjustedCostPrice)
+    const salePerformanceScore = calculateSalePerformanceScore(record, performances, adjustedCostPrice)
     
     return {
       record,
