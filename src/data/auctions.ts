@@ -229,6 +229,9 @@ export const createBidRecord = (
 }
 
 export const getMinNextBid = (auction: AuctionItem): number => {
+  if (auction.bidCount === 0) {
+    return auction.startingPrice
+  }
   return auction.currentBid + auction.minBidIncrement
 }
 
@@ -247,8 +250,11 @@ export const canPlaceBid = (
     return { valid: false, reason: `出价不能低于当前最低加价 ¥${minBid}` }
   }
   
-  if (bidAmount % auction.minBidIncrement !== 0) {
-    return { valid: false, reason: `出价必须是 ¥${auction.minBidIncrement} 的整数倍` }
+  if (auction.bidCount > 0) {
+    const increment = bidAmount - auction.currentBid
+    if (increment % auction.minBidIncrement !== 0) {
+      return { valid: false, reason: `加价幅度必须是 ¥${auction.minBidIncrement} 的整数倍` }
+    }
   }
   
   const availableBudget = userBudget - frozenAmount

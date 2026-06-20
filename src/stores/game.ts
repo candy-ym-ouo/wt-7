@@ -957,6 +957,12 @@ export const useGameStore = defineStore('game', () => {
       currentAuctionItems.value = [...currentAuctionItems.value, ...newAuctions]
       nextAuctionRefresh.value = currentDay.value + 2
       
+      for (const auction of currentAuctionItems.value) {
+        if (auction.status === 'upcoming' && auction.startTime <= currentDay.value) {
+          auction.status = 'active'
+        }
+      }
+      
       for (const collector of unlockedCollectors) {
         const offer = generateCollectorOffer(collector, availableRecords.value, currentDay.value)
         if (offer) {
