@@ -139,7 +139,12 @@ import {
   getHottestGenres,
   getColdestGenres
 } from '@/data/marketHeat'
-import type { GenreMarketHeat } from '@/types'
+import type { GenreMarketHeat, StaffState, StaffSkillType } from '@/types'
+import {
+  createInitialStaffState,
+  upgradeStaffSkill as upgradeStaffSkillData,
+  addStaffPoints as addStaffPointsData
+} from '@/data/staff'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -236,6 +241,8 @@ export const useGameStore = defineStore('game', () => {
     totalActivated: 0,
     totalAvailable: getTotalAlbumStats(albumCategories).totalAvailable
   })
+
+  const staff = ref<StaffState>(createInitialStaffState())
 
   const specialCustomersState = ref<SpecialCustomerConfig[]>(JSON.parse(JSON.stringify(specialCustomers)))
   const collectionBonuses = ref<CollectionBonus[]>([])
@@ -813,6 +820,11 @@ export const useGameStore = defineStore('game', () => {
     budget.value += reward.totalReward
     shopReputation.value = Math.min(100, shopReputation.value + reward.reputationBonus)
 
+    const staffPointsEarned = currentLevel.value + Math.floor(reputationBonusFromCollection.value / 10)
+    if (staffPointsEarned > 0) {
+      addStaffPoints(staffPointsEarned)
+    }
+
     return reward
   }
 
@@ -1262,6 +1274,7 @@ export const useGameStore = defineStore('game', () => {
     )
     let totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
     totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
+    totalCustomerCount = Math.floor(totalCustomerCount * (1 + staff.value.dailyCapacityBonus))
     const slotCount = getCustomerCountForSlot(totalCustomerCount, currentTimeSlot.value)
 
     customers.value = generateCustomersWithSpecial(
@@ -1308,6 +1321,7 @@ export const useGameStore = defineStore('game', () => {
     )
     let totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
     totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
+    totalCustomerCount = Math.floor(totalCustomerCount * (1 + staff.value.dailyCapacityBonus))
     const nightCount = getCustomerCountForSlot(totalCustomerCount, 'night')
 
     customers.value = generateCustomersWithSpecial(
@@ -1479,6 +1493,11 @@ export const useGameStore = defineStore('game', () => {
 
       decay *= (1 + consecutiveSkips.value * 0.1)
 
+      const serviceEfficiencyBonus = staff.value.serviceEfficiencyBonus
+      if (serviceEfficiencyBonus > 0) {
+        decay *= (1 - serviceEfficiencyBonus)
+      }
+
       const updated = applyPatienceDecay(cust, decay)
 
       if (updated.hasLeftAngrily && !cust.hasLeftAngrily) {
@@ -1573,6 +1592,7 @@ export const useGameStore = defineStore('game', () => {
     const collectionMatchBonus = matchScoreBonusFromCollection.value
     const themeBonus = themeMatchScoreBonus.value
     const playbackBonus = playbackThemeBonus.value
+    const staffRecommendationBonus = staff.value.recommendationAccuracyBonus
 
     const patienceRatio = customer.patience / customer.maxPatience
     const urgencyMultiplier = customer.isImpatient ? 1.8 : (patienceRatio < 0.5 ? 1.0 + (0.5 - patienceRatio) : 1.0)
@@ -1582,7 +1602,7 @@ export const useGameStore = defineStore('game', () => {
     const overstockMap = new Map(overstockInfos.value.map(i => [i.recordId, i]))
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value, genreMarketHeat.value)
-      let finalScore = score + collectionMatchBonus + themeBonus
+      let finalScore = score + collectionMatchBonus + themeBonus + staffRecommendationBonus
 
       const isGenreMatch = customer.preference.favoriteGenres.includes(d.item.record.genre)
       if (customer.isImpatient && isGenreMatch) {
@@ -2174,17 +2194,21 @@ export const useGameStore = defineStore('game', () => {
       dailyServedCustomers.value += 1
       recordLostSale('customer_skipped')
 
+      const skipLossReduction = staff.value.skipLossReduction
       const patienceRatio = customer.patience / customer.maxPatience
       const skipPenalty = Math.min(5, Math.floor(consecutiveSkips.value * 0.8))
+      const reducedSkipPenalty = Math.floor(skipPenalty * (1 - skipLossReduction))
       const patienceBasedDissatisfaction = patienceRatio < 0.3 ? 10 : (patienceRatio < 0.5 ? 5 : 0)
-      const baseSatisfaction = 20 - skipPenalty + patienceBasedDissatisfaction
+      const baseSatisfaction = 20 - reducedSkipPenalty + patienceBasedDissatisfaction
       const finalDissatisfaction = Math.max(10, Math.min(35, baseSatisfaction))
+      const reducedDissatisfaction = Math.floor(finalDissatisfaction * (1 - skipLossReduction))
 
-      dailySatisfactionSum.value += finalDissatisfaction
-      slotSatisfactionSum.value += finalDissatisfaction
-      shopReputation.value = Math.max(0, shopReputation.value - (2 + skipPenalty))
+      dailySatisfactionSum.value += reducedDissatisfaction
+      slotSatisfactionSum.value += reducedDissatisfaction
+      const reputationLoss = Math.floor((2 + reducedSkipPenalty) * (1 - skipLossReduction))
+      shopReputation.value = Math.max(0, shopReputation.value - reputationLoss)
 
-      currentLevelSatisfactionSum.value += finalDissatisfaction
+      currentLevelSatisfactionSum.value += reducedDissatisfaction
       currentLevelSatisfactionCount.value += 1
 
       const remaining = customers.value.slice(currentCustomerIndex.value + 1)
@@ -3050,6 +3074,18 @@ export const useGameStore = defineStore('game', () => {
     return baseChance * config.albumBonusMultiplier * albumMultiplier
   }
 
+  const upgradeStaffSkill = (skillType: StaffSkillType): { success: boolean; message: string } => {
+    const result = upgradeStaffSkillData(staff.value, skillType)
+    if (result.success) {
+      staff.value = result.state
+    }
+    return { success: result.success, message: result.message }
+  }
+
+  const addStaffPoints = (points: number) => {
+    staff.value = addStaffPointsData(staff.value, points)
+  }
+
   const goToNextLevel = () => {
     const next = getNextLevel(currentLevel.value)
     if (next) {
@@ -3248,6 +3284,9 @@ export const useGameStore = defineStore('game', () => {
     resetDailyPromotionStats,
     trackBuyGiftPurchase,
     checkAndConsumeBuyGift,
-    getPromotionReputationBonus
+    getPromotionReputationBonus,
+    staff,
+    upgradeStaffSkill,
+    addStaffPoints
   }
 })

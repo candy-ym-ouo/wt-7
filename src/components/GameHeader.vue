@@ -6,6 +6,7 @@ import { getTimeSlotConfig } from '@/data/timeSlots'
 const emit = defineEmits<{
   back: []
   collection: []
+  staff: []
 }>()
 
 const gameStore = useGameStore()
@@ -49,9 +50,15 @@ const timeSlotLabel = computed(() => {
         <div class="day-info">第 {{ gameStore.currentDay }} / {{ gameStore.currentLevelConfig?.days }} 天</div>
       </div>
 
-      <button class="icon-btn" @click="emit('collection')">
-        📚
-      </button>
+      <div class="header-buttons">
+        <button class="icon-btn staff-btn" @click="emit('staff')">
+          👥
+          <span v-if="gameStore.staff.availablePoints > 0" class="badge">{{ gameStore.staff.availablePoints }}</span>
+        </button>
+        <button class="icon-btn" @click="emit('collection')">
+          📚
+        </button>
+      </div>
     </div>
 
     <div class="stats-bar">
@@ -244,5 +251,31 @@ const timeSlotLabel = computed(() => {
 
 .progress-fill.success {
   background: linear-gradient(90deg, var(--success) 0%, #38b2ac 100%);
+}
+
+.header-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.staff-btn {
+  position: relative;
+}
+
+.staff-btn .badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: var(--accent-gold);
+  color: var(--bg-card);
+  font-size: 10px;
+  font-weight: bold;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
 }
 </style>

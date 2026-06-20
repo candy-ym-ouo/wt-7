@@ -670,6 +670,29 @@ export interface PromotionApplicationResult {
   appliedPromotionId: string | null
 }
 
+export type StaffSkillType = 'service' | 'recommendation' | 'skip_recovery' | 'capacity'
+
+export interface StaffSkill {
+  type: StaffSkillType
+  name: string
+  icon: string
+  level: number
+  maxLevel: number
+  description: string
+  effectPerLevel: number
+  currentEffect: number
+}
+
+export interface StaffState {
+  skills: StaffSkill[]
+  totalStaffPoints: number
+  availablePoints: number
+  serviceEfficiencyBonus: number
+  recommendationAccuracyBonus: number
+  skipLossReduction: number
+  dailyCapacityBonus: number
+}
+
 export interface GameState {
   currentLevel: number
   currentDay: number
@@ -707,4 +730,5 @@ export interface GameState {
   collectionBonuses: CollectionBonus[]
   levelStartReputation: number
   completedLevels: number[]
+  staff: StaffState
 }
