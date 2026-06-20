@@ -1315,3 +1315,80 @@ export interface ShopRenovationBonusSummary {
   totalDisplaySlots: number
   unlockedGenresBonus: number
 }
+
+export type SupplierContractTier = 'none' | 'trial' | 'standard' | 'preferred' | 'strategic' | 'exclusive'
+
+export interface SupplierContractConfig {
+  tier: SupplierContractTier
+  tierName: string
+  icon: string
+  minTrustPoints: number
+  discountRate: number
+  exclusiveSlotCount: number
+  minOrderDiscount: number
+  deliveryBonus: number
+  rareItemBonus: number
+  breachForgiveness: number
+  dailyTrustGainCap: number
+  description: string
+}
+
+export interface SupplierGrowthMilestone {
+  id: string
+  name: string
+  icon: string
+  requiredTrustPoints: number
+  requiredContractTier: SupplierContractTier
+  rewardType: 'discount_boost' | 'exclusive_genre' | 'rare_slot' | 'delivery_speed' | 'breach_shield' | 'special_offer_boost'
+  rewardValue: number
+  rewardDescription: string
+  isUnlocked: boolean
+}
+
+export interface SupplierExclusiveSupply {
+  genre: Genre
+  minRarity: number
+  bonusStockCount: number
+  priceCap: number
+  requiredContractTier: SupplierContractTier
+}
+
+export interface SupplierBreachRecord {
+  id: string
+  supplierId: string
+  day: number
+  type: 'min_order_missed' | 'contract_cancelled' | 'payment_delayed' | 'exclusive_violation'
+  description: string
+  trustPenalty: number
+  reputationPenalty: number
+  fineAmount: number
+}
+
+export interface SupplierRelationship {
+  supplierId: string
+  contractTier: SupplierContractTier
+  trustPoints: number
+  totalSpent: number
+  totalPurchased: number
+  consecutivePurchaseDays: number
+  breachCount: number
+  breachRecords: SupplierBreachRecord[]
+  unlockedMilestones: string[]
+  isActive: boolean
+  contractStartDate: number | null
+  lastPurchaseDay: number
+  dailyTrustGained: number
+  cumulativeDiscount: number
+}
+
+export interface SupplierRelationshipBonusSummary {
+  totalDiscountRate: number
+  exclusiveSlots: number
+  deliverySpeedBonus: number
+  rareItemBonus: number
+  breachForgiveness: number
+  activeMilestoneBonuses: { type: string; value: number; description: string }[]
+  nextMilestone: SupplierGrowthMilestone | null
+  nextContractTier: SupplierContractConfig | null
+  trustProgressPercent: number
+}

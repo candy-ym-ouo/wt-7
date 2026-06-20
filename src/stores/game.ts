@@ -14,7 +14,9 @@ import type {
   AuctionItem, BidRecord, FrozenFund, AuctionSettlement,
   RareCollectorConfig, ActiveRareCollector, PendingCollectorOffer,
   AuctionHouseStats, CollectionSourceType, CollectionSource,
-  ShopRenovationState, ShopRenovationBonusSummary
+  ShopRenovationState, ShopRenovationBonusSummary,
+  SupplierRelationship, SupplierContractTier, SupplierBreachRecord,
+  SupplierRelationshipBonusSummary
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -202,6 +204,26 @@ import {
 import type {
   PresaleItem, PresaleOrder, PresaleSettlement, PresaleEventPage, PresaleStats
 } from '@/types'
+import {
+  createInitialRelationship,
+  applyBreachPenalty,
+  calculateTotalDiscount,
+  getExclusiveSuppliesForSupplier,
+  getMilestonesForRelationship,
+  checkAndUnlockMilestones,
+  calculateRelationshipBonusSummary,
+  canSignContract,
+  signContract,
+  cancelContract,
+  updateRelationshipOnPurchase,
+  resetDailyTrustGain,
+  getContractTierConfig,
+  getNextContractTier,
+  getTierColor,
+  getTierBgColor,
+  getBreachTypeLabel,
+  getBreachTypeIcon
+} from '@/data/supplierRelationship'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -253,6 +275,10 @@ export const useGameStore = defineStore('game', () => {
   const recordPerformances = ref<RecordPerformance[]>([])
   const totalInventoryPurchased = ref<Map<string, number>>(new Map())
   const supplierPurchaseHistory = ref<Map<string, { totalSpent: number; totalItems: number }>>(new Map())
+
+  const supplierRelationships = ref<Map<string, SupplierRelationship>>(new Map())
+  const dailyBreachRecords = ref<SupplierBreachRecord[]>([])
+  const newlyUnlockedMilestones = ref<string[]>([])
 
   const currentTimeSlot = ref<TimeSlot>('afternoon')
   const afternoonCompleted = ref(false)
@@ -550,6 +576,90 @@ export const useGameStore = defineStore('game', () => {
       return supplierPurchaseHistory.value.get(supplierId) || { totalSpent: 0, totalItems: 0 }
     }
   })
+
+  const getSupplierRelationship = (supplierId: string): SupplierRelationship => {
+    return supplierRelationships.value.get(supplierId) || createInitialRelationship(supplierId)
+  }
+
+  const currentSupplierRelationship = computed<SupplierRelationship>(() => {
+    if (!currentSupplierId.value) return createInitialRelationship('')
+    return getSupplierRelationship(currentSupplierId.value)
+  })
+
+  const currentSupplierBonusSummary = computed<SupplierRelationshipBonusSummary>(() => {
+    return calculateRelationshipBonusSummary(currentSupplierRelationship.value)
+  })
+
+  const allSupplierRelationships = computed<SupplierRelationship[]>(() => {
+    return availableSuppliers.value.map(s => getSupplierRelationship(s.id))
+  })
+
+  const supplierDiscountForCurrent = computed(() => {
+    return calculateTotalDiscount(currentSupplierRelationship.value)
+  })
+
+  const signSupplierContract = (supplierId: string, targetTier: SupplierContractTier): { success: boolean; message: string } => {
+    const relationship = getSupplierRelationship(supplierId)
+    const check = canSignContract(relationship, targetTier)
+    if (!check.canSign) {
+      return { success: false, message: check.reason }
+    }
+    const updated = signContract(relationship, targetTier, currentDay.value)
+    supplierRelationships.value.set(supplierId, updated)
+    const config = getContractTierConfig(targetTier)
+    return { success: true, message: `成功签订${config.tierName}！${config.description}` }
+  }
+
+  const cancelSupplierContract = (supplierId: string): { success: boolean; message: string; breachRecord?: SupplierBreachRecord } => {
+    const relationship = getSupplierRelationship(supplierId)
+    if (!relationship.isActive) {
+      return { success: false, message: '当前没有合约' }
+    }
+    const { updatedRelationship, breachRecord } = cancelContract(relationship, currentDay.value)
+    supplierRelationships.value.set(supplierId, updatedRelationship)
+    dailyBreachRecords.value.push(breachRecord)
+    shopReputation.value = Math.max(0, shopReputation.value - breachRecord.reputationPenalty)
+    return {
+      success: true,
+      message: `已解除合约，扣除信任 ${breachRecord.trustPenalty} 点，声望 -${breachRecord.reputationPenalty}`,
+      breachRecord
+    }
+  }
+
+  const triggerBreach = (
+    supplierId: string,
+    type: SupplierBreachRecord['type'],
+    orderAmount: number = 0
+  ): SupplierBreachRecord | null => {
+    const relationship = getSupplierRelationship(supplierId)
+    const { updatedRelationship, breachRecord } = applyBreachPenalty(relationship, type, orderAmount, currentDay.value)
+    supplierRelationships.value.set(supplierId, updatedRelationship)
+    dailyBreachRecords.value.push(breachRecord)
+    if (breachRecord.reputationPenalty > 0) {
+      shopReputation.value = Math.max(0, shopReputation.value - breachRecord.reputationPenalty)
+    }
+    if (breachRecord.fineAmount > 0) {
+      budget.value = Math.max(0, budget.value - breachRecord.fineAmount)
+    }
+    return breachRecord
+  }
+
+  const getSupplierExclusiveSupplies = (supplierId: string) => {
+    const supplier = getSupplierById(supplierId)
+    if (!supplier) return []
+    const relationship = getSupplierRelationship(supplierId)
+    return getExclusiveSuppliesForSupplier(supplier, relationship)
+  }
+
+  const getSupplierMilestones = (supplierId: string) => {
+    const relationship = getSupplierRelationship(supplierId)
+    return getMilestonesForRelationship(relationship)
+  }
+
+  const getSupplierBonusSummaryFor = (supplierId: string): SupplierRelationshipBonusSummary => {
+    const relationship = getSupplierRelationship(supplierId)
+    return calculateRelationshipBonusSummary(relationship)
+  }
 
   const hottestGenresToday = computed(() => getHottestGenres(genreMarketHeat.value, 3))
   const coldestGenresToday = computed(() => getColdestGenres(genreMarketHeat.value, 3))
@@ -1918,6 +2028,9 @@ export const useGameStore = defineStore('game', () => {
     recordPerformances.value = []
     totalInventoryPurchased.value = new Map()
     supplierPurchaseHistory.value = new Map()
+    supplierRelationships.value = new Map()
+    dailyBreachRecords.value = []
+    newlyUnlockedMilestones.value = []
     overstockPenalties.value = new Map()
     dailyOverstockPenalty.value = null
     totalOverstockPenaltyAccumulated.value = 0
@@ -1993,6 +2106,12 @@ export const useGameStore = defineStore('game', () => {
     resetDailyPromotionStats()
     dailyReservationFulfilledCount.value = 0
     dailyReservationMissedCount.value = 0
+    dailyBreachRecords.value = []
+    newlyUnlockedMilestones.value = []
+
+    for (const [supplierId, rel] of supplierRelationships.value.entries()) {
+      supplierRelationships.value.set(supplierId, resetDailyTrustGain(rel))
+    }
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -2030,13 +2149,20 @@ export const useGameStore = defineStore('game', () => {
 
   const purchaseFromSupplier = (supplierItem: SupplierInventoryItem, quantity: number = 1) => {
     const actualQty = Math.min(quantity, supplierItem.quantityAvailable)
-    const totalCost = supplierItem.adjustedCostPrice * actualQty
+    let totalCost = supplierItem.adjustedCostPrice * actualQty
     
     if (budget.value < totalCost) return { success: false, message: '预算不足！' }
     
     const supplier = getSupplierById(supplierItem.supplierId)
     if (supplier && totalCost < supplier.minOrderAmount) {
       return { success: false, message: `未达到最低订货金额 ¥${supplier.minOrderAmount}！` }
+    }
+
+    const relationship = getSupplierRelationship(supplierItem.supplierId)
+    const discountRate = calculateTotalDiscount(relationship)
+    if (discountRate > 0) {
+      const discountAmount = Math.floor(totalCost * discountRate)
+      totalCost = totalCost - discountAmount
     }
     
     const existing = inventory.value.find(i => i.record.id === supplierItem.record.id)
@@ -2066,6 +2192,21 @@ export const useGameStore = defineStore('game', () => {
       totalSpent: supplierHistory.totalSpent + totalCost,
       totalItems: supplierHistory.totalItems + actualQty
     })
+
+    const updatedRelationship = updateRelationshipOnPurchase(
+      relationship,
+      totalCost,
+      actualQty,
+      currentDay.value
+    )
+    supplierRelationships.value.set(supplierItem.supplierId, updatedRelationship)
+
+    const newMilestones = checkAndUnlockMilestones(updatedRelationship)
+    if (newMilestones.length > 0) {
+      updatedRelationship.unlockedMilestones = [...updatedRelationship.unlockedMilestones, ...newMilestones]
+      supplierRelationships.value.set(supplierItem.supplierId, updatedRelationship)
+      newlyUnlockedMilestones.value = [...newlyUnlockedMilestones.value, ...newMilestones]
+    }
     
     const invItemIndex = supplierInventory.value.findIndex(i => i.record.id === supplierItem.record.id)
     if (invItemIndex >= 0) {
@@ -2091,6 +2232,12 @@ export const useGameStore = defineStore('game', () => {
     
     const riskApplied = Math.random() < supplierItem.riskFactor * 0.3
     let finalMessage = `成功购入 ${actualQty} 张《${supplierItem.record.title}》！`
+    if (discountRate > 0) {
+      finalMessage += ` 合约折扣 -${Math.round(discountRate * 100)}%，省 ¥${Math.floor(supplierItem.adjustedCostPrice * actualQty * discountRate)}！`
+    }
+    if (newMilestones.length > 0) {
+      finalMessage += ` 解锁新里程碑！`
+    }
     if (riskApplied) {
       const invItem = inventory.value.find(i => i.record.id === supplierItem.record.id)
       if (invItem) {
@@ -4787,6 +4934,20 @@ export const useGameStore = defineStore('game', () => {
     placeToDisplay,
     removeFromDisplay,
     trySellToCustomer,
+    supplierRelationships,
+    dailyBreachRecords,
+    newlyUnlockedMilestones,
+    getSupplierRelationship,
+    currentSupplierRelationship,
+    currentSupplierBonusSummary,
+    allSupplierRelationships,
+    supplierDiscountForCurrent,
+    signSupplierContract,
+    cancelSupplierContract,
+    triggerBreach,
+    getSupplierExclusiveSupplies,
+    getSupplierMilestones,
+    getSupplierBonusSummaryFor,
     skipCustomer,
     nextCustomer,
     playRecord,
@@ -4970,6 +5131,13 @@ export const useGameStore = defineStore('game', () => {
     cancelPresaleOrderAction,
     getPresaleRecommendations,
     getItemStatusInfo,
-    getPresaleStatusLabel
+    getPresaleStatusLabel,
+    getContractTierConfig,
+    getNextContractTier,
+    getTierColor,
+    getTierBgColor,
+    getBreachTypeLabel,
+    getBreachTypeIcon,
+    calculateTotalDiscount
   }
 })

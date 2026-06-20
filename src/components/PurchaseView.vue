@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
 import RecordCard from './RecordCard.vue'
-import type { Record, SupplierInventoryItem, Genre } from '@/types'
+import type { Record, SupplierInventoryItem, Genre, SupplierContractTier } from '@/types'
 import { ref, computed } from 'vue'
 import { getConditionColor, getConditionScoreFromLabel } from '@/data/condition'
 import { 
@@ -22,6 +22,13 @@ import {
   formatHeatValue
 } from '@/data/marketHeat'
 import type { MarketHeatLevel } from '@/types'
+import {
+  getContractTierConfig,
+  getTierColor,
+  getTierBgColor,
+  getNextContractTier
+} from '@/data/supplierRelationship'
+import type { SupplierRelationshipBonusSummary } from '@/types'
 
 const gameStore = useGameStore()
 const selectedRecord = ref<Record | null>(null)
@@ -187,6 +194,47 @@ const genreEmoji: { [key in Genre]: string } = {
   Electronic: '🎧',
   Folk: '🪕'
 }
+
+const currentSupplierRel = computed(() => {
+  if (!gameStore.currentSupplierId) return null
+  return gameStore.getSupplierRelationship(gameStore.currentSupplierId)
+})
+
+const currentRelBonus = computed<SupplierRelationshipBonusSummary | null>(() => {
+  if (!currentSupplierRel.value) return null
+  return gameStore.getSupplierBonusSummaryFor(gameStore.currentSupplierId!)
+})
+
+const currentRelTierConfig = computed(() => {
+  if (!currentSupplierRel.value) return null
+  return getContractTierConfig(currentSupplierRel.value.contractTier)
+})
+
+const nextRelTier = computed(() => {
+  if (!currentSupplierRel.value) return null
+  return getNextContractTier(currentSupplierRel.value.contractTier)
+})
+
+const canSignNextTier = computed(() => {
+  if (!currentSupplierRel.value || !nextRelTier.value) return false
+  return currentSupplierRel.value.trustPoints >= nextRelTier.value.minTrustPoints
+})
+
+const handleSignContract = (targetTier: SupplierContractTier) => {
+  if (!gameStore.currentSupplierId) return
+  const result = gameStore.signSupplierContract(gameStore.currentSupplierId, targetTier)
+  message.value = result.message
+}
+
+const currentSupplierExclusiveSupplies = computed(() => {
+  if (!gameStore.currentSupplierId) return []
+  return gameStore.getSupplierExclusiveSupplies(gameStore.currentSupplierId)
+})
+
+const currentSupplierMilestones = computed(() => {
+  if (!gameStore.currentSupplierId) return []
+  return gameStore.getSupplierMilestones(gameStore.currentSupplierId)
+})
 </script>
 
 <template>
@@ -444,6 +492,20 @@ const genreEmoji: { [key in Genre]: string } = {
               <span class="stat-label">采购数量</span>
               <span class="stat-value">{{ getSupplierStats(supplier.id).totalItems }} 张</span>
             </div>
+            <div class="stat-item">
+              <span class="stat-label">合约等级</span>
+              <span 
+                class="stat-value"
+                :style="{ color: getTierColor(gameStore.getSupplierRelationship(supplier.id).contractTier) }"
+              >
+                {{ getContractTierConfig(gameStore.getSupplierRelationship(supplier.id).contractTier).icon }}
+                {{ getContractTierConfig(gameStore.getSupplierRelationship(supplier.id).contractTier).tierName }}
+              </span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">信任度</span>
+              <span class="stat-value">{{ gameStore.getSupplierRelationship(supplier.id).trustPoints }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -608,6 +670,129 @@ const genreEmoji: { [key in Genre]: string } = {
           <span class="empty-icon">📭</span>
           <p class="empty-text">该供应商今日暂无新货</p>
           <button class="btn-secondary" @click="refreshInventory">刷新货单</button>
+        </div>
+      </div>
+
+      <div v-if="currentSupplierRel && currentRelTierConfig" class="relationship-card card" :style="{ background: getTierBgColor(currentSupplierRel.contractTier), borderColor: getTierColor(currentSupplierRel.contractTier) + '50' }">
+        <div class="rel-header">
+          <span class="rel-tier-icon">{{ currentRelTierConfig.icon }}</span>
+          <div class="rel-title-area">
+            <h3 class="rel-title" :style="{ color: getTierColor(currentSupplierRel.contractTier) }">
+              {{ currentRelTierConfig.tierName }}
+            </h3>
+            <p class="rel-desc">{{ currentRelTierConfig.description }}</p>
+          </div>
+          <div class="rel-trust-area">
+            <span class="rel-trust-label">信任度</span>
+            <span class="rel-trust-value" :style="{ color: getTierColor(currentSupplierRel.contractTier) }">
+              {{ currentSupplierRel.trustPoints }}
+            </span>
+          </div>
+        </div>
+
+        <div class="rel-trust-bar">
+          <div 
+            class="rel-trust-fill"
+            :style="{ 
+              width: currentRelBonus ? currentRelBonus.trustProgressPercent + '%' : '0%',
+              background: `linear-gradient(90deg, ${getTierColor(currentSupplierRel.contractTier)} 0%, ${getTierColor(currentSupplierRel.contractTier)}cc 100%)`
+            }"
+          ></div>
+        </div>
+        <div class="rel-trust-hint">
+          <span v-if="nextRelTier" class="rel-next-tier">
+            下一等级: {{ nextRelTier.icon }} {{ nextRelTier.tierName }}（需 {{ nextRelTier.minTrustPoints }} 信任）
+          </span>
+          <span v-else class="rel-max-tier">已达最高等级</span>
+        </div>
+
+        <div v-if="currentRelBonus" class="rel-bonuses">
+          <div class="rel-bonus-item">
+            <span class="rb-label">采购折扣</span>
+            <span class="rb-value" :style="{ color: getTierColor(currentSupplierRel.contractTier) }">
+              -{{ Math.round(currentRelBonus.totalDiscountRate * 100) }}%
+            </span>
+          </div>
+          <div class="rel-bonus-item">
+            <span class="rb-label">专属货位</span>
+            <span class="rb-value">{{ currentRelBonus.exclusiveSlots }} 个</span>
+          </div>
+          <div class="rel-bonus-item">
+            <span class="rb-label">稀有品加成</span>
+            <span class="rb-value">+{{ Math.round(currentRelBonus.rareItemBonus * 100) }}%</span>
+          </div>
+          <div v-if="currentRelBonus.deliverySpeedBonus > 0" class="rel-bonus-item">
+            <span class="rb-label">配送加速</span>
+            <span class="rb-value">-{{ currentRelBonus.deliverySpeedBonus }} 天</span>
+          </div>
+          <div v-if="currentRelBonus.breachForgiveness > 0" class="rel-bonus-item">
+            <span class="rb-label">违约豁免</span>
+            <span class="rb-value">{{ currentRelBonus.breachForgiveness }} 次</span>
+          </div>
+        </div>
+
+        <div v-if="canSignNextTier && nextRelTier" class="rel-sign-section">
+          <button 
+            class="btn-primary rel-sign-btn"
+            :style="{ background: `linear-gradient(135deg, ${getTierColor(nextRelTier.tier)} 0%, ${getTierColor(nextRelTier.tier)}cc 100%)` }"
+            @click="handleSignContract(nextRelTier.tier)"
+          >
+            {{ nextRelTier.icon }} 升级至{{ nextRelTier.tierName }}
+          </button>
+        </div>
+
+        <div v-if="currentSupplierRel.contractTier === 'none' && !currentSupplierRel.isActive" class="rel-sign-section">
+          <button 
+            class="btn-primary rel-sign-btn"
+            @click="handleSignContract('trial')"
+          >
+            📋 签订试用合约
+          </button>
+        </div>
+
+        <div v-if="currentSupplierExclusiveSupplies.length > 0" class="rel-exclusive-section">
+          <div class="rel-section-header">
+            <span>🔓 专属货源</span>
+          </div>
+          <div class="rel-exclusive-list">
+            <div 
+              v-for="(supply, idx) in currentSupplierExclusiveSupplies" 
+              :key="idx"
+              class="rel-exclusive-item"
+            >
+              <span class="re-genre">{{ genreEmoji[supply.genre] }} {{ supply.genre }}</span>
+              <span class="re-rarity">{{ supply.minRarity }}星+</span>
+              <span class="re-stock">+{{ supply.bonusStockCount }}张</span>
+              <span class="re-price">≤¥{{ supply.priceCap }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentSupplierMilestones.length > 0" class="rel-milestones-section">
+          <div class="rel-section-header">
+            <span>🎯 成长里程碑</span>
+          </div>
+          <div class="rel-milestone-list">
+            <div 
+              v-for="ms in currentSupplierMilestones" 
+              :key="ms.id"
+              class="rel-milestone-item"
+              :class="{ unlocked: ms.isUnlocked }"
+            >
+              <span class="rm-icon">{{ ms.icon }}</span>
+              <div class="rm-info">
+                <span class="rm-name">{{ ms.name }}</span>
+                <span class="rm-reward">{{ ms.rewardDescription }}</span>
+              </div>
+              <span v-if="ms.isUnlocked" class="rm-status">✅</span>
+              <span v-else class="rm-status">{{ ms.requiredTrustPoints }}信任</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentSupplierRel.breachCount > 0" class="rel-breach-warning">
+          <span class="rbw-icon">⚠️</span>
+          <span class="rbw-text">累计违约 {{ currentSupplierRel.breachCount }} 次</span>
         </div>
       </div>
     </div>
@@ -1972,5 +2157,248 @@ const genreEmoji: { [key in Genre]: string } = {
   color: var(--success);
   font-weight: 500;
   text-align: center;
+}
+
+.relationship-card {
+  border: 1px solid;
+  animation: slideUp 0.3s ease-out;
+}
+
+.rel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.rel-tier-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.rel-title-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.rel-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.rel-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.rel-trust-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.rel-trust-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.rel-trust-value {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.rel-trust-bar {
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.rel-trust-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.rel-trust-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.rel-max-tier {
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+.rel-bonuses {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+}
+
+.rel-bonus-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rb-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.rb-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rel-sign-section {
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.rel-sign-btn {
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rel-exclusive-section,
+.rel-milestones-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.rel-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.rel-exclusive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rel-exclusive-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.re-genre {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.re-rarity {
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+.re-stock {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.re-price {
+  color: var(--text-secondary);
+}
+
+.rel-milestone-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rel-milestone-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.rel-milestone-item.unlocked {
+  opacity: 1;
+  background: rgba(72, 187, 120, 0.08);
+}
+
+.rm-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.rm-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.rm-name {
+  display: block;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rm-reward {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.rm-status {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.rel-milestone-item.unlocked .rm-status {
+  color: var(--success);
+}
+
+.rel-breach-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(245, 101, 101, 0.1);
+  border: 1px solid rgba(245, 101, 101, 0.3);
+  border-radius: 8px;
+}
+
+.rbw-icon {
+  font-size: 14px;
+}
+
+.rbw-text {
+  font-size: 12px;
+  color: #f56565;
+  font-weight: 600;
 }
 </style>
