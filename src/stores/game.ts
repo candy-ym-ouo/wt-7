@@ -139,12 +139,17 @@ import {
   getHottestGenres,
   getColdestGenres
 } from '@/data/marketHeat'
-import type { GenreMarketHeat, StaffState, StaffSkillType } from '@/types'
+import type { GenreMarketHeat, StaffState, StaffSkillType, CollectionSource, CollectionSourceType } from '@/types'
 import {
   createInitialStaffState,
   upgradeStaffSkill as upgradeStaffSkillData,
   addStaffPoints as addStaffPointsData
 } from '@/data/staff'
+import {
+  generateRecordStory,
+  generateRecordAchievements,
+  generateDisplayCopy
+} from '@/data/stories'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -824,6 +829,17 @@ export const useGameStore = defineStore('game', () => {
     if (staffPointsEarned > 0) {
       addStaffPoints(staffPointsEarned)
     }
+    
+    const levelConfig = getLevelById(currentLevel.value)
+    const grade = reward.evaluation?.grade || 'B'
+    const totalScore = reward.evaluation?.totalScore || 0
+    addLevelClearToCollectionHistory(
+      currentLevel.value,
+      levelConfig?.name || `第${currentLevel.value}关`,
+      grade,
+      totalScore
+    )
+    updateAllCollectionStoryProgress()
 
     return reward
   }
@@ -2093,6 +2109,8 @@ export const useGameStore = defineStore('game', () => {
       
       salesHistory.value.push(saleRecord)
       
+      addSaleToCollectionHistory(record.id, saleRecord)
+      
       const daysInStock = invItem ? currentDay.value - invItem.purchaseDate : 1
       recordPerformances.value = updatePerformanceAfterSale(
         recordPerformances.value,
@@ -2115,7 +2133,13 @@ export const useGameStore = defineStore('game', () => {
       const finalCollectionChance = Math.max(0, Math.min(1, baseCollectionChance + identityCollectionBonus))
 
       if (satisfaction >= 80 && Math.random() < finalCollectionChance) {
-        addToCollection(record, invItem.actualCostPrice, slotConditionScore)
+        const sourceType = isMemberPurchase ? 'member_reward' : (customer.identityTag === 'collector' || customer.identityTag === 'connoisseur' ? 'special_customer' : 'customer_gift')
+        addToCollection(record, invItem.actualCostPrice, slotConditionScore, {
+          type: sourceType,
+          customerId: customer.id,
+          customerName: customer.name,
+          sourceId: customer.id
+        })
       }
 
       let reputationDelta = satisfaction > 60 ? 1 : -1
@@ -2326,12 +2350,15 @@ export const useGameStore = defineStore('game', () => {
 
     item.conditionScore = targetScore
     item.collectionValue = calculateCollectionValue(item.record.rarity, targetScore, item.record.marketPrice)
+    item.extended.timesRenovated++
     budget.value -= cost
     dailyRenovationCost.value += cost
     dailyCost.value += cost
 
     const newlyActivated = checkAndActivateAlbums()
     updateCollectionBonuses()
+    updateCollectionStoryProgress(recordId)
+    checkAndUpdateAchievements(recordId)
 
     let message = `翻新成功！《${item.record.title}》品相提升至 ${getConditionLabel(targetScore)}，收藏价值 ¥${item.collectionValue}`
     if (newlyActivated.length > 0) {
@@ -2922,25 +2949,322 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  const addToCollection = (record: Record, purchasePrice: number, conditionScore: number = 100) => {
+  const createEmptyExtended = (record: Record): CollectionItem['extended'] => {
+    const story = generateRecordStory({
+      id: record.id,
+      title: record.title,
+      artist: record.artist,
+      genre: record.genre,
+      rarity: record.rarity
+    })
+    story.chapters[0].isUnlocked = true
+    story.chapters[0].unlockedDate = Date.now()
+    story.unlockedChapters = 1
+    
+    const achievements = generateRecordAchievements(record.id, record.rarity)
+    
+    const achFirstPurchase = achievements.find(a => a.type === 'first_purchase')
+    if (achFirstPurchase) {
+      achFirstPurchase.isUnlocked = true
+      achFirstPurchase.unlockedDate = Date.now()
+      achFirstPurchase.progress = 1
+    }
+    
+    if (record.rarity >= 4) {
+      const achLegendary = achievements.find(a => a.type === 'legendary_find')
+      if (achLegendary) {
+        achLegendary.isUnlocked = true
+        achLegendary.unlockedDate = Date.now()
+        achLegendary.progress = 1
+      }
+    }
+    
+    const displayCopy = generateDisplayCopy({
+      id: record.id,
+      title: record.title,
+      artist: record.artist,
+      genre: record.genre,
+      year: record.year,
+      rarity: record.rarity
+    })
+    
+    return {
+      story,
+      achievements,
+      source: null,
+      displayCopy,
+      saleHistory: [],
+      clearHistory: [],
+      daysOwned: 0,
+      timesRenovated: 0,
+      totalSaleRevenue: 0,
+      totalSalesCount: 0,
+      isStoryUnlocked: true,
+      unlockedAchievementCount: achievements.filter(a => a.isUnlocked).length
+    }
+  }
+
+  const setCollectionSource = (recordId: string, source: CollectionSource) => {
+    const item = collection.value.find(c => c.record.id === recordId)
+    if (item) {
+      item.extended.source = source
+    }
+  }
+
+  const createCollectionSource = (
+    type: CollectionSourceType,
+    options: {
+      sourceId?: string | null
+      sourceName?: string
+      customerId?: string | null
+      customerName?: string | null
+      levelId?: number | null
+      eventId?: string | null
+      description?: string
+    } = {}
+  ): CollectionSource => {
+    const sourceLabels: { [key in CollectionSourceType]: { name: string; icon: string; desc: string } } = {
+      'customer_gift': { name: '顾客赠送', icon: '🎁', desc: '高满意度顾客赠予的珍贵礼物' },
+      'purchase': { name: '进货收藏', icon: '🛒', desc: '在供应商处购得后入藏' },
+      'member_reward': { name: '会员回馈', icon: '👑', desc: '忠实会员赠送的特别礼物' },
+      'event_reward': { name: '活动奖励', icon: '🎉', desc: '通过特殊事件获得' },
+      'level_clear': { name: '通关奖励', icon: '🏆', desc: '完成关卡目标的奖励' },
+      'special_customer': { name: '特殊顾客', icon: '⭐', desc: '来自特殊顾客的馈赠' },
+      'album_bonus': { name: '图鉴奖励', icon: '📖', desc: '激活图鉴后的额外奖励' },
+      'staff_reward': { name: '员工推荐', icon: '👨‍💼', desc: '员工协助发现的珍品' }
+    }
+    const label = sourceLabels[type]
+    return {
+      type,
+      sourceId: options.sourceId || null,
+      sourceName: options.sourceName || label.name,
+      sourceIcon: label.icon,
+      description: options.description || label.desc,
+      timestamp: Date.now(),
+      customerId: options.customerId || null,
+      customerName: options.customerName || null,
+      levelId: options.levelId || null,
+      eventId: options.eventId || null
+    }
+  }
+
+  const addToCollection = (
+    record: Record, 
+    purchasePrice: number, 
+    conditionScore: number = 100,
+    sourceOptions?: {
+      type?: CollectionSourceType
+      sourceId?: string | null
+      sourceName?: string
+      customerId?: string | null
+      customerName?: string | null
+      levelId?: number | null
+      eventId?: string | null
+    }
+  ) => {
     if (collection.value.some(c => c.record.id === record.id)) return
 
     const collValue = calculateCollectionValue(record.rarity, conditionScore, record.marketPrice)
-
-    collection.value.push({
+    
+    const sourceType: CollectionSourceType = sourceOptions?.type || 'customer_gift'
+    
+    const collectionItem: CollectionItem = {
       record,
       acquiredDate: Date.now(),
       purchasePrice,
       isFavorite: false,
       notes: '',
       conditionScore,
-      collectionValue: collValue
-    })
+      collectionValue: collValue,
+      extended: createEmptyExtended(record)
+    }
+    
+    const source = createCollectionSource(sourceType, sourceOptions)
+    collectionItem.extended.source = source
+    
+    collection.value.push(collectionItem)
 
     const newlyActivated = checkAndActivateAlbums()
     updateCollectionBonuses()
+    updateCollectionStoryProgress(record.id)
 
     return newlyActivated
+  }
+
+  const checkAndUpdateAchievements = (recordId: string) => {
+    const item = collection.value.find(c => c.record.id === recordId)
+    if (!item) return
+    
+    const ext = item.extended
+    
+    for (const ach of ext.achievements) {
+      if (ach.isUnlocked) continue
+      
+      let shouldUnlock = false
+      let progress = ach.progress
+      
+      switch (ach.type) {
+        case 'perfect_condition':
+          progress = item.conditionScore
+          shouldUnlock = item.conditionScore >= ach.target
+          break
+        case 'repeat_sales':
+          progress = ext.totalSalesCount
+          shouldUnlock = ext.totalSalesCount >= ach.target
+          break
+        case 'renovated':
+          progress = ext.timesRenovated
+          shouldUnlock = ext.timesRenovated >= ach.target
+          break
+        case 'favorite_pick':
+          progress = item.isFavorite ? 1 : 0
+          shouldUnlock = item.isFavorite
+          break
+        case 'album_centerpiece':
+          const isInAlbum = albumState.value.categories.some(cat =>
+            cat.entries.some(entry =>
+              entry.isActivated && entry.requiredRecordIds.includes(recordId)
+            )
+          )
+          progress = isInAlbum ? 1 : 0
+          shouldUnlock = isInAlbum
+          break
+      }
+      
+      ach.progress = progress
+      if (shouldUnlock) {
+        ach.isUnlocked = true
+        ach.unlockedDate = Date.now()
+      }
+    }
+    
+    ext.unlockedAchievementCount = ext.achievements.filter(a => a.isUnlocked).length
+  }
+
+  const updateCollectionStoryProgress = (recordId: string) => {
+    const item = collection.value.find(c => c.record.id === recordId)
+    if (!item || !item.extended.story) return
+    
+    const story = item.extended.story
+    const ext = item.extended
+    
+    for (let i = 0; i < story.chapters.length; i++) {
+      const chapter = story.chapters[i]
+      if (chapter.isUnlocked) continue
+      
+      let canUnlock = true
+      
+      if (chapter.requiredDaysOwned && ext.daysOwned < chapter.requiredDaysOwned) {
+        canUnlock = false
+      }
+      if (chapter.requiredSalesCount && ext.totalSalesCount < chapter.requiredSalesCount) {
+        canUnlock = false
+      }
+      if (chapter.requiredConditionScore && item.conditionScore < chapter.requiredConditionScore) {
+        canUnlock = false
+      }
+      if (chapter.requiredRenovationCount && ext.timesRenovated < chapter.requiredRenovationCount) {
+        canUnlock = false
+      }
+      if (chapter.requiredFavorite && !item.isFavorite) {
+        canUnlock = false
+      }
+      if (chapter.requiredCompletedLevels) {
+        const allLevelsCleared = chapter.requiredCompletedLevels.every(lvl => 
+          completedLevels.value.includes(lvl)
+        )
+        if (!allLevelsCleared) canUnlock = false
+      }
+      
+      if (canUnlock) {
+        chapter.isUnlocked = true
+        chapter.unlockedDate = Date.now()
+        story.unlockedChapters++
+      }
+    }
+    
+    story.isStoryComplete = story.unlockedChapters >= story.totalChapters
+  }
+
+  const updateAllCollectionStoryProgress = () => {
+    for (const item of collection.value) {
+      updateCollectionStoryProgress(item.record.id)
+      checkAndUpdateAchievements(item.record.id)
+    }
+  }
+
+  const addSaleToCollectionHistory = (
+    recordId: string,
+    saleRecord: SaleRecord
+  ) => {
+    const item = collection.value.find(c => c.record.id === recordId)
+    if (!item) return
+    
+    const ext = item.extended
+    const customerName = saleRecord.memberId 
+      ? (members.value.find(m => m.id === saleRecord.memberId)?.name || '顾客')
+      : '顾客'
+    
+    ext.saleHistory.push({
+      saleRecordId: saleRecord.recordId,
+      salePrice: saleRecord.salePrice,
+      customerName,
+      timestamp: saleRecord.timestamp,
+      satisfaction: saleRecord.customerSatisfaction,
+      wasMember: !!saleRecord.memberId,
+      memberLevel: saleRecord.memberLevel,
+      wasBargained: saleRecord.wasBargained
+    })
+    
+    ext.totalSalesCount++
+    ext.totalSaleRevenue += saleRecord.salePrice
+    
+    const achFirstSale = ext.achievements.find(a => a.type === 'first_sale')
+    if (achFirstSale && !achFirstSale.isUnlocked) {
+      achFirstSale.isUnlocked = true
+      achFirstSale.unlockedDate = Date.now()
+      achFirstSale.progress = 1
+    }
+    
+    const achHighValue = ext.achievements.find(a => a.type === 'high_value_sale')
+    if (achHighValue && !achHighValue.isUnlocked) {
+      const marketPrice = item.record.marketPrice
+      if (saleRecord.salePrice >= marketPrice * 1.2) {
+        achHighValue.isUnlocked = true
+        achHighValue.unlockedDate = Date.now()
+        achHighValue.progress = 1
+      }
+    }
+    
+    updateCollectionStoryProgress(recordId)
+    checkAndUpdateAchievements(recordId)
+  }
+
+  const addLevelClearToCollectionHistory = (
+    levelId: number,
+    levelName: string,
+    grade: string,
+    totalScore: number
+  ) => {
+    for (const item of collection.value) {
+      item.extended.clearHistory.push({
+        levelId,
+        levelName,
+        clearedDate: Date.now(),
+        grade,
+        totalScore
+      })
+      item.extended.daysOwned += currentDay.value
+      updateCollectionStoryProgress(item.record.id)
+      checkAndUpdateAchievements(item.record.id)
+    }
+  }
+
+  const incrementCollectionDaysOwned = () => {
+    for (const item of collection.value) {
+      item.extended.daysOwned++
+    }
+    updateAllCollectionStoryProgress()
   }
 
   const toggleFavorite = (recordId: string) => {
@@ -2948,6 +3272,8 @@ export const useGameStore = defineStore('game', () => {
     if (item) {
       item.isFavorite = !item.isFavorite
       updateCollectionBonuses()
+      updateCollectionStoryProgress(recordId)
+      checkAndUpdateAchievements(recordId)
     }
   }
 
@@ -3287,6 +3613,13 @@ export const useGameStore = defineStore('game', () => {
     getPromotionReputationBonus,
     staff,
     upgradeStaffSkill,
-    addStaffPoints
+    addStaffPoints,
+    setCollectionSource,
+    checkAndUpdateAchievements,
+    updateCollectionStoryProgress,
+    updateAllCollectionStoryProgress,
+    addSaleToCollectionHistory,
+    addLevelClearToCollectionHistory,
+    incrementCollectionDaysOwned
   }
 })

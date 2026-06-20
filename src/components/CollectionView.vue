@@ -6,6 +6,7 @@ import type { CollectionItem, MemberProfile, MemberLevel, AlbumEntry } from '@/t
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
 import { getConditionLabel, getConditionColor, getConditionDescription, getRenovationOptions } from '@/data/condition'
 import { checkAlbumActivation } from '@/data/album'
+import { getSourceTypeLabel } from '@/data/stories'
 
 const emit = defineEmits<{
   close: []
@@ -156,6 +157,8 @@ const showRenovateModal = ref(false)
 const renovateItem = ref<CollectionItem | null>(null)
 const renovateMessage = ref('')
 const renovateMessageType = ref<'success' | 'error'>('success')
+
+const detailTab = ref<'info' | 'story' | 'achievements' | 'history' | 'display'>('info')
 
 const openRenovateModal = (item: CollectionItem) => {
   renovateItem.value = item
@@ -626,66 +629,358 @@ const formatBonusValue = (type: string, value: number): string => {
                 >
                   {{ getConditionLabel(selectedItem.conditionScore) }}
                 </span>
+                <span v-if="selectedItem.extended.source" class="detail-tag" :style="{ color: getSourceTypeLabel(selectedItem.extended.source.type).color, borderColor: getSourceTypeLabel(selectedItem.extended.source.type).color + '40' }">
+                  {{ getSourceTypeLabel(selectedItem.extended.source.type).icon }} {{ getSourceTypeLabel(selectedItem.extended.source.type).label }}
+                </span>
               </div>
 
-              <div class="detail-condition-section">
-                <div class="dcs-header">
-                  <span class="dcs-label">品相评分</span>
-                  <span class="dcs-score" :style="{ color: getConditionColor(selectedItem.conditionScore) }">
-                    {{ selectedItem.conditionScore }}/100
-                  </span>
+              <div class="detail-quick-stats card">
+                <div class="dqs-item">
+                  <span class="dqs-icon">📜</span>
+                  <div class="dqs-info">
+                    <span class="dqs-value">{{ selectedItem.extended.story?.unlockedChapters || 0 }}/{{ selectedItem.extended.story?.totalChapters || 0 }}</span>
+                    <span class="dqs-label">故事章节</span>
+                  </div>
                 </div>
-                <div class="dcs-bar">
-                  <div 
-                    class="dcs-fill" 
-                    :style="{ width: selectedItem.conditionScore + '%', background: getConditionColor(selectedItem.conditionScore) }"
-                  ></div>
+                <div class="dqs-item">
+                  <span class="dqs-icon">🏆</span>
+                  <div class="dqs-info">
+                    <span class="dqs-value">{{ selectedItem.extended.unlockedAchievementCount }}/{{ selectedItem.extended.achievements.length }}</span>
+                    <span class="dqs-label">成就解锁</span>
+                  </div>
                 </div>
-                <p class="dcs-desc">{{ getConditionDescription(getConditionLabel(selectedItem.conditionScore) as any) }}</p>
-              </div>
-
-              <div class="detail-rarity">
-                <span style="color: #f6e05e">{{ rarityStars(selectedItem.record.rarity) }}</span>
-                <span class="rarity-label">{{ selectedItem.record.rarity }} 星稀有</span>
-              </div>
-
-              <p class="detail-desc">{{ selectedItem.record.description }}</p>
-
-              <div class="detail-stats">
-                <div class="ds-item">
-                  <span class="ds-label">购入价格</span>
-                  <span class="ds-value">¥{{ selectedItem.purchasePrice }}</span>
+                <div class="dqs-item">
+                  <span class="dqs-icon">💰</span>
+                  <div class="dqs-info">
+                    <span class="dqs-value">{{ selectedItem.extended.totalSalesCount }}</span>
+                    <span class="dqs-label">成交次数</span>
+                  </div>
                 </div>
-                <div class="ds-item">
-                  <span class="ds-label">收藏价值</span>
-                  <span class="ds-value" :style="{ color: getConditionColor(selectedItem.conditionScore) }">¥{{ selectedItem.collectionValue }}</span>
-                </div>
-                <div class="ds-item">
-                  <span class="ds-label">购入时间</span>
-                  <span class="ds-value">{{ formatDate(selectedItem.acquiredDate) }}</span>
-                </div>
-                <div class="ds-item">
-                  <span class="ds-label">曲目数量</span>
-                  <span class="ds-value">{{ selectedItem.record.trackCount }} 首</span>
+                <div class="dqs-item">
+                  <span class="dqs-icon">📅</span>
+                  <div class="dqs-info">
+                    <span class="dqs-value">{{ selectedItem.extended.daysOwned }}天</span>
+                    <span class="dqs-label">收藏天数</span>
+                  </div>
                 </div>
               </div>
 
-              <div v-if="getRenovationOptions(selectedItem.conditionScore, selectedItem.record.rarity).length > 0" class="renovate-section">
-                <button class="renovate-trigger-btn" @click="openRenovateModal(selectedItem)">
-                  🔧 翻新维护 · 提升收藏价值
+              <div class="detail-tabs">
+                <button
+                  v-for="tab in [
+                    { key: 'info', label: '📋 信息', icon: '📋' },
+                    { key: 'story', label: '📜 故事', icon: '📜' },
+                    { key: 'achievements', label: '🏆 成就', icon: '🏆' },
+                    { key: 'history', label: '📊 历史', icon: '📊' },
+                    { key: 'display', label: '✨ 展示', icon: '✨' }
+                  ]"
+                  :key="tab.key"
+                  class="detail-tab-btn"
+                  :class="{ active: detailTab === tab.key as any }"
+                  @click="detailTab = tab.key as any"
+                >
+                  {{ tab.label }}
                 </button>
               </div>
 
-              <div class="notes-section">
-                <label class="notes-label">我的笔记</label>
-                <textarea
-                  class="notes-input"
-                  :value="selectedItem.notes"
-                  @input="handleNotesInput"
-                  placeholder="记录你对这张唱片的感受..."
-                  rows="3"
-                ></textarea>
+              <div v-show="detailTab === 'info'" class="detail-tab-content">
+                <div class="detail-condition-section">
+                  <div class="dcs-header">
+                    <span class="dcs-label">品相评分</span>
+                    <span class="dcs-score" :style="{ color: getConditionColor(selectedItem.conditionScore) }">
+                      {{ selectedItem.conditionScore }}/100
+                    </span>
+                  </div>
+                  <div class="dcs-bar">
+                    <div 
+                      class="dcs-fill" 
+                      :style="{ width: selectedItem.conditionScore + '%', background: getConditionColor(selectedItem.conditionScore) }"
+                    ></div>
+                  </div>
+                  <p class="dcs-desc">{{ getConditionDescription(getConditionLabel(selectedItem.conditionScore) as any) }}</p>
+                </div>
+
+                <div class="detail-rarity">
+                  <span style="color: #f6e05e">{{ rarityStars(selectedItem.record.rarity) }}</span>
+                  <span class="rarity-label">{{ selectedItem.record.rarity }} 星稀有</span>
+                </div>
+
+                <p class="detail-desc">{{ selectedItem.record.description }}</p>
+
+                <div v-if="selectedItem.extended.source" class="source-section card">
+                  <h4 class="section-title">🎁 获取来源</h4>
+                  <div class="source-info">
+                    <div class="source-icon" :style="{ background: getSourceTypeLabel(selectedItem.extended.source.type).color + '20' }">
+                      {{ selectedItem.extended.source.sourceIcon }}
+                    </div>
+                    <div class="source-content">
+                      <div class="source-name">
+                        <span :style="{ color: getSourceTypeLabel(selectedItem.extended.source.type).color, fontWeight: 600 }">
+                          {{ selectedItem.extended.source.sourceName }}
+                        </span>
+                      </div>
+                      <p class="source-desc">{{ selectedItem.extended.source.description }}</p>
+                      <div v-if="selectedItem.extended.source.customerName" class="source-meta">
+                        <span>来自：{{ selectedItem.extended.source.customerName }}</span>
+                        <span>{{ formatDate(selectedItem.extended.source.timestamp) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-stats">
+                  <div class="ds-item">
+                    <span class="ds-label">购入价格</span>
+                    <span class="ds-value">¥{{ selectedItem.purchasePrice }}</span>
+                  </div>
+                  <div class="ds-item">
+                    <span class="ds-label">收藏价值</span>
+                    <span class="ds-value" :style="{ color: getConditionColor(selectedItem.conditionScore) }">¥{{ selectedItem.collectionValue }}</span>
+                  </div>
+                  <div class="ds-item">
+                    <span class="ds-label">购入时间</span>
+                    <span class="ds-value">{{ formatDate(selectedItem.acquiredDate) }}</span>
+                  </div>
+                  <div class="ds-item">
+                    <span class="ds-label">曲目数量</span>
+                    <span class="ds-value">{{ selectedItem.record.trackCount }} 首</span>
+                  </div>
+                  <div class="ds-item">
+                    <span class="ds-label">翻新次数</span>
+                    <span class="ds-value">{{ selectedItem.extended.timesRenovated }} 次</span>
+                  </div>
+                  <div class="ds-item">
+                    <span class="ds-label">累计营收</span>
+                    <span class="ds-value" style="color: var(--success)">¥{{ selectedItem.extended.totalSaleRevenue }}</span>
+                  </div>
+                </div>
+
+                <div v-if="getRenovationOptions(selectedItem.conditionScore, selectedItem.record.rarity).length > 0" class="renovate-section">
+                  <button class="renovate-trigger-btn" @click="openRenovateModal(selectedItem)">
+                    🔧 翻新维护 · 提升收藏价值
+                  </button>
+                </div>
+
+                <div class="notes-section">
+                  <label class="notes-label">我的笔记</label>
+                  <textarea
+                    class="notes-input"
+                    :value="selectedItem.notes"
+                    @input="handleNotesInput"
+                    placeholder="记录你对这张唱片的感受..."
+                    rows="3"
+                  ></textarea>
+                </div>
               </div>
+
+              <div v-show="detailTab === 'story'" class="detail-tab-content">
+                <div v-if="selectedItem.extended.story" class="story-section">
+                  <div class="story-header-card card">
+                    <div class="story-icon">{{ selectedItem.extended.story.storyIcon }}</div>
+                    <div class="story-title-info">
+                      <h3 class="story-title">{{ selectedItem.extended.story.storyTitle }}</h3>
+                      <div class="story-progress-info">
+                        <div class="story-progress-bar">
+                          <div 
+                            class="story-progress-fill"
+                            :style="{ width: (selectedItem.extended.story.unlockedChapters / selectedItem.extended.story.totalChapters * 100) + '%' }"
+                          ></div>
+                        </div>
+                        <span class="story-progress-text">
+                          {{ selectedItem.extended.story.unlockedChapters }}/{{ selectedItem.extended.story.totalChapters }} 章节
+                        </span>
+                      </div>
+                      <div v-if="selectedItem.extended.story.isStoryComplete" class="story-complete-badge">
+                        🎉 故事已全部解锁
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="story-chapters">
+                    <div 
+                      v-for="chapter in selectedItem.extended.story.chapters"
+                      :key="chapter.id"
+                      class="story-chapter-card"
+                      :class="{ unlocked: chapter.isUnlocked, locked: !chapter.isUnlocked }"
+                    >
+                      <div class="chapter-header">
+                        <div class="chapter-index">
+                          {{ chapter.isUnlocked ? chapter.chapterIndex : '🔒' }}
+                        </div>
+                        <div class="chapter-title-info">
+                          <h4 class="chapter-title">{{ chapter.isUnlocked ? chapter.title : '???' }}</h4>
+                          <p class="chapter-condition">
+                            {{ chapter.isUnlocked ? (chapter.unlockedDate ? formatDate(chapter.unlockedDate) : '') : '解锁条件：' + chapter.unlockCondition }}
+                          </p>
+                        </div>
+                      </div>
+                      <p v-if="chapter.isUnlocked" class="chapter-content">
+                        {{ chapter.content }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-show="detailTab === 'achievements'" class="detail-tab-content">
+                <div class="achievements-section">
+                  <div class="achievements-summary card">
+                    <div class="ach-summary-icon">🏆</div>
+                    <div class="ach-summary-info">
+                      <h4>成就进度</h4>
+                      <div class="ach-summary-progress">
+                        <div class="ach-progress-bar">
+                          <div 
+                            class="ach-progress-fill"
+                            :style="{ width: (selectedItem.extended.unlockedAchievementCount / selectedItem.extended.achievements.length * 100) + '%' }"
+                          ></div>
+                        </div>
+                        <span class="ach-progress-text">
+                          {{ selectedItem.extended.unlockedAchievementCount }}/{{ selectedItem.extended.achievements.length }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="achievements-grid">
+                    <div 
+                      v-for="achievement in selectedItem.extended.achievements"
+                      :key="achievement.id"
+                      class="achievement-card"
+                      :class="{ unlocked: achievement.isUnlocked, locked: !achievement.isUnlocked }"
+                    >
+                      <div class="ach-icon" :class="{ unlocked: achievement.isUnlocked }">
+                        {{ achievement.isUnlocked ? achievement.icon : '🔒' }}
+                      </div>
+                      <div class="ach-info">
+                        <h5 class="ach-name">{{ achievement.name }}</h5>
+                        <p class="ach-desc">{{ achievement.description }}</p>
+                        <div v-if="!achievement.isUnlocked && achievement.target > 1" class="ach-progress-mini">
+                          <div class="achpm-bar">
+                            <div 
+                              class="achpm-fill"
+                              :style="{ width: Math.min(100, (achievement.progress / achievement.target * 100)) + '%' }"
+                            ></div>
+                          </div>
+                          <span class="achpm-text">{{ achievement.progress }}/{{ achievement.target }}</span>
+                        </div>
+                        <div v-if="achievement.isUnlocked && achievement.unlockedDate" class="ach-date">
+                          {{ formatDate(achievement.unlockedDate) }} 解锁
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-show="detailTab === 'history'" class="detail-tab-content">
+                <div class="history-section">
+                  <div v-if="selectedItem.extended.saleHistory.length > 0" class="history-subsection">
+                    <h4 class="subsection-title">💰 成交记录</h4>
+                    <div class="history-list">
+                      <div 
+                        v-for="(sale, idx) in [...selectedItem.extended.saleHistory].reverse()"
+                        :key="idx"
+                        class="history-item-card card"
+                      >
+                        <div class="hi-header">
+                          <span class="hi-price">¥{{ sale.salePrice }}</span>
+                          <span class="hi-date">{{ formatDate(sale.timestamp) }}</span>
+                        </div>
+                        <div class="hi-details">
+                          <span class="hi-customer">👤 {{ sale.customerName }}</span>
+                          <span class="hi-satisfaction" :style="{ color: sale.satisfaction >= 80 ? 'var(--success)' : (sale.satisfaction >= 60 ? 'var(--accent-gold)' : 'var(--danger)') }">
+                            😊 满意度 {{ sale.satisfaction }}%
+                          </span>
+                        </div>
+                        <div class="hi-tags">
+                          <span v-if="sale.wasMember" class="hi-tag hi-tag-member">
+                            {{ getLevelIcon(sale.memberLevel!) }} 会员
+                          </span>
+                          <span v-if="sale.wasBargained" class="hi-tag hi-tag-bargain">
+                            🤝 砍价成交
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="history-summary card">
+                      <div class="hs-item">
+                        <span class="hs-label">总成交次数</span>
+                        <span class="hs-value">{{ selectedItem.extended.totalSalesCount }} 次</span>
+                      </div>
+                      <div class="hs-item">
+                        <span class="hs-label">累计营收</span>
+                        <span class="hs-value" style="color: var(--success)">¥{{ selectedItem.extended.totalSaleRevenue }}</span>
+                      </div>
+                      <div class="hs-item">
+                        <span class="hs-label">平均售价</span>
+                        <span class="hs-value">¥{{ selectedItem.extended.totalSalesCount > 0 ? Math.round(selectedItem.extended.totalSaleRevenue / selectedItem.extended.totalSalesCount) : 0 }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="empty-history">
+                    <div class="eh-icon">💰</div>
+                    <p>暂无成交记录</p>
+                  </div>
+
+                  <div v-if="selectedItem.extended.clearHistory.length > 0" class="history-subsection" style="margin-top: 20px">
+                    <h4 class="subsection-title">🏆 通关成就</h4>
+                    <div class="history-list">
+                      <div 
+                        v-for="(clear, idx) in [...selectedItem.extended.clearHistory].reverse()"
+                        :key="idx"
+                        class="history-item-card card"
+                      >
+                        <div class="hi-header">
+                          <span class="hi-level">{{ clear.levelName }}</span>
+                          <span class="hi-grade" :class="'grade-' + clear.grade.toLowerCase()">
+                            {{ clear.grade }} 级
+                          </span>
+                        </div>
+                        <div class="hi-details">
+                          <span class="hi-score">📊 得分：{{ clear.totalScore }}</span>
+                          <span class="hi-date">{{ formatDate(clear.clearedDate) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-show="detailTab === 'display'" class="detail-tab-content">
+                <div v-if="selectedItem.extended.displayCopy" class="display-section">
+                  <div class="display-headline card">
+                    <h3 class="dh-title">{{ selectedItem.extended.displayCopy.headline }}</h3>
+                    <p class="dh-tagline">{{ selectedItem.extended.displayCopy.tagline }}</p>
+                  </div>
+
+                  <div class="display-quote card">
+                    <div class="dq-icon">💬</div>
+                    <p class="dq-content">{{ selectedItem.extended.displayCopy.quote }}</p>
+                  </div>
+
+                  <div class="display-history card">
+                    <h4 class="section-title">📖 专辑历史</h4>
+                    <p class="display-text">{{ selectedItem.extended.displayCopy.history }}</p>
+                  </div>
+
+                  <div class="display-trivia card">
+                    <h4 class="section-title">🎵 趣闻轶事</h4>
+                    <p class="display-text">{{ selectedItem.extended.displayCopy.trivia }}</p>
+                  </div>
+
+                  <div class="display-mood card">
+                    <h4 class="section-title">🎧 氛围描述</h4>
+                    <p class="display-text">{{ selectedItem.extended.displayCopy.moodDescription }}</p>
+                  </div>
+
+                  <div class="display-pairing card">
+                    <h4 class="section-title">🍷 推荐搭配</h4>
+                    <p class="display-text">{{ selectedItem.extended.displayCopy.recommendedPairing }}</p>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
@@ -2421,5 +2716,664 @@ const formatBonusValue = (type: string, value: number): string => {
   padding: 10px;
   background: var(--bg-secondary);
   border-radius: 8px;
+}
+
+.card {
+  background: var(--bg-card);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.subsection-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.detail-quick-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dqs-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.dqs-icon {
+  font-size: 18px;
+}
+
+.dqs-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dqs-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  line-height: 1.1;
+}
+
+.dqs-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.detail-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.detail-tab-btn {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 8px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.detail-tab-btn.active {
+  background: var(--accent-gold);
+  color: var(--bg-primary);
+}
+
+.detail-tab-content {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.source-section {
+  margin-bottom: 16px;
+}
+
+.source-info {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.source-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.source-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-name {
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.source-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.source-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.story-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.story-header-card {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.story-icon {
+  font-size: 48px;
+  flex-shrink: 0;
+}
+
+.story-title-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.story-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.story-progress-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.story-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.story-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-orange) 100%);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.story-progress-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-gold);
+  white-space: nowrap;
+}
+
+.story-complete-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.2) 0%, rgba(233, 69, 96, 0.2) 100%);
+  color: var(--accent-gold);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+.story-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.story-chapter-card {
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  padding: 12px;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.story-chapter-card.unlocked {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.08) 0%, rgba(233, 69, 96, 0.05) 100%);
+  border-color: rgba(246, 224, 94, 0.2);
+}
+
+.story-chapter-card.locked {
+  opacity: 0.5;
+}
+
+.chapter-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.chapter-index {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-gold);
+  color: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.story-chapter-card.locked .chapter-index {
+  background: var(--bg-card);
+  color: var(--text-muted);
+}
+
+.chapter-title-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chapter-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.chapter-condition {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.chapter-content {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  padding-left: 44px;
+}
+
+.achievements-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.achievements-summary {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.ach-summary-icon {
+  font-size: 40px;
+  flex-shrink: 0;
+}
+
+.ach-summary-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ach-summary-info h4 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.ach-summary-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ach-progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ach-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.ach-progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+  white-space: nowrap;
+}
+
+.achievements-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.achievement-card {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  transition: all 0.2s;
+}
+
+.achievement-card.unlocked {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(246, 224, 94, 0.08) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.achievement-card.locked {
+  opacity: 0.6;
+}
+
+.ach-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+  filter: grayscale(0.8);
+  transition: all 0.2s;
+}
+
+.ach-icon.unlocked {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.2) 0%, rgba(233, 69, 96, 0.2) 100%);
+  filter: grayscale(0);
+}
+
+.ach-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.ach-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.ach-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.ach-progress-mini {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.achpm-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-card);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.achpm-fill {
+  height: 100%;
+  background: var(--accent-gold);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.achpm-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ach-date {
+  font-size: 10px;
+  color: var(--success);
+  font-weight: 500;
+}
+
+.history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.history-item-card {
+  margin-bottom: 0;
+}
+
+.hi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.hi-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-gold);
+}
+
+.hi-level {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.hi-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.hi-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.hi-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hi-tag {
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.hi-tag-member {
+  background: rgba(246, 224, 94, 0.15);
+  color: var(--accent-gold);
+}
+
+.hi-tag-bargain {
+  background: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+}
+
+.hi-grade {
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.hi-grade.grade-s {
+  background: linear-gradient(135deg, #f6e05e, #ecc94b);
+  color: #744210;
+}
+
+.hi-grade.grade-a {
+  background: linear-gradient(135deg, #68d391, #48bb78);
+  color: #22543d;
+}
+
+.hi-grade.grade-b {
+  background: linear-gradient(135deg, #63b3ed, #4299e1);
+  color: #1a365d;
+}
+
+.hi-grade.grade-c {
+  background: linear-gradient(135deg, #fbd38d, #f6ad55);
+  color: #7b341e;
+}
+
+.hi-grade.grade-d {
+  background: linear-gradient(135deg, #fc8181, #f56565);
+  color: #742a2a;
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.hs-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.hs-label {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.hs-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.empty-history {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+}
+
+.empty-history .eh-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+.empty-history p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.display-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.display-headline {
+  background: linear-gradient(135deg, rgba(246, 224, 94, 0.12) 0%, rgba(233, 69, 96, 0.12) 100%);
+  border-color: rgba(246, 224, 94, 0.3);
+  text-align: center;
+}
+
+.dh-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-orange) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dh-tagline {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.display-quote {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(99, 179, 237, 0.08) 100%);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+.dq-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.dq-content {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  font-style: italic;
+  flex: 1;
+}
+
+.display-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.display-history,
+.display-trivia,
+.display-mood,
+.display-pairing {
+  background: var(--bg-card);
 }
 </style>

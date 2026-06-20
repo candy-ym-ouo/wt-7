@@ -307,6 +307,125 @@ export interface LevelConfig {
   overstockConfig: OverstockConfig
 }
 
+export type CollectionSourceType = 
+  | 'customer_gift' 
+  | 'purchase' 
+  | 'member_reward' 
+  | 'event_reward' 
+  | 'level_clear' 
+  | 'special_customer' 
+  | 'album_bonus'
+  | 'staff_reward'
+
+export interface CollectionSource {
+  type: CollectionSourceType
+  sourceId: string | null
+  sourceName: string
+  sourceIcon: string
+  description: string
+  timestamp: number
+  customerId?: string | null
+  customerName?: string | null
+  levelId?: number | null
+  eventId?: string | null
+}
+
+export interface StoryChapter {
+  id: string
+  chapterIndex: number
+  title: string
+  content: string
+  unlockCondition: string
+  isUnlocked: boolean
+  unlockedDate: number | null
+  requiredConditionScore?: number
+  requiredDaysOwned?: number
+  requiredSalesCount?: number
+  requiredCompletedLevels?: number[]
+  requiredRarity?: number
+  requiredFavorite?: boolean
+  requiredRenovationCount?: number
+}
+
+export interface RecordStory {
+  recordId: string
+  storyTitle: string
+  storyIcon: string
+  chapters: StoryChapter[]
+  totalChapters: number
+  unlockedChapters: number
+  isStoryComplete: boolean
+}
+
+export type RecordAchievementType = 
+  | 'first_purchase' 
+  | 'first_sale' 
+  | 'high_value_sale' 
+  | 'repeat_sales' 
+  | 'perfect_condition' 
+  | 'renovated' 
+  | 'album_centerpiece'
+  | 'favorite_pick'
+  | 'customer_favorite'
+  | 'legendary_find'
+
+export interface RecordAchievement {
+  id: string
+  type: RecordAchievementType
+  name: string
+  icon: string
+  description: string
+  isUnlocked: boolean
+  unlockedDate: number | null
+  progress: number
+  target: number
+  rewardBonus?: number
+}
+
+export interface DisplayCopy {
+  headline: string
+  tagline: string
+  history: string
+  trivia: string
+  quote: string
+  recommendedPairing: string
+  moodDescription: string
+}
+
+export interface SaleTransactionLink {
+  saleRecordId: string
+  salePrice: number
+  customerName: string
+  timestamp: number
+  satisfaction: number
+  wasMember: boolean
+  memberLevel?: MemberLevel | null
+  wasBargained: boolean
+}
+
+export interface LevelClearLink {
+  levelId: number
+  levelName: string
+  clearedDate: number
+  grade: string
+  totalScore: number
+}
+
+export interface CollectionItemExtended {
+  story: RecordStory | null
+  achievements: RecordAchievement[]
+  source: CollectionSource | null
+  displayCopy: DisplayCopy | null
+  saleHistory: SaleTransactionLink[]
+  clearHistory: LevelClearLink[]
+  daysOwned: number
+  timesRenovated: number
+  totalSaleRevenue: number
+  totalSalesCount: number
+  isStoryUnlocked: boolean
+  unlockedAchievementCount: number
+}
+
 export interface CollectionItem {
   record: Record
   acquiredDate: number
@@ -315,6 +434,7 @@ export interface CollectionItem {
   notes: string
   conditionScore: number
   collectionValue: number
+  extended: CollectionItemExtended
 }
 
 export type AlbumBonusType = 'record_unlock' | 'reputation' | 'special_customer' | 'level_reward' | 'price_bonus' | 'customer_budget' | 'match_score' | 'buy_chance'
