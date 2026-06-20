@@ -7,6 +7,7 @@ const emit = defineEmits<{
   back: []
   collection: []
   staff: []
+  auction: []
 }>()
 
 const gameStore = useGameStore()
@@ -51,6 +52,10 @@ const timeSlotLabel = computed(() => {
       </div>
 
       <div class="header-buttons">
+        <button class="icon-btn auction-btn" @click="emit('auction')">
+          🔨
+          <span v-if="gameStore.endedAuctions.filter(a => a.status === 'ended').length > 0" class="badge">{{ gameStore.endedAuctions.filter(a => a.status === 'ended').length }}</span>
+        </button>
         <button class="icon-btn staff-btn" @click="emit('staff')">
           👥
           <span v-if="gameStore.staff.availablePoints > 0" class="badge">{{ gameStore.staff.availablePoints }}</span>

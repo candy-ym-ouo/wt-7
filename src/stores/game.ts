@@ -10,7 +10,10 @@ import type {
   CustomerProfileSnapshot, CustomerProfileShift, DailySuggestion, DailyBusinessReview,
   OverstockInfo, OverstockStatus, DailyOverstockPenalty,
   ActivePromotion, PromotionApplicationResult,
-  Reservation, ReservationItem, ReservationSummary
+  Reservation, ReservationItem, ReservationSummary,
+  AuctionItem, BidRecord, FrozenFund, AuctionSettlement,
+  RareCollectorConfig, ActiveRareCollector, PendingCollectorOffer,
+  AuctionHouseStats, CollectionSourceType, CollectionSource
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -140,7 +143,7 @@ import {
   getHottestGenres,
   getColdestGenres
 } from '@/data/marketHeat'
-import type { GenreMarketHeat, StaffState, StaffSkillType, CollectionSource, CollectionSourceType } from '@/types'
+import type { GenreMarketHeat, StaffState, StaffSkillType } from '@/types'
 import {
   createInitialStaffState,
   upgradeStaffSkill as upgradeStaffSkillData,
@@ -151,6 +154,19 @@ import {
   generateRecordAchievements,
   generateDisplayCopy
 } from '@/data/stories'
+import {
+  generateDailyAuctions,
+  createBidRecord,
+  getMinNextBid,
+  canPlaceBid,
+  checkAuctionEnding,
+  createInitialAuctionStats,
+  rareCollectorConfigs,
+  checkCollectorUnlock,
+  generateCollectorBid,
+  generateCollectorOffer,
+  sourceConfigs
+} from '@/data/auctions'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -268,6 +284,53 @@ export const useGameStore = defineStore('game', () => {
   const dailyReservationFulfilledCount = ref(0)
   const dailyReservationMissedCount = ref(0)
   const reservationNotes = ref<Map<string, string>>(new Map())
+
+  const currentAuctionItems = ref<AuctionItem[]>([])
+  const auctionHistory = ref<AuctionItem[]>([])
+  const frozenFunds = ref<FrozenFund[]>([])
+  const settlements = ref<AuctionSettlement[]>([])
+  const rareCollectors = ref<RareCollectorConfig[]>(JSON.parse(JSON.stringify(rareCollectorConfigs)))
+  const activeRareCollectors = ref<ActiveRareCollector[]>([])
+  const pendingCollectorOffers = ref<PendingCollectorOffer[]>([])
+  const auctionHouseStats = ref<AuctionHouseStats>(createInitialAuctionStats())
+  const nextAuctionRefresh = ref(1)
+  const isAuctionHouseOpen = ref(true)
+  const selectedAuctionFilter = ref('all')
+  const selectedAuctionId = ref<string | null>(null)
+
+  const totalFrozenFunds = computed(() => {
+    return frozenFunds.value
+      .filter(f => f.status === 'frozen')
+      .reduce((sum, f) => sum + f.amount, 0)
+  })
+
+  const availableBudgetForAuctions = computed(() => {
+    return budget.value - totalFrozenFunds.value
+  })
+
+  const activeAuctions = computed(() => {
+    return currentAuctionItems.value.filter(a => a.status === 'active')
+  })
+
+  const upcomingAuctions = computed(() => {
+    return currentAuctionItems.value.filter(a => a.status === 'upcoming')
+  })
+
+  const endedAuctions = computed(() => {
+    return currentAuctionItems.value.filter(a => a.status === 'ended' || a.status === 'settled' || a.status === 'cancelled')
+  })
+
+  const unlockedRareCollectors = computed(() => {
+    const activatedIds = getActivatedAlbumIds()
+    return rareCollectors.value.filter(c => {
+      const result = checkCollectorUnlock(c, activatedIds, shopReputation.value, collection.value.length)
+      return result.unlocked
+    })
+  })
+
+  const rareCollectorAuctions = computed(() => {
+    return currentAuctionItems.value.filter(a => a.linkedRareCustomerId !== null)
+  })
 
   const totalCollectionValue = computed(() => {
     return collection.value.reduce((sum, item) => sum + item.collectionValue, 0)
@@ -817,6 +880,483 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  const refreshDailyAuctions = () => {
+    if (!baseLevelConfig.value) return
+    
+    const activatedIds = getActivatedAlbumIds()
+    for (let i = 0; i < rareCollectors.value.length; i++) {
+      const result = checkCollectorUnlock(rareCollectors.value[i], activatedIds, shopReputation.value, collection.value.length)
+      rareCollectors.value[i].isUnlocked = result.unlocked
+    }
+    
+    currentAuctionItems.value = currentAuctionItems.value.filter(a => {
+      if (a.status === 'settled' || a.status === 'cancelled') {
+        auctionHistory.value.push(a)
+        return false
+      }
+      return true
+    })
+    
+    for (let i = 0; i < currentAuctionItems.value.length; i++) {
+      currentAuctionItems.value[i] = checkAuctionEnding(currentAuctionItems.value[i], currentDay.value)
+    }
+    
+    for (const auction of currentAuctionItems.value) {
+      if (auction.status === 'upcoming' && auction.startTime <= currentDay.value) {
+        auction.status = 'active'
+      }
+    }
+    
+    if (currentDay.value >= nextAuctionRefresh.value) {
+      const excludeIds = [
+        ...inventory.value.map(i => i.record.id),
+        ...currentAuctionItems.value.map(a => a.record.id),
+        ...collection.value.map(c => c.record.id)
+      ]
+      const unlockedGenres = getUnlockedGenres(currentLevel.value)
+      const newAuctions = generateDailyAuctions(
+        currentDay.value,
+        currentLevel.value,
+        excludeIds,
+        unlockedGenres,
+        recordUnlockBonus.value,
+        specialCustomerBonus.value
+      )
+      
+      const unlockedCollectors = rareCollectors.value.filter(c => c.isUnlocked)
+      for (const collector of unlockedCollectors) {
+        if (Math.random() < 0.3 + collector.relationshipLevel * 0.05) {
+          const preferredRecords = allRecords.filter(r =>
+            !excludeIds.includes(r.id) &&
+            unlockedGenres.includes(r.genre) &&
+            collector.favoriteGenres.includes(r.genre) &&
+            collector.preferredRarity.includes(r.rarity)
+          )
+          if (preferredRecords.length > 0) {
+            const target = preferredRecords[Math.floor(Math.random() * preferredRecords.length)]
+            const specialAuction = generateDailyAuctions(
+              currentDay.value,
+              currentLevel.value,
+              [...excludeIds, target.id],
+              unlockedGenres,
+              recordUnlockBonus.value + 0.3,
+              specialCustomerBonus.value
+            )[0]
+            if (specialAuction) {
+              specialAuction.record = target
+              specialAuction.linkedRareCustomerId = collector.id
+              specialAuction.isRareItem = true
+              specialAuction.provenance = `${collector.title}${collector.name}特别推荐：${specialAuction.provenance}`
+              newAuctions.push(specialAuction)
+              auctionHouseStats.value.rareCollectorEncounters++
+            }
+          }
+        }
+      }
+      
+      currentAuctionItems.value = [...currentAuctionItems.value, ...newAuctions]
+      nextAuctionRefresh.value = currentDay.value + 2
+      
+      for (const collector of unlockedCollectors) {
+        const offer = generateCollectorOffer(collector, availableRecords.value, currentDay.value)
+        if (offer) {
+          pendingCollectorOffers.value = pendingCollectorOffers.value.filter(o => o.collectorId !== collector.id)
+          pendingCollectorOffers.value.push(offer)
+        }
+      }
+    }
+    
+    processRareCollectorBids()
+  }
+
+  const processRareCollectorBids = () => {
+    const unlockedCollectors = rareCollectors.value.filter(c => c.isUnlocked)
+    
+    for (const auction of currentAuctionItems.value) {
+      if (auction.status !== 'active') continue
+      
+      for (const collector of unlockedCollectors) {
+        const isLastDay = currentDay.value >= auction.endTime
+        const snipeTrigger = isLastDay && Math.random() < collector.snipeChance
+        const normalChance = collector.bidAggressiveness * 0.4
+        
+        if (!snipeTrigger && !(Math.random() < normalChance)) continue
+        
+        const collectorBudget = collector.budgetRange[0] + Math.random() * (collector.budgetRange[1] - collector.budgetRange[0])
+        const bidResult = generateCollectorBid(collector, auction, auction.currentBid, collectorBudget)
+        
+        if (bidResult) {
+          const bid = createBidRecord(
+            auction.id,
+            collector.id,
+            collector.name,
+            collector.avatar,
+            bidResult.bidAmount,
+            null,
+            true,
+            snipeTrigger,
+            bidResult.maxBid
+          )
+          
+          applyBidToAuction(auction.id, bid, false)
+        }
+      }
+    }
+  }
+
+  const applyBidToAuction = (auctionId: string, bid: BidRecord, isPlayerBid: boolean) => {
+    const auction = currentAuctionItems.value.find(a => a.id === auctionId)
+    if (!auction || auction.status !== 'active') return { success: false, message: '拍卖不存在或已结束' }
+    
+    const validation = canPlaceBid(auction, bid.bidAmount, Number.MAX_SAFE_INTEGER, 0)
+    if (!validation.valid) return { success: false, message: validation.reason }
+    
+    if (auction.bidHistory.length > 0) {
+      auction.bidHistory[auction.bidHistory.length - 1].isWinningBid = false
+    }
+    
+    if (isPlayerBid) {
+      const previousBid = auction.bidHistory.find(b => b.bidderId === 'player')
+      if (previousBid) {
+        releaseFrozenFundsForBid(auctionId, 'player')
+      }
+      freezeFunds('player', auctionId, bid.bidAmount, '拍卖出价冻结')
+    }
+    
+    auction.bidHistory.push(bid)
+    auction.currentBid = bid.bidAmount
+    auction.bidCount = auction.bidHistory.length
+    
+    return { success: true, message: '出价成功' }
+  }
+
+  const placeAuctionBid = (auctionId: string, bidAmount: number, maxBid: number = bidAmount): { success: boolean; message: string } => {
+    const auction = currentAuctionItems.value.find(a => a.id === auctionId)
+    if (!auction) return { success: false, message: '拍卖不存在' }
+    
+    const validation = canPlaceBid(auction, bidAmount, budget.value, totalFrozenFunds.value)
+    if (!validation.valid) return { success: false, message: validation.reason }
+    
+    const bid = createBidRecord(
+      auctionId,
+      'player',
+      '我',
+      '🧑',
+      bidAmount,
+      members.value.length > 0 ? (members.value.sort((a, b) => b.totalSpent - a.totalSpent)[0].level) : null,
+      false,
+      false,
+      maxBid
+    )
+    
+    return applyBidToAuction(auctionId, bid, true)
+  }
+
+  const freezeFunds = (bidderId: string, auctionItemId: string, amount: number, reason: string) => {
+    const frozen: FrozenFund = {
+      id: `frozen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      bidderId,
+      auctionItemId,
+      amount,
+      frozenAt: Date.now(),
+      releasedAt: null,
+      status: 'frozen',
+      reason
+    }
+    frozenFunds.value.push(frozen)
+    return frozen
+  }
+
+  const releaseFrozenFundsForBid = (auctionItemId: string, bidderId: string) => {
+    const funds = frozenFunds.value.filter(f => 
+      f.auctionItemId === auctionItemId && 
+      f.bidderId === bidderId && 
+      f.status === 'frozen'
+    )
+    for (const f of funds) {
+      f.status = 'released'
+      f.releasedAt = Date.now()
+    }
+  }
+
+  const settleAuction = (auctionId: string, shouldAddToCollection: boolean = true): { success: boolean; message: string; settlement?: AuctionSettlement } => {
+    const auction = currentAuctionItems.value.find(a => a.id === auctionId)
+    if (!auction) return { success: false, message: '拍卖不存在' }
+    if (auction.status !== 'ended') return { success: false, message: '拍卖尚未结束' }
+    
+    const isWinner = auction.winnerId === 'player'
+    
+    let settlement: AuctionSettlement | null = null
+    
+    if (isWinner && auction.finalSalePrice) {
+      const fee = Math.round(auction.finalSalePrice * 0.08)
+      const buyerTotal = auction.finalSalePrice + fee
+      
+      const playerFrozen = frozenFunds.value.find(f => 
+        f.auctionItemId === auctionId && 
+        f.bidderId === 'player' && 
+        f.status === 'frozen'
+      )
+      
+      if (playerFrozen) {
+        if (playerFrozen.amount < auction.finalSalePrice) {
+          const additional = auction.finalSalePrice - playerFrozen.amount + fee
+          if (budget.value < additional) {
+            return { success: false, message: `资金不足！还需要 ¥${additional}` }
+          }
+          budget.value -= additional
+          playerFrozen.status = 'deducted'
+          playerFrozen.releasedAt = Date.now()
+        } else {
+          const refund = playerFrozen.amount - auction.finalSalePrice
+          playerFrozen.status = 'deducted'
+          playerFrozen.releasedAt = Date.now()
+          if (refund > 0) {
+            budget.value += refund
+          }
+          if (budget.value < fee) {
+            return { success: false, message: `余额不足以支付手续费，还需 ¥${fee - budget.value}` }
+          }
+          budget.value -= fee
+        }
+      } else {
+        if (budget.value < buyerTotal) {
+          return { success: false, message: `资金不足！需要 ¥${buyerTotal}` }
+        }
+        budget.value -= buyerTotal
+      }
+      
+      let conditionScore = auction.conditionScoreAtStart
+      const conditionBoostAbility = rareCollectors.value
+        .filter(c => c.isUnlocked)
+        .flatMap(c => c.specialAbilities)
+        .find(a => a.effectType === 'condition_boost' && a.isActive)
+      if (conditionBoostAbility && auction.linkedRareCustomerId) {
+        conditionScore = Math.min(100, conditionScore + conditionBoostAbility.effectValue)
+      }
+      
+      if (shouldAddToCollection) {
+        const newlyActivated = addToCollection(auction.record, auction.finalSalePrice, conditionScore, {
+          type: 'special_customer' as CollectionSourceType,
+          sourceId: auction.id,
+          sourceName: '拍卖会',
+          customerName: auction.winnerName,
+          description: auction.provenance
+        })
+        auctionHouseStats.value.collectionAdditions++
+        if (newlyActivated && newlyActivated.length > 0) {
+          shopReputation.value = Math.min(100, shopReputation.value + newlyActivated.length * 2)
+        }
+      } else {
+        const existing = inventory.value.find(i => i.record.id === auction.record.id)
+        if (existing) {
+          const totalQtyBefore = existing.quantity
+          const totalScoreBefore = existing.conditionScore * totalQtyBefore
+          existing.quantity += 1
+          existing.conditionScore = Math.round((totalScoreBefore + conditionScore) / existing.quantity)
+          existing.actualCostPrice = Math.round((existing.actualCostPrice * totalQtyBefore + auction.finalSalePrice) / existing.quantity)
+        } else {
+          inventory.value.push({
+            record: auction.record,
+            quantity: 1,
+            purchaseDate: currentDay.value,
+            conditionScore,
+            actualCostPrice: auction.finalSalePrice
+          })
+        }
+      }
+      
+      settlement = {
+        id: `settle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        auctionItemId: auction.id,
+        recordId: auction.record.id,
+        recordTitle: auction.record.title,
+        buyerId: auction.winnerId,
+        buyerName: auction.winnerName,
+        buyerAvatar: '🧑',
+        finalPrice: auction.finalSalePrice,
+        auctionHouseFee: fee,
+        sellerPayout: auction.finalSalePrice - Math.round(auction.finalSalePrice * sourceConfigs[auction.source].feeRate),
+        buyerTotalCost: buyerTotal,
+        conditionScore,
+        addedToCollection: shouldAddToCollection,
+        addedToInventory: !shouldAddToCollection,
+        settlementTime: Date.now(),
+        notes: auction.provenance
+      }
+      settlements.value.push(settlement!)
+      
+      auctionHouseStats.value.totalAuctionsSold++
+      auctionHouseStats.value.totalRevenue += auction.finalSalePrice
+      auctionHouseStats.value.totalFeesCollected += fee
+      if (auction.isRareItem) {
+        auctionHouseStats.value.rareItemsSold++
+      }
+      if (auction.finalSalePrice > auctionHouseStats.value.highestSalePrice) {
+        auctionHouseStats.value.highestSalePrice = auction.finalSalePrice
+        auctionHouseStats.value.highestSaleRecordTitle = auction.record.title
+      }
+      
+      if (auction.linkedRareCustomerId) {
+        const collector = rareCollectors.value.find(c => c.id === auction.linkedRareCustomerId)
+        if (collector) {
+          collector.relationshipLevel = Math.min(10, collector.relationshipLevel + 1)
+          auctionHouseStats.value.rareCollectorEncounters++
+          shopReputation.value = Math.min(100, shopReputation.value + 3)
+        }
+      }
+    } else {
+      releaseFrozenFundsForBid(auctionId, 'player')
+      
+      settlement = {
+        id: `settle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        auctionItemId: auction.id,
+        recordId: auction.record.id,
+        recordTitle: auction.record.title,
+        buyerId: auction.winnerId,
+        buyerName: auction.winnerName,
+        buyerAvatar: null,
+        finalPrice: auction.finalSalePrice || 0,
+        auctionHouseFee: auction.finalSalePrice ? Math.round(auction.finalSalePrice * 0.08) : 0,
+        sellerPayout: 0,
+        buyerTotalCost: 0,
+        conditionScore: auction.conditionScoreAtStart,
+        addedToCollection: false,
+        addedToInventory: false,
+        settlementTime: Date.now(),
+        notes: `未中标`
+      }
+      settlements.value.push(settlement!)
+    }
+    
+    auctionHouseStats.value.totalAuctionsHeld++
+    auction.status = 'settled'
+    auction.finalSalePrice = auction.finalSalePrice
+    
+    const message = isWinner 
+      ? `🎉 恭喜！以 ¥${auction.finalSalePrice} 拍得《${auction.record.title}》！${shouldAddToCollection ? '已加入收藏' : '已加入库存'}`
+      : `拍卖结束，${auction.winnerName ? `${auction.winnerName} 赢得了本次拍卖` : '本次拍卖流拍'}`
+    
+    return { success: true, message, settlement }
+  }
+
+  const settleAllEndedAuctions = (addWinnersToCollection: boolean = true) => {
+    const results: { id: string; message: string }[] = []
+    for (const auction of currentAuctionItems.value) {
+      if (auction.status === 'ended') {
+        const result = settleAuction(auction.id, addWinnersToCollection)
+        results.push({ id: auction.id, message: result.message })
+      }
+    }
+    return results
+  }
+
+  const cancelAuction = (auctionId: string): { success: boolean; message: string } => {
+    const auction = currentAuctionItems.value.find(a => a.id === auctionId)
+    if (!auction) return { success: false, message: '拍卖不存在' }
+    if (auction.status === 'settled') return { success: false, message: '拍卖已结算' }
+    
+    releaseFrozenFundsForBid(auctionId, 'player')
+    auction.status = 'cancelled'
+    auction.actualEndTime = Date.now()
+    
+    return { success: true, message: `已取消拍卖：${auction.record.title}` }
+  }
+
+  const getCollectorInfo = (collectorId: string) => {
+    return rareCollectors.value.find(c => c.id === collectorId) || null
+  }
+
+  const acceptCollectorOffer = (offerId: string): { success: boolean; message: string } => {
+    const offer = pendingCollectorOffers.value.find(o => 
+      `${o.collectorId}-${o.recordId}` === offerId || o.collectorId === offerId
+    )
+    if (!offer) return { success: false, message: '优惠不存在' }
+    if (offer.expirationTime < currentDay.value) return { success: false, message: '优惠已过期' }
+    if (offer.isAccepted) return { success: false, message: '优惠已接受' }
+    
+    const collector = rareCollectors.value.find(c => c.id === offer.collectorId)
+    if (!collector) return { success: false, message: '收藏家不存在' }
+    
+    if (offer.offerType === 'private_sale' || offer.offerType === 'commission') {
+      if (budget.value < offer.offerPrice) {
+        return { success: false, message: `预算不足！需要 ¥${offer.offerPrice}` }
+      }
+      
+      if (offer.recordId) {
+        const record = getRecordById(offer.recordId)
+        if (record) {
+          if (!collection.value.some(c => c.record.id === record.id)) {
+            budget.value -= offer.offerPrice
+            addToCollection(record, offer.offerPrice, 85, {
+              type: 'special_customer' as CollectionSourceType,
+              sourceId: collector.id,
+              sourceName: collector.title,
+              customerName: collector.name,
+              description: offer.description
+            })
+          }
+        }
+      }
+    }
+    
+    collector.relationshipLevel = Math.min(10, collector.relationshipLevel + 1)
+    shopReputation.value = Math.min(100, shopReputation.value + 2)
+    offer.isAccepted = true
+    
+    pendingCollectorOffers.value = pendingCollectorOffers.value.filter(o => 
+      !(`${o.collectorId}-${o.recordId}` === offerId || o.collectorId === offerId)
+    )
+    
+    return { 
+      success: true, 
+      message: `成功达成交易！${offer.bonusRewards.join('，')}` 
+    }
+  }
+
+  const setAuctionFilter = (filter: string) => {
+    selectedAuctionFilter.value = filter
+  }
+
+  const selectAuction = (auctionId: string | null) => {
+    selectedAuctionId.value = auctionId
+  }
+
+  const getSelectedAuction = computed(() => {
+    if (!selectedAuctionId.value) return null
+    return currentAuctionItems.value.find(a => a.id === selectedAuctionId.value) || null
+  })
+
+  const getAuctionById = (auctionId: string): AuctionItem | undefined => {
+    return currentAuctionItems.value.find(a => a.id === auctionId) || 
+           auctionHistory.value.find(a => a.id === auctionId)
+  }
+
+  const getBidHistory = (auctionId: string): BidRecord[] => {
+    const auction = getAuctionById(auctionId)
+    return auction?.bidHistory || []
+  }
+
+  const getFilteredAuctions = computed(() => {
+    const filter = selectedAuctionFilter.value
+    switch (filter) {
+      case 'active': return activeAuctions.value
+      case 'upcoming': return upcomingAuctions.value
+      case 'ended': return endedAuctions.value
+      case 'rare': return currentAuctionItems.value.filter(a => a.isRareItem)
+      case 'collector': return rareCollectorAuctions.value
+      default: return currentAuctionItems.value
+    }
+  })
+
+  const getAuctionProgress = (auction: AuctionItem): number => {
+    if (auction.status === 'settled' || auction.status === 'cancelled') return 100
+    if (auction.status === 'upcoming') return 0
+    const total = auction.endTime - auction.startTime
+    const elapsed = currentDay.value - auction.startTime
+    return Math.min(100, Math.max(0, (elapsed / Math.max(1, total)) * 100))
+  }
+
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
   const isLastDay = computed(() => baseLevelConfig.value ? currentDay.value >= baseLevelConfig.value.days : false)
   const canAdvancePhase = computed(() => {
@@ -1173,6 +1713,19 @@ export const useGameStore = defineStore('game', () => {
     dailyReservationMissedCount.value = 0
     reservationNotes.value = new Map()
     
+    currentAuctionItems.value = []
+    auctionHistory.value = []
+    frozenFunds.value = []
+    settlements.value = []
+    rareCollectors.value = JSON.parse(JSON.stringify(rareCollectorConfigs))
+    activeRareCollectors.value = []
+    pendingCollectorOffers.value = []
+    auctionHouseStats.value = createInitialAuctionStats()
+    nextAuctionRefresh.value = 1
+    isAuctionHouseOpen.value = true
+    selectedAuctionFilter.value = 'all'
+    selectedAuctionId.value = null
+    
     checkAndActivateAlbums()
     updateCollectionBonuses()
     
@@ -1181,6 +1734,7 @@ export const useGameStore = defineStore('game', () => {
     }
     
     refreshActivePromotions()
+    refreshDailyAuctions()
   }
 
   const resetDailyStats = () => {
@@ -3284,6 +3838,8 @@ export const useGameStore = defineStore('game', () => {
         }
         break
       case 'settlement':
+        settleAllEndedAuctions(true)
+        
         if (isLastDay.value) {
           if (isLevelComplete.value) {
             if (!completedLevels.value.includes(currentLevel.value)) {
@@ -3316,6 +3872,7 @@ export const useGameStore = defineStore('game', () => {
           }
           
           refreshActivePromotions()
+          refreshDailyAuctions()
         }
         break
     }
@@ -3432,6 +3989,7 @@ export const useGameStore = defineStore('game', () => {
       customerName?: string | null
       levelId?: number | null
       eventId?: string | null
+      description?: string
     }
   ) => {
     if (collection.value.some(c => c.record.id === record.id)) return
@@ -4000,6 +4558,40 @@ export const useGameStore = defineStore('game', () => {
     dailyReservationMissedCount,
     generateReservationsForNextDay,
     finalizeMissedReservations,
-    updateReservationOnSale
+    updateReservationOnSale,
+    currentAuctionItems,
+    auctionHistory,
+    frozenFunds,
+    settlements,
+    rareCollectors,
+    activeRareCollectors,
+    pendingCollectorOffers,
+    auctionHouseStats,
+    nextAuctionRefresh,
+    isAuctionHouseOpen,
+    selectedAuctionFilter,
+    selectedAuctionId,
+    totalFrozenFunds,
+    availableBudgetForAuctions,
+    activeAuctions,
+    upcomingAuctions,
+    endedAuctions,
+    unlockedRareCollectors,
+    rareCollectorAuctions,
+    refreshDailyAuctions,
+    placeAuctionBid,
+    settleAuction,
+    settleAllEndedAuctions,
+    cancelAuction,
+    getCollectorInfo,
+    acceptCollectorOffer,
+    setAuctionFilter,
+    selectAuction,
+    getSelectedAuction,
+    getAuctionById,
+    getBidHistory,
+    getFilteredAuctions,
+    getAuctionProgress,
+    getMinNextBid
   }
 })

@@ -901,3 +901,164 @@ export interface GameState {
   dailyReservationFulfilledCount: number
   dailyReservationMissedCount: number
 }
+
+export type AuctionStatus = 'upcoming' | 'active' | 'ended' | 'settled' | 'cancelled'
+
+export interface AuctionItem {
+  id: string
+  record: Record
+  startingPrice: number
+  reservePrice: number
+  currentBid: number
+  minBidIncrement: number
+  startTime: number
+  endTime: number
+  actualEndTime: number | null
+  status: AuctionStatus
+  bidCount: number
+  bidHistory: BidRecord[]
+  winnerId: string | null
+  winnerName: string | null
+  isRareItem: boolean
+  auctionHouseFee: number
+  finalSalePrice: number | null
+  sellerId: string
+  sellerName: string
+  conditionScoreAtStart: number
+  source: 'consignment' | 'private_sale' | 'estate' | 'museum' | 'celebrity'
+  sourceIcon: string
+  sourceName: string
+  linkedRareCustomerId: string | null
+  provenance: string
+}
+
+export interface BidRecord {
+  id: string
+  auctionItemId: string
+  bidderId: string
+  bidderName: string
+  bidderAvatar: string
+  bidderLevel: MemberLevel | null
+  isRareCollector: boolean
+  bidAmount: number
+  timestamp: number
+  maxBid: number
+  isAutoBid: boolean
+  isWinningBid: boolean
+  reaction?: string
+}
+
+export interface FrozenFund {
+  id: string
+  bidderId: string
+  auctionItemId: string
+  amount: number
+  frozenAt: number
+  releasedAt: number | null
+  status: 'frozen' | 'released' | 'deducted'
+  reason: string
+}
+
+export interface AuctionSettlement {
+  id: string
+  auctionItemId: string
+  recordId: string
+  recordTitle: string
+  buyerId: string | null
+  buyerName: string | null
+  buyerAvatar: string | null
+  finalPrice: number
+  auctionHouseFee: number
+  sellerPayout: number
+  buyerTotalCost: number
+  conditionScore: number
+  addedToCollection: boolean
+  addedToInventory: boolean
+  settlementTime: number
+  notes: string
+}
+
+export interface RareCollectorConfig {
+  id: string
+  name: string
+  avatar: string
+  title: string
+  description: string
+  personality: string
+  favoriteGenres: Genre[]
+  preferredRarity: number[]
+  minConditionScore: number
+  budgetRange: [number, number]
+  bidAggressiveness: number
+  snipeChance: number
+  triggerAlbumIds: string[]
+  isUnlocked: boolean
+  baseAppearanceWeight: number
+  specialAbilities: RareCollectorAbility[]
+  relationshipLevel: number
+  preferredSources: string[]
+}
+
+export interface RareCollectorAbility {
+  id: string
+  name: string
+  icon: string
+  description: string
+  effectType: 'bid_bonus' | 'price_reduction' | 'condition_boost' | 'exclusive_access' | 'provenance_bonus'
+  effectValue: number
+  unlockCondition: string
+  isActive: boolean
+}
+
+export interface ActiveRareCollector {
+  config: RareCollectorConfig
+  currentAuctionId: string | null
+  activeBid: BidRecord | null
+  currentBudget: number
+  satisfaction: number
+  interactionCount: number
+  lastInteraction: number
+  pendingOffer: PendingCollectorOffer | null
+}
+
+export interface PendingCollectorOffer {
+  collectorId: string
+  collectorName: string
+  offerType: 'private_sale' | 'commission' | 'trade' | 'gifting'
+  recordId: string | null
+  recordTitle: string | null
+  offerPrice: number
+  expirationTime: number
+  isAccepted: boolean
+  description: string
+  bonusRewards: string[]
+}
+
+export interface AuctionHouseStats {
+  totalAuctionsHeld: number
+  totalAuctionsSold: number
+  totalRevenue: number
+  totalFeesCollected: number
+  rareItemsSold: number
+  highestSalePrice: number
+  highestSaleRecordTitle: string | null
+  avgSaleToEstimateRatio: number
+  uniqueBidders: number
+  rareCollectorEncounters: number
+  collectionAdditions: number
+}
+
+export interface AuctionGameState {
+  currentAuctionItems: AuctionItem[]
+  auctionHistory: AuctionItem[]
+  activeBids: Map<string, BidRecord[]>
+  frozenFunds: FrozenFund[]
+  settlements: AuctionSettlement[]
+  rareCollectors: RareCollectorConfig[]
+  activeRareCollectors: ActiveRareCollector[]
+  pendingOffers: PendingCollectorOffer[]
+  auctionHouseStats: AuctionHouseStats
+  nextAuctionRefresh: number
+  isAuctionHouseOpen: boolean
+  selectedAuctionFilter: string
+}
