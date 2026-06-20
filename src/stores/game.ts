@@ -21,7 +21,8 @@ import type {
   EncyclopediaRewardClaimResult,
   EncyclopediaFilterOptions,
   EncyclopediaEntry,
-  AlbumBonus
+  AlbumBonus,
+  FestivalState, FestivalTheme, FestivalSettlement, FestivalTaskConfig
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -282,6 +283,17 @@ import {
   getRarityColor,
   getRarityConfig
 } from '@/data/encyclopedia'
+import {
+  createInitialFestivalState,
+  getFestivalThemeConfig,
+  generateFestivalMenu,
+  generateFestivalTasks,
+  getFestivalCustomersForTheme,
+  getFestivalAtmosphereOverride,
+  getRewardTier,
+  calculateFestivalScore,
+  shouldFestivalAppear
+} from '@/data/festival'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -451,6 +463,8 @@ export const useGameStore = defineStore('game', () => {
     name: string
     message: string
   } | null>(null)
+
+  const festival = ref<FestivalState>(createInitialFestivalState())
 
   const repairableInventory = computed(() => {
     const repairingIds = repairWorkshop.value.activeTasks.map(t => t.inventoryId)
@@ -6268,6 +6282,288 @@ export const useGameStore = defineStore('game', () => {
     encyclopedia.value.newlyClaimableRewards = []
   }
 
+  const festivalThemeConfig = computed(() => {
+    if (!festival.value.activeFestival) return null
+    return getFestivalThemeConfig(festival.value.activeFestival)
+  })
+
+  const festivalScore = computed(() => calculateFestivalScore(festival.value))
+
+  const festivalRewardTier = computed(() => getRewardTier(festivalScore.value))
+
+  const festivalActiveTasks = computed(() => festival.value.tasks.filter(t => t.status === 'active'))
+
+  const festivalCompletedTasks = computed(() => festival.value.tasks.filter(t => t.status === 'completed'))
+
+  const festivalClaimableTasks = computed(() => festival.value.tasks.filter(t => t.status === 'completed'))
+
+  const festivalUnlockedCustomers = computed(() => {
+    if (!festival.value.activeFestival) return []
+    return festival.value.customers.filter(c => c.isUnlocked)
+  })
+
+  const startFestival = (theme: FestivalTheme): { success: boolean; message: string } => {
+    if (festival.value.isFestivalActive) {
+      return { success: false, message: '已有节日活动进行中' }
+    }
+
+    const themeConfig = getFestivalThemeConfig(theme)
+    const availableIds = allRecords.map(r => r.id)
+    const simplifiedRecords = allRecords.map(r => ({
+      id: r.id,
+      genre: r.genre as Genre,
+      marketPrice: r.marketPrice,
+      rarity: r.rarity
+    }))
+
+    const menu = generateFestivalMenu(theme, availableIds, simplifiedRecords, currentDay.value)
+    const tasks = generateFestivalTasks(theme, currentLevel.value)
+    const customers = getFestivalCustomersForTheme(theme).map(c => ({
+      ...c,
+      isUnlocked: shopReputation.value >= c.requiredReputation,
+      unlockDay: c.unlockDay
+    }))
+
+    festival.value = {
+      activeFestival: theme,
+      festivalDay: 1,
+      maxFestivalDays: 5,
+      menus: [menu],
+      customers,
+      encounteredCustomers: [],
+      tasks,
+      settlements: [],
+      atmosphereOverride: getFestivalAtmosphereOverride(theme),
+      totalFestivalScore: 0,
+      menuItemsSold: 0,
+      customersServed: 0,
+      tasksCompleted: 0,
+      isFestivalActive: true,
+      hasUnclaimedRewards: false
+    }
+
+    return { success: true, message: `${themeConfig.icon}${themeConfig.name}活动开始！` }
+  }
+
+  const checkFestivalTrigger = (): { triggered: boolean; theme: FestivalTheme | null; message: string } => {
+    if (festival.value.isFestivalActive) {
+      return { triggered: false, theme: null, message: '' }
+    }
+
+    const result = shouldFestivalAppear(currentDay.value, currentLevel.value, shopReputation.value)
+    if (!result.shouldAppear) {
+      return { triggered: false, theme: null, message: '' }
+    }
+
+    return {
+      triggered: true,
+      theme: result.theme,
+      message: `🎉 节日活动即将开启！${getFestivalThemeConfig(result.theme).icon}${getFestivalThemeConfig(result.theme).name}来啦！`
+    }
+  }
+
+  const advanceFestivalDay = () => {
+    if (!festival.value.isFestivalActive) return
+
+    festival.value.festivalDay++
+
+    for (const task of festival.value.tasks) {
+      if (task.status === 'locked') {
+        const dayMet = festival.value.festivalDay >= task.requiredDay
+        const depsMet = task.requiredTaskIds.every(id => {
+          const dep = festival.value.tasks.find(t => t.id === id)
+          return dep && (dep.status === 'completed' || dep.status === 'claimed')
+        })
+        if (dayMet && depsMet) {
+          task.status = 'active'
+        }
+      }
+    }
+
+    for (const customer of festival.value.customers) {
+      if (!customer.isUnlocked && shopReputation.value >= customer.requiredReputation) {
+        customer.isUnlocked = true
+        customer.unlockDay = currentDay.value
+      }
+    }
+
+    if (festival.value.festivalDay > festival.value.maxFestivalDays) {
+      endFestival()
+    }
+  }
+
+  const endFestival = () => {
+    if (!festival.value.isFestivalActive) return
+
+    const score = calculateFestivalScore(festival.value)
+    const tier = getRewardTier(score)
+    const theme = festival.value.activeFestival!
+
+    const settlement: FestivalSettlement = {
+      festivalTheme: theme,
+      totalScore: score,
+      rewardTier: tier,
+      tasksCompleted: festival.value.tasksCompleted,
+      totalTasks: festival.value.tasks.length,
+      customersServed: festival.value.customersServed,
+      menuItemsSold: festival.value.menuItemsSold,
+      bonusRewards: tier.rewards.bonusItems,
+      settledDay: currentDay.value
+    }
+
+    festival.value.settlements.push(settlement)
+    festival.value.isFestivalActive = false
+    festival.value.atmosphereOverride = null
+    festival.value.hasUnclaimedRewards = true
+    festival.value.totalFestivalScore = score
+  }
+
+  const claimFestivalReward = (): { success: boolean; message: string; rewards: FestivalSettlement | null } => {
+    if (festival.value.settlements.length === 0) {
+      return { success: false, message: '没有可领取的奖励', rewards: null }
+    }
+
+    const lastSettlement = festival.value.settlements[festival.value.settlements.length - 1]
+    if (!lastSettlement) {
+      return { success: false, message: '没有可领取的奖励', rewards: null }
+    }
+
+    budget.value += lastSettlement.rewardTier.rewards.budget
+    shopReputation.value = Math.min(100, shopReputation.value + lastSettlement.rewardTier.rewards.reputation)
+
+    festival.value.hasUnclaimedRewards = false
+
+    return {
+      success: true,
+      message: `领取${lastSettlement.rewardTier.tierName}奖励！资金 +¥${lastSettlement.rewardTier.rewards.budget}，声望 +${lastSettlement.rewardTier.rewards.reputation}`,
+      rewards: lastSettlement
+    }
+  }
+
+  const claimFestivalTaskReward = (taskId: string): { success: boolean; message: string } => {
+    const task = festival.value.tasks.find(t => t.id === taskId)
+    if (!task) return { success: false, message: '任务不存在' }
+    if (task.status !== 'completed') return { success: false, message: '任务未完成' }
+
+    budget.value += task.reward.budget
+    shopReputation.value = Math.min(100, shopReputation.value + task.reward.reputation)
+    task.status = 'claimed'
+
+    return { success: true, message: `领取任务奖励！资金 +¥${task.reward.budget}，声望 +${task.reward.reputation}` }
+  }
+
+  const purchaseFestivalMenuItem = (menuId: string, recordId: string): { success: boolean; message: string } => {
+    const menu = festival.value.menus.find(m => m.id === menuId)
+    if (!menu) return { success: false, message: '专题货单不存在' }
+
+    const item = menu.items.find(i => i.recordId === recordId)
+    if (!item) return { success: false, message: '商品不存在' }
+    if (item.status === 'sold_out') return { success: false, message: '已售罄' }
+    if (item.stock <= 0) return { success: false, message: '库存不足' }
+    if (budget.value < item.festivalPrice) return { success: false, message: '资金不足' }
+
+    budget.value -= item.festivalPrice
+    item.stock--
+    if (item.stock <= 0) {
+      item.status = 'sold_out'
+    } else if (item.stock <= 1 && item.isExclusive) {
+      item.status = 'limited'
+    }
+
+    menu.totalPurchased++
+    festival.value.menuItemsSold++
+
+    const record = getRecordById(recordId)
+    if (record) {
+      const invItem: InventoryItem = {
+        record,
+        quantity: 1,
+        purchaseDate: currentDay.value,
+        conditionScore: 80 + Math.floor(Math.random() * 20),
+        actualCostPrice: item.festivalPrice
+      }
+      inventory.value.push(invItem)
+    }
+
+    updateFestivalTaskProgress('special', 1)
+
+    return { success: true, message: `成功购买${item.isFeatured ? '热门' : ''}节日商品！` }
+  }
+
+  const updateFestivalTaskProgress = (type: FestivalTaskConfig['type'], amount: number) => {
+    if (!festival.value.isFestivalActive) return
+
+    for (const task of festival.value.tasks) {
+      if (task.status !== 'active') continue
+      if (task.type === type) {
+        task.current = Math.min(task.target, task.current + amount)
+        if (task.current >= task.target) {
+          task.status = 'completed'
+          festival.value.tasksCompleted++
+        }
+      }
+    }
+
+    const specialTask = festival.value.tasks.find(t => t.type === 'special' && t.id.includes('special_1') && t.status === 'locked')
+    if (specialTask) {
+      const depsMet = specialTask.requiredTaskIds.every(id => {
+        const dep = festival.value.tasks.find(t => t.id === id)
+        return dep && (dep.status === 'completed' || dep.status === 'claimed')
+      })
+      if (depsMet) {
+        specialTask.current = 1
+        specialTask.status = 'completed'
+        festival.value.tasksCompleted++
+      }
+    }
+  }
+
+  const recordFestivalCustomerEncounter = (customerId: string, satisfaction: number, purchasedRecordId: string | null) => {
+    const config = festival.value.customers.find(c => c.id === customerId)
+    if (!config) return
+
+    const existing = festival.value.encounteredCustomers.find(e => e.config.id === customerId)
+    if (existing) {
+      existing.satisfaction = Math.max(existing.satisfaction, satisfaction)
+      if (purchasedRecordId) {
+        existing.purchasedRecordIds.push(purchasedRecordId)
+      }
+    } else {
+      festival.value.encounteredCustomers.push({
+        config,
+        day: currentDay.value,
+        satisfaction,
+        purchasedRecordIds: purchasedRecordId ? [purchasedRecordId] : [],
+        giftGiven: false
+      })
+      festival.value.customersServed++
+    }
+
+    updateFestivalTaskProgress('customer', 1)
+  }
+
+  const getFestivalBonuses = () => {
+    if (!festival.value.isFestivalActive || !festival.value.activeFestival) {
+      return { budgetBonus: 0, buyChanceBonus: 0, reputationBonus: 0, satisfactionBonus: 0 }
+    }
+    const config = getFestivalThemeConfig(festival.value.activeFestival)
+    return {
+      budgetBonus: config.customerBudgetBonus,
+      buyChanceBonus: config.buyChanceBonus,
+      reputationBonus: config.reputationBonus,
+      satisfactionBonus: config.satisfactionBonus
+    }
+  }
+
+  const switchFestivalAtmosphere = (theme: FestivalTheme | null) => {
+    if (theme === null) {
+      festival.value.atmosphereOverride = null
+      return
+    }
+    if (!festival.value.isFestivalActive) return
+    festival.value.atmosphereOverride = getFestivalAtmosphereOverride(theme)
+  }
+
   return {
     currentLevel,
     currentDay,
@@ -6621,6 +6917,25 @@ export const useGameStore = defineStore('game', () => {
     clearNewEncyclopediaNotifications,
     rarityConfigs,
     getRarityColor,
-    getRarityConfig
+    getRarityConfig,
+    festival,
+    festivalThemeConfig,
+    festivalScore,
+    festivalRewardTier,
+    festivalActiveTasks,
+    festivalCompletedTasks,
+    festivalClaimableTasks,
+    festivalUnlockedCustomers,
+    startFestival,
+    checkFestivalTrigger,
+    advanceFestivalDay,
+    endFestival,
+    claimFestivalReward,
+    claimFestivalTaskReward,
+    purchaseFestivalMenuItem,
+    updateFestivalTaskProgress,
+    recordFestivalCustomerEncounter,
+    getFestivalBonuses,
+    switchFestivalAtmosphere
   }
 })

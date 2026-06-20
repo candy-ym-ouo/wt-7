@@ -1832,3 +1832,150 @@ export interface EncyclopediaRewardClaimResult {
   message: string
   rewards: AlbumBonus[]
 }
+
+export type FestivalTheme = 'spring' | 'summer' | 'autumn' | 'winter' | 'newyear' | 'midautumn' | 'christmas' | 'valentine'
+
+export interface FestivalThemeConfig {
+  theme: FestivalTheme
+  name: string
+  icon: string
+  description: string
+  bgGradient: string
+  accentColor: string
+  particleIcon: string
+  genreAffinity: Genre[]
+  customerBudgetBonus: number
+  buyChanceBonus: number
+  reputationBonus: number
+  satisfactionBonus: number
+}
+
+export type FestivalMenuStatus = 'available' | 'sold_out' | 'limited'
+
+export interface FestivalMenuItem {
+  recordId: string
+  festivalPrice: number
+  originalPrice: number
+  discountRate: number
+  status: FestivalMenuStatus
+  stock: number
+  maxStock: number
+  isFeatured: boolean
+  isExclusive: boolean
+  tagLabel: string
+}
+
+export interface FestivalMenu {
+  id: string
+  festivalTheme: FestivalTheme
+  name: string
+  icon: string
+  description: string
+  items: FestivalMenuItem[]
+  bonusBuyThreshold: number
+  bonusReward: string
+  totalPurchased: number
+}
+
+export type FestivalCustomerRarity = 'rare' | 'epic' | 'legendary'
+
+export interface FestivalCustomerConfig {
+  id: string
+  name: string
+  avatar: string
+  title: string
+  description: string
+  rarity: FestivalCustomerRarity
+  favoriteGenres: Genre[]
+  budgetMultiplier: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  appearanceChance: number
+  requiredReputation: number
+  requiredFestivalTheme: FestivalTheme | null
+  isUnlocked: boolean
+  unlockDay: number | null
+  quotes: string[]
+  specialReward: string
+}
+
+export interface FestivalCustomerEncounter {
+  config: FestivalCustomerConfig
+  day: number
+  satisfaction: number
+  purchasedRecordIds: string[]
+  giftGiven: boolean
+}
+
+export type FestivalTaskType = 'sales' | 'genre' | 'customer' | 'atmosphere' | 'collection' | 'special'
+export type FestivalTaskStatus = 'locked' | 'active' | 'completed' | 'claimed'
+
+export interface FestivalTaskConfig {
+  id: string
+  type: FestivalTaskType
+  name: string
+  icon: string
+  description: string
+  target: number
+  current: number
+  status: FestivalTaskStatus
+  reward: FestivalTaskReward
+  requiredTaskIds: string[]
+  requiredDay: number
+}
+
+export interface FestivalTaskReward {
+  budget: number
+  reputation: number
+  growthPoints: number
+  bonusItems: string[]
+}
+
+export interface FestivalRewardTier {
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum'
+  tierName: string
+  icon: string
+  minScore: number
+  rewards: FestivalTaskReward
+  description: string
+}
+
+export interface FestivalSettlement {
+  festivalTheme: FestivalTheme
+  totalScore: number
+  rewardTier: FestivalRewardTier
+  tasksCompleted: number
+  totalTasks: number
+  customersServed: number
+  menuItemsSold: number
+  bonusRewards: string[]
+  settledDay: number
+}
+
+export interface FestivalAtmosphereOverride {
+  theme: FestivalTheme
+  bgGradient: string
+  accentColor: string
+  particleEffect: string
+  headerStyle: string
+  cardStyle: string
+  isActive: boolean
+}
+
+export interface FestivalState {
+  activeFestival: FestivalTheme | null
+  festivalDay: number
+  maxFestivalDays: number
+  menus: FestivalMenu[]
+  customers: FestivalCustomerConfig[]
+  encounteredCustomers: FestivalCustomerEncounter[]
+  tasks: FestivalTaskConfig[]
+  settlements: FestivalSettlement[]
+  atmosphereOverride: FestivalAtmosphereOverride | null
+  totalFestivalScore: number
+  menuItemsSold: number
+  customersServed: number
+  tasksCompleted: number
+  isFestivalActive: boolean
+  hasUnclaimedRewards: boolean
+}
