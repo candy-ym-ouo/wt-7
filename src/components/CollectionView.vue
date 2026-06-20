@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import VinylRecord from './VinylRecord.vue'
 import type { CollectionItem, MemberProfile, MemberLevel, AlbumEntry } from '@/types'
 import { getLevelIcon, getLevelColor, getMemberBenefit, getNextLevelInfo } from '@/data/members'
@@ -22,6 +22,14 @@ const activeTab = ref<'records' | 'members' | 'album'>('records')
 const memberSortBy = ref<'level' | 'visits' | 'spent'>('level')
 const memberLevelFilter = ref<MemberLevel | 'all'>('all')
 const selectedAlbumCategory = ref<string | null>(null)
+
+watch(() => gameStore.currentDay, () => {
+  if (selectedItem.value) {
+    gameStore.updateCollectionStoryProgress(selectedItem.value.record.id)
+    gameStore.checkAndUpdateAchievements(selectedItem.value.record.id)
+    selectedItem.value = gameStore.collection.find(c => c.record.id === selectedItem.value!.record.id) || null
+  }
+})
 
 const genres = computed(() => {
   const gs = new Set(gameStore.collection.map(c => c.record.genre))
@@ -357,7 +365,7 @@ const formatBonusValue = (type: string, value: number): string => {
       </div>
     </template>
 
-    <template v-else>
+    <template v-else-if="activeTab === 'members'">
       <div v-if="gameStore.members.length > 0" class="member-stats-card">
         <div class="msc-grid">
           <div class="msc-item">
@@ -810,7 +818,13 @@ const formatBonusValue = (type: string, value: number): string => {
                         <div class="chapter-title-info">
                           <h4 class="chapter-title">{{ chapter.isUnlocked ? chapter.title : '???' }}</h4>
                           <p class="chapter-condition">
-                            {{ chapter.isUnlocked ? (chapter.unlockedDate ? formatDate(chapter.unlockedDate) : '') : '解锁条件：' + chapter.unlockCondition }}
+                            <template v-if="chapter.isUnlocked">{{ chapter.unlockedDate ? formatDate(chapter.unlockedDate) : '' }}</template>
+                            <template v-else>
+                              解锁条件：{{ chapter.unlockCondition }}
+                              <span v-if="chapter.requiredDaysOwned" class="chapter-days-hint">
+                                （已持有 {{ selectedItem.extended.daysOwned }}/{{ chapter.requiredDaysOwned }} 天）
+                              </span>
+                            </template>
                           </p>
                         </div>
                       </div>
@@ -2996,6 +3010,11 @@ const formatBonusValue = (type: string, value: number): string => {
   font-size: 10px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+
+.chapter-days-hint {
+  color: #f59e0b;
+  font-weight: 600;
 }
 
 .chapter-content {

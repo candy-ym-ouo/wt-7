@@ -2928,6 +2928,7 @@ export const useGameStore = defineStore('game', () => {
           resetDailyStats()
           phase.value = 'purchase'
           stopPlaying()
+          incrementCollectionDaysOwned()
           
           genreMarketHeat.value = generateDailyMarketHeat(
             currentDay.value,
@@ -2995,7 +2996,7 @@ export const useGameStore = defineStore('game', () => {
       displayCopy,
       saleHistory: [],
       clearHistory: [],
-      daysOwned: 0,
+      daysOwned: 1,
       timesRenovated: 0,
       totalSaleRevenue: 0,
       totalSalesCount: 0,
@@ -3254,7 +3255,6 @@ export const useGameStore = defineStore('game', () => {
         grade,
         totalScore
       })
-      item.extended.daysOwned += currentDay.value
       updateCollectionStoryProgress(item.record.id)
       checkAndUpdateAchievements(item.record.id)
     }
