@@ -187,7 +187,11 @@ export const lockPresaleOrders = (
     o.presaleItemId === item.id && (o.status === 'paid' || o.status === 'confirmed')
   )
 
-  if (pendingOrders.length === 0 || item.status !== 'preselling') {
+  if (pendingOrders.length === 0) {
+    return { updatedItem: item, updatedOrders: orders }
+  }
+
+  if (item.status !== 'preselling' || currentDay <= item.config.endDate) {
     return { updatedItem: item, updatedOrders: orders }
   }
 

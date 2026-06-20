@@ -4074,6 +4074,8 @@ export const useGameStore = defineStore('game', () => {
           
           refreshActivePromotions()
           refreshDailyAuctions()
+          refreshPresaleItems()
+          settlePresaleDeliveries()
         }
         break
     }
