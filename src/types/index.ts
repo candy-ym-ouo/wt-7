@@ -488,7 +488,7 @@ export interface SpecialCustomerConfig {
   isUnlocked: boolean
 }
 
-export type CollectionBonusSource = 'album' | 'favorite' | 'high_value'
+export type CollectionBonusSource = 'album' | 'favorite' | 'high_value' | 'encyclopedia'
 
 export interface CollectionBonus {
   source: CollectionBonusSource

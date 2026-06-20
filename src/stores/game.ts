@@ -390,6 +390,7 @@ export const useGameStore = defineStore('game', () => {
 
   const specialCustomersState = ref<SpecialCustomerConfig[]>(JSON.parse(JSON.stringify(specialCustomers)))
   const collectionBonuses = ref<CollectionBonus[]>([])
+  const encyclopediaBonuses = ref<CollectionBonus[]>([])
   const recentlyActivatedAlbums = ref<string[]>([])
 
   const activePromotions = ref<ActivePromotion[]>([])
@@ -518,7 +519,10 @@ export const useGameStore = defineStore('game', () => {
     const collectionValue = collectionBonuses.value
       .filter(b => b.bonusType === bonusType)
       .reduce((sum, b) => sum + b.value, 0)
-    return albumValue + collectionValue
+    const encyclopediaValue = encyclopediaBonuses.value
+      .filter(b => b.bonusType === bonusType)
+      .reduce((sum, b) => sum + b.value, 0)
+    return albumValue + collectionValue + encyclopediaValue
   }
 
   const reputationBonusFromCollection = computed(() => getAlbumBonus('reputation'))
@@ -4586,6 +4590,7 @@ export const useGameStore = defineStore('game', () => {
       currentLevel.value
     )
     encyclopedia.value = updatedState
+    rebuildEncyclopediaBonuses()
 
     if (newUnlocks.series.length > 0) {
       const seriesId = newUnlocks.series[0]
@@ -4869,6 +4874,60 @@ export const useGameStore = defineStore('game', () => {
     const valueBonuses = getCollectionValueBonus(totalCollectionValue.value)
     const favBonuses = getFavoriteBonuses(favoriteCount.value)
     collectionBonuses.value = [...valueBonuses, ...favBonuses]
+    rebuildEncyclopediaBonuses()
+  }
+
+  const rebuildEncyclopediaBonuses = () => {
+    const bonuses: CollectionBonus[] = []
+
+    for (const category of encyclopedia.value.categories) {
+      for (const series of category.series) {
+        if (series.rewardClaimed) {
+          for (const reward of series.rewards) {
+            if (reward.type === 'reputation') continue
+            bonuses.push({
+              source: 'encyclopedia',
+              sourceId: `encyclopedia-series-${series.id}`,
+              bonusType: reward.type,
+              value: reward.value,
+              description: reward.description
+            })
+          }
+        }
+      }
+    }
+
+    for (const achievement of encyclopedia.value.achievements) {
+      if (achievement.rewardClaimed) {
+        for (const reward of achievement.rewards) {
+          if (reward.type === 'reputation') continue
+          bonuses.push({
+            source: 'encyclopedia',
+            sourceId: `encyclopedia-achievement-${achievement.id}`,
+            bonusType: reward.type,
+            value: reward.value,
+            description: reward.description
+          })
+        }
+      }
+    }
+
+    for (const milestone of encyclopedia.value.milestones) {
+      if (milestone.isClaimed) {
+        for (const reward of milestone.rewards) {
+          if (reward.type === 'reputation') continue
+          bonuses.push({
+            source: 'encyclopedia',
+            sourceId: `encyclopedia-milestone-${milestone.id}`,
+            bonusType: reward.type,
+            value: reward.value,
+            description: reward.description
+          })
+        }
+      }
+    }
+
+    encyclopediaBonuses.value = bonuses
   }
 
   const generateSpecialCustomer = (baseId: string, config: SpecialCustomerConfig, reputation: number, _inventoryGenres: Genre[], timeSlot: TimeSlot): Customer => {
@@ -6127,30 +6186,8 @@ export const useGameStore = defineStore('game', () => {
       case 'reputation':
         shopReputation.value = Math.min(100, shopReputation.value + bonus.value)
         break
-      case 'price_bonus':
-        collectionBonuses.value.push({
-          source: 'album',
-          sourceId: `encyclopedia-${Date.now()}`,
-          bonusType: bonus.type,
-          value: bonus.value,
-          description: bonus.description
-        })
-        break
-      case 'customer_budget':
-      case 'buy_chance':
-      case 'match_score':
-      case 'level_reward':
-      case 'special_customer':
-      case 'record_unlock':
-        collectionBonuses.value.push({
-          source: 'album',
-          sourceId: `encyclopedia-${Date.now()}`,
-          bonusType: bonus.type,
-          value: bonus.value,
-          description: bonus.description
-        })
-        break
     }
+    rebuildEncyclopediaBonuses()
   }
 
   const getEncyclopediaSeriesProgress = (series: EncyclopediaSeries): number => {
