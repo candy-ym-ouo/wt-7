@@ -167,6 +167,22 @@ import {
   generateCollectorOffer,
   sourceConfigs
 } from '@/data/auctions'
+import {
+  refreshPresaleData,
+  createPresaleOrder,
+  confirmPresaleOrder,
+  payPresaleOrder,
+  deliverPresaleOrder,
+  cancelPresaleOrder,
+  calculatePresaleStats,
+  createInitialPresaleStats,
+  generatePresaleRecommendation,
+  getItemStatusInfo,
+  getPresaleStatusLabel
+} from '@/data/presale'
+import type {
+  PresaleItem, PresaleOrder, PresaleSettlement, PresaleEventPage, PresaleStats
+} from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -297,6 +313,14 @@ export const useGameStore = defineStore('game', () => {
   const isAuctionHouseOpen = ref(true)
   const selectedAuctionFilter = ref('all')
   const selectedAuctionId = ref<string | null>(null)
+
+  const presaleItems = ref<PresaleItem[]>([])
+  const presaleOrders = ref<PresaleOrder[]>([])
+  const presaleSettlements = ref<PresaleSettlement[]>([])
+  const presaleEventPages = ref<PresaleEventPage[]>([])
+  const presaleStats = ref<PresaleStats>(createInitialPresaleStats())
+  const nextPresaleRefresh = ref(1)
+  const selectedPresaleEventId = ref<string | null>(null)
 
   const totalFrozenFunds = computed(() => {
     return frozenFunds.value
@@ -1363,6 +1387,168 @@ export const useGameStore = defineStore('game', () => {
     return Math.min(100, Math.max(0, (elapsed / Math.max(1, total)) * 100))
   }
 
+  const activePresaleItems = computed(() => {
+    return presaleItems.value.filter(i => i.status === 'preselling')
+  })
+
+  const presaleToFulfillCount = computed(() => {
+    return presaleOrders.value.filter(o =>
+      o.status === 'confirmed' || o.status === 'paid' || o.status === 'locked'
+    ).length
+  })
+
+  const presaleTotalDeposits = computed(() => {
+    return presaleOrders.value
+      .filter(o => o.status !== 'cancelled' && o.status !== 'refunded')
+      .reduce((sum, o) => sum + o.depositAmount, 0)
+  })
+
+  const presaleTotalRevenue = computed(() => {
+    return presaleSettlements.value.reduce((sum, s) => sum + s.netRevenue, 0)
+  })
+
+  const selectedPresaleEvent = computed(() => {
+    if (!selectedPresaleEventId.value) return null
+    return presaleEventPages.value.find(p => p.id === selectedPresaleEventId.value) || null
+  })
+
+  const refreshPresaleItems = () => {
+    const unlockedGenres = getUnlockedGenres(currentLevel.value)
+    const result = refreshPresaleData(
+      currentDay.value,
+      currentLevel.value,
+      unlockedGenres,
+      presaleItems.value,
+      presaleOrders.value,
+      nextPresaleRefresh.value
+    )
+    presaleItems.value = result.items
+    presaleOrders.value = result.orders
+    if (result.eventPages.length > 0) {
+      presaleEventPages.value = [
+        ...presaleEventPages.value.filter(p => p.isActive && currentDay.value <= p.endDate),
+        ...result.eventPages
+      ]
+    }
+    nextPresaleRefresh.value = result.nextRefreshDay
+    presaleStats.value = calculatePresaleStats(presaleOrders.value, presaleSettlements.value, presaleItems.value)
+  }
+
+  const placePresaleOrder = (
+    itemId: string,
+    customerId: string,
+    customerName: string,
+    customerAvatar: string,
+    memberProfile: MemberProfile | null,
+    quantity: number,
+    matchScore: number,
+    recommendedReason: string
+  ): { success: boolean; message: string; order?: PresaleOrder } => {
+    const item = presaleItems.value.find(i => i.id === itemId)
+    if (!item) return { success: false, message: '预售商品不存在' }
+
+    const result = createPresaleOrder(
+      item, customerId, customerName, customerAvatar, memberProfile,
+      quantity, currentDay.value, matchScore, recommendedReason
+    )
+    if (!result) return { success: false, message: '无法创建预售订单' }
+
+    const idx = presaleItems.value.findIndex(i => i.id === itemId)
+    if (idx >= 0) presaleItems.value[idx] = result.updatedItem
+    presaleOrders.value.push(result.order)
+    presaleStats.value = calculatePresaleStats(presaleOrders.value, presaleSettlements.value, presaleItems.value)
+
+    return { success: true, message: `成功预订《${item.record.title}》×${quantity}`, order: result.order }
+  }
+
+  const confirmPresaleOrderAction = (orderId: string) => {
+    const idx = presaleOrders.value.findIndex(o => o.id === orderId)
+    if (idx < 0) return { success: false, message: '订单不存在' }
+    presaleOrders.value[idx] = confirmPresaleOrder(presaleOrders.value[idx], currentDay.value)
+    presaleStats.value = calculatePresaleStats(presaleOrders.value, presaleSettlements.value, presaleItems.value)
+    return { success: true, message: '订单已确认' }
+  }
+
+  const payPresaleOrderAction = (orderId: string) => {
+    const order = presaleOrders.value.find(o => o.id === orderId)
+    if (!order) return { success: false, message: '订单不存在' }
+    if (budget.value < order.depositAmount) return { success: false, message: `预算不足！需要 ¥${order.depositAmount}` }
+
+    budget.value -= order.depositAmount
+    const idx = presaleOrders.value.findIndex(o => o.id === orderId)
+    presaleOrders.value[idx] = payPresaleOrder(order, currentDay.value)
+    presaleStats.value = calculatePresaleStats(presaleOrders.value, presaleSettlements.value, presaleItems.value)
+    return { success: true, message: `已支付定金 ¥${order.depositAmount}` }
+  }
+
+  const settlePresaleDeliveries = () => {
+    for (let i = 0; i < presaleOrders.value.length; i++) {
+      const order = presaleOrders.value[i]
+      if (order.status !== 'locked' && order.status !== 'shipped') continue
+
+      const item = presaleItems.value.find(it => it.id === order.presaleItemId)
+      if (!item || (item.status !== 'shipped' && item.status !== 'delivered')) continue
+
+      if (budget.value < order.remainingAmount) continue
+      budget.value -= order.remainingAmount
+
+      const result = deliverPresaleOrder(order, currentDay.value)
+      if (!result) continue
+
+      presaleOrders.value[i] = result.updatedOrder
+      presaleSettlements.value.push(result.settlement)
+
+      const invItem = inventory.value.find(inv => inv.record.id === order.recordId)
+      if (invItem) {
+        invItem.quantity += order.quantity
+      } else {
+        const record = getRecordById(order.recordId)
+        if (record) {
+          inventory.value.push({
+            record,
+            quantity: order.quantity,
+            purchaseDate: currentDay.value,
+            conditionScore: 85,
+            actualCostPrice: order.unitPrice
+          })
+        }
+      }
+
+      shopReputation.value = Math.min(100, shopReputation.value + result.settlement.reputationImpact)
+    }
+
+    presaleStats.value = calculatePresaleStats(presaleOrders.value, presaleSettlements.value, presaleItems.value)
+  }
+
+  const cancelPresaleOrderAction = (orderId: string) => {
+    const idx = presaleOrders.value.findIndex(o => o.id === orderId)
+    if (idx < 0) return { success: false, message: '订单不存在' }
+
+    const order = presaleOrders.value[idx]
+    if (order.status === 'paid' || order.status === 'confirmed') {
+      budget.value += order.depositAmount
+    }
+
+    presaleOrders.value[idx] = cancelPresaleOrder(order, currentDay.value)
+
+    const item = presaleItems.value.find(it => it.id === order.presaleItemId)
+    if (item) {
+      const itemIdx = presaleItems.value.indexOf(item)
+      presaleItems.value[itemIdx] = {
+        ...item,
+        soldCount: Math.max(0, item.soldCount - order.quantity),
+        availableStock: item.availableStock + order.quantity
+      }
+    }
+
+    presaleStats.value = calculatePresaleStats(presaleOrders.value, presaleSettlements.value, presaleItems.value)
+    return { success: true, message: '订单已取消，定金已退还' }
+  }
+
+  const getPresaleRecommendations = (customer: { favoriteGenres: Genre[]; preferredRarity: number[]; priceRange: [number, number] }) => {
+    return generatePresaleRecommendation(customer, presaleItems.value, shopReputation.value)
+  }
+
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
   const isLastDay = computed(() => baseLevelConfig.value ? currentDay.value >= baseLevelConfig.value.days : false)
   const canAdvancePhase = computed(() => {
@@ -1731,6 +1917,14 @@ export const useGameStore = defineStore('game', () => {
     isAuctionHouseOpen.value = true
     selectedAuctionFilter.value = 'all'
     selectedAuctionId.value = null
+
+    presaleItems.value = []
+    presaleOrders.value = []
+    presaleSettlements.value = []
+    presaleEventPages.value = []
+    presaleStats.value = createInitialPresaleStats()
+    nextPresaleRefresh.value = 1
+    selectedPresaleEventId.value = null
     
     checkAndActivateAlbums()
     updateCollectionBonuses()
@@ -1741,6 +1935,7 @@ export const useGameStore = defineStore('game', () => {
     
     refreshActivePromotions()
     refreshDailyAuctions()
+    refreshPresaleItems()
   }
 
   const resetDailyStats = () => {
@@ -4598,6 +4793,27 @@ export const useGameStore = defineStore('game', () => {
     getBidHistory,
     getFilteredAuctions,
     getAuctionProgress,
-    getMinNextBid
+    getMinNextBid,
+    presaleItems,
+    presaleOrders,
+    presaleSettlements,
+    presaleEventPages,
+    presaleStats,
+    nextPresaleRefresh,
+    selectedPresaleEventId,
+    activePresaleItems,
+    presaleToFulfillCount,
+    presaleTotalDeposits,
+    presaleTotalRevenue,
+    selectedPresaleEvent,
+    refreshPresaleItems,
+    placePresaleOrder,
+    confirmPresaleOrderAction,
+    payPresaleOrderAction,
+    settlePresaleDeliveries,
+    cancelPresaleOrderAction,
+    getPresaleRecommendations,
+    getItemStatusInfo,
+    getPresaleStatusLabel
   }
 })

@@ -10,11 +10,13 @@ import SettlementView from './components/SettlementView.vue'
 import CollectionView from './components/CollectionView.vue'
 import StaffView from './components/StaffView.vue'
 import AuctionView from './components/AuctionView.vue'
+import PresaleView from './components/PresaleView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
 const showStaff = ref(false)
 const showAuction = ref(false)
+const showPresale = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -37,6 +39,10 @@ const toggleStaff = () => {
 const toggleAuction = () => {
   showAuction.value = !showAuction.value
 }
+
+const togglePresale = () => {
+  showPresale.value = !showPresale.value
+}
 </script>
 
 <template>
@@ -44,6 +50,7 @@ const toggleAuction = () => {
     <CollectionView v-if="showCollection" @close="toggleCollection" />
     <StaffView v-if="showStaff" @close="toggleStaff" />
     <AuctionView v-if="showAuction" @close="toggleAuction" />
+    <PresaleView v-if="showPresale" @close="togglePresale" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -55,6 +62,7 @@ const toggleAuction = () => {
         @collection="toggleCollection"
         @staff="toggleStaff"
         @auction="toggleAuction"
+        @presale="togglePresale"
       />
       
       <main class="main-content">

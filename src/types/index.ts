@@ -1062,3 +1062,130 @@ export interface AuctionGameState {
   isAuctionHouseOpen: boolean
   selectedAuctionFilter: string
 }
+
+export type PresaleItemStatus = 'upcoming' | 'preselling' | 'locked' | 'shipped' | 'delivered' | 'cancelled'
+export type PresaleOrderStatus = 'pending' | 'confirmed' | 'paid' | 'locked' | 'shipped' | 'delivered' | 'cancelled' | 'refunded'
+
+export interface PresaleItemConfig {
+  recordId: string
+  presalePrice: number
+  retailPrice: number
+  earlyBirdDiscount: number
+  depositRate: number
+  totalStock: number
+  reservedStock: number
+  maxPerCustomer: number
+  startDate: number
+  endDate: number
+  expectedShipDate: number
+  bonusDescription: string
+  isLimited: boolean
+  isExclusive: boolean
+}
+
+export interface PresaleItem {
+  id: string
+  record: Record
+  config: PresaleItemConfig
+  status: PresaleItemStatus
+  soldCount: number
+  lockedCount: number
+  availableStock: number
+  dailySyncLog: PresaleSyncLog[]
+  createdAt: number
+}
+
+export interface PresaleSyncLog {
+  day: number
+  syncType: 'stock_update' | 'price_adjust' | 'status_change'
+  before: string
+  after: string
+  detail: string
+}
+
+export interface PresaleOrder {
+  id: string
+  customerId: string
+  customerName: string
+  customerAvatar: string
+  memberProfile: MemberProfile | null
+  memberLevel: MemberLevel | null
+  presaleItemId: string
+  recordId: string
+  recordTitle: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  depositAmount: number
+  remainingAmount: number
+  status: PresaleOrderStatus
+  isEarlyBird: boolean
+  discountRate: number
+  preferenceMatchScore: number
+  recommendedReason: string
+  orderDate: number
+  confirmDate: number | null
+  payDate: number | null
+  lockDate: number | null
+  shipDate: number | null
+  deliverDate: number | null
+  cancelDate: number | null
+  refundDate: number | null
+  note: string
+  satisfactionBonus: number
+}
+
+export interface PresaleEventPage {
+  id: string
+  title: string
+  subtitle: string
+  bannerIcon: string
+  theme: 'new_release' | 'limited' | 'seasonal' | 'exclusive' | 'anniversary'
+  themeColor: string
+  description: string
+  startDate: number
+  endDate: number
+  itemIds: string[]
+  isActive: boolean
+  bonusTagline: string
+}
+
+export interface PresaleSettlement {
+  id: string
+  orderId: string
+  recordId: string
+  recordTitle: string
+  customerName: string
+  finalPrice: number
+  depositUsed: number
+  remainingPaid: number
+  platformFee: number
+  netRevenue: number
+  settledDay: number
+  satisfaction: number
+  reputationImpact: number
+}
+
+export interface PresaleStats {
+  totalOrders: number
+  totalRevenue: number
+  totalDeposits: number
+  totalSettled: number
+  avgMatchScore: number
+  earlyBirdCount: number
+  memberOrderCount: number
+  cancellationCount: number
+  topGenre: Genre | null
+  presaleToFulfill: number
+  eventPageViews: number
+}
+
+export interface PresaleGameState {
+  presaleItems: PresaleItem[]
+  presaleOrders: PresaleOrder[]
+  presaleSettlements: PresaleSettlement[]
+  eventPages: PresaleEventPage[]
+  presaleStats: PresaleStats
+  nextPresaleRefresh: number
+  selectedEventPageId: string | null
+}
