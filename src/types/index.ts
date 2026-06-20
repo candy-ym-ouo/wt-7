@@ -900,6 +900,7 @@ export interface GameState {
   reservations: Reservation[]
   dailyReservationFulfilledCount: number
   dailyReservationMissedCount: number
+  shopRenovation: ShopRenovationState
 }
 
 export type AuctionStatus = 'upcoming' | 'active' | 'ended' | 'settled' | 'cancelled'
@@ -1188,4 +1189,129 @@ export interface PresaleGameState {
   presaleStats: PresaleStats
   nextPresaleRefresh: number
   selectedEventPageId: string | null
+}
+
+export type ShopStyleTier = 'shabby' | 'simple' | 'refined' | 'elegant' | 'luxurious'
+
+export interface ShopStyleConfig {
+  tier: ShopStyleTier
+  tierName: string
+  icon: string
+  minReputation: number
+  cost: number
+  description: string
+  customerCountModifier: number
+  budgetModifier: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  reputationDailyBonus: number
+  attractGenres: Genre[]
+  unlockGenresBonus: number
+  unlockLevel: number
+}
+
+export type ShopAreaTier = 'tiny' | 'small' | 'medium' | 'large' | 'grand'
+
+export interface ShopAreaConfig {
+  tier: ShopAreaTier
+  tierName: string
+  icon: string
+  areaLevel: number
+  cost: number
+  description: string
+  baseDisplaySlots: number
+  maxCustomersBonus: number
+  customerCountModifier: number
+  unlockLevel: number
+}
+
+export type DisplaySlotType = 'standard' | 'premium' | 'featured' | 'vip'
+
+export interface DisplaySlotUpgradeConfig {
+  type: DisplaySlotType
+  typeName: string
+  icon: string
+  cost: number
+  description: string
+  matchScoreBonus: number
+  buyChanceBonus: number
+  conditionPreservationBonus: number
+  unlockLevel: number
+}
+
+export interface ShopDisplaySlotState {
+  id: number
+  type: DisplaySlotType
+  unlocked: boolean
+  upgradeDate: number | null
+}
+
+export type CustomerAttractionTier = 'casual' | 'regular' | 'premium' | 'elite' | 'celebrity'
+
+export interface CustomerAttractionConfig {
+  tier: CustomerAttractionTier
+  tierName: string
+  icon: string
+  cost: number
+  description: string
+  specialCustomerWeightBoost: number
+  memberChanceBonus: number
+  highBudgetCustomerChance: number
+  rareCollectorChance: number
+  minReputation: number
+  unlockLevel: number
+}
+
+export type RevenueBonusTier = 'none' | 'minor' | 'moderate' | 'major' | 'exclusive'
+
+export interface RevenueBonusConfig {
+  tier: RevenueBonusTier
+  tierName: string
+  icon: string
+  cost: number
+  description: string
+  salePriceBonus: number
+  profitMarginBonus: number
+  memberSpendBonus: number
+  minShopStyleTier: ShopStyleTier
+  unlockLevel: number
+}
+
+export interface ShopRenovationState {
+  currentStyle: ShopStyleTier
+  currentArea: ShopAreaTier
+  displaySlots: ShopDisplaySlotState[]
+  customerAttraction: CustomerAttractionTier
+  revenueBonus: RevenueBonusTier
+  totalRenovationSpent: number
+  renovationCount: number
+  lastRenovationDay: number
+  upgradeHistory: {
+    type: 'style' | 'area' | 'display' | 'attraction' | 'revenue'
+    fromTier: string
+    toTier: string
+    cost: number
+    day: number
+  }[]
+}
+
+export interface ShopRenovationBonusSummary {
+  customerCountModifier: number
+  budgetModifier: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  reputationDailyBonus: number
+  matchScoreBonus: number
+  conditionPreservationBonus: number
+  specialCustomerWeightBoost: number
+  memberChanceBonus: number
+  highBudgetCustomerChance: number
+  rareCollectorChance: number
+  salePriceBonus: number
+  profitMarginBonus: number
+  memberSpendBonus: number
+  attractGenres: Genre[]
+  maxCustomersBonus: number
+  totalDisplaySlots: number
+  unlockedGenresBonus: number
 }

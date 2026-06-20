@@ -13,7 +13,8 @@ import type {
   Reservation, ReservationItem, ReservationSummary,
   AuctionItem, BidRecord, FrozenFund, AuctionSettlement,
   RareCollectorConfig, ActiveRareCollector, PendingCollectorOffer,
-  AuctionHouseStats, CollectionSourceType, CollectionSource
+  AuctionHouseStats, CollectionSourceType, CollectionSource,
+  ShopRenovationState, ShopRenovationBonusSummary
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -150,6 +151,24 @@ import {
   addStaffPoints as addStaffPointsData
 } from '@/data/staff'
 import {
+  createInitialShopRenovationState,
+  calculateRenovationBonusSummary,
+  canUpgradeStyle,
+  canUpgradeArea,
+  canUpgradeCustomerAttraction,
+  canUpgradeRevenueBonus,
+  canUpgradeDisplaySlot,
+  upgradeStyle as upgradeStyleData,
+  upgradeArea as upgradeAreaData,
+  upgradeCustomerAttraction as upgradeCustomerAttractionData,
+  upgradeRevenueBonus as upgradeRevenueBonusData,
+  upgradeDisplaySlot as upgradeDisplaySlotData,
+  getShopStyleConfig,
+  getShopAreaConfig,
+  getCustomerAttractionConfig,
+  getRevenueBonusConfig
+} from '@/data/shopRenovation'
+import {
   generateRecordStory,
   generateRecordAchievements,
   generateDisplayCopy
@@ -281,6 +300,8 @@ export const useGameStore = defineStore('game', () => {
   })
 
   const staff = ref<StaffState>(createInitialStaffState())
+
+  const shopRenovation = ref<ShopRenovationState>(createInitialShopRenovationState())
 
   const specialCustomersState = ref<SpecialCustomerConfig[]>(JSON.parse(JSON.stringify(specialCustomers)))
   const collectionBonuses = ref<CollectionBonus[]>([])
@@ -4546,6 +4567,89 @@ export const useGameStore = defineStore('game', () => {
     staff.value = addStaffPointsData(staff.value, points)
   }
 
+  const shopRenovationBonus = computed<ShopRenovationBonusSummary>(() => {
+    return calculateRenovationBonusSummary(shopRenovation.value)
+  })
+
+  const currentShopStyleConfig = computed(() => getShopStyleConfig(shopRenovation.value.currentStyle))
+  const currentShopAreaConfig = computed(() => getShopAreaConfig(shopRenovation.value.currentArea))
+  const currentCustomerAttractionConfig = computed(() => getCustomerAttractionConfig(shopRenovation.value.customerAttraction))
+  const currentRevenueBonusConfig = computed(() => getRevenueBonusConfig(shopRenovation.value.revenueBonus))
+
+  const canUpgradeShopStyle = computed(() => canUpgradeStyle(shopRenovation.value, budget.value, shopReputation.value, currentLevel.value))
+  const canUpgradeShopArea = computed(() => canUpgradeArea(shopRenovation.value, budget.value, currentLevel.value))
+  const canUpgradeShopAttraction = computed(() => canUpgradeCustomerAttraction(shopRenovation.value, budget.value, shopReputation.value, currentLevel.value))
+  const canUpgradeShopRevenue = computed(() => canUpgradeRevenueBonus(shopRenovation.value, budget.value, currentLevel.value))
+
+  const getCanUpgradeDisplaySlot = (slotId: number) => {
+    return canUpgradeDisplaySlot(slotId, shopRenovation.value, budget.value, currentLevel.value)
+  }
+
+  const upgradeShopStyle = (): { success: boolean; message: string } => {
+    const check = canUpgradeStyle(shopRenovation.value, budget.value, shopReputation.value, currentLevel.value)
+    if (!check.canUpgrade || !check.nextConfig) {
+      return { success: false, message: check.reason }
+    }
+    budget.value -= check.nextConfig.cost
+    const result = upgradeStyleData(shopRenovation.value, currentDay.value)
+    if (result.success) {
+      shopRenovation.value = result.newState
+    }
+    return { success: result.success, message: result.message }
+  }
+
+  const upgradeShopArea = (): { success: boolean; message: string } => {
+    const check = canUpgradeArea(shopRenovation.value, budget.value, currentLevel.value)
+    if (!check.canUpgrade || !check.nextConfig) {
+      return { success: false, message: check.reason }
+    }
+    budget.value -= check.nextConfig.cost
+    const result = upgradeAreaData(shopRenovation.value, currentDay.value)
+    if (result.success) {
+      shopRenovation.value = result.newState
+    }
+    return { success: result.success, message: result.message }
+  }
+
+  const upgradeShopAttraction = (): { success: boolean; message: string } => {
+    const check = canUpgradeCustomerAttraction(shopRenovation.value, budget.value, shopReputation.value, currentLevel.value)
+    if (!check.canUpgrade || !check.nextConfig) {
+      return { success: false, message: check.reason }
+    }
+    budget.value -= check.nextConfig.cost
+    const result = upgradeCustomerAttractionData(shopRenovation.value, currentDay.value)
+    if (result.success) {
+      shopRenovation.value = result.newState
+    }
+    return { success: result.success, message: result.message }
+  }
+
+  const upgradeShopRevenue = (): { success: boolean; message: string } => {
+    const check = canUpgradeRevenueBonus(shopRenovation.value, budget.value, currentLevel.value)
+    if (!check.canUpgrade || !check.nextConfig) {
+      return { success: false, message: check.reason }
+    }
+    budget.value -= check.nextConfig.cost
+    const result = upgradeRevenueBonusData(shopRenovation.value, currentDay.value)
+    if (result.success) {
+      shopRenovation.value = result.newState
+    }
+    return { success: result.success, message: result.message }
+  }
+
+  const upgradeDisplaySlotType = (slotId: number): { success: boolean; message: string } => {
+    const check = canUpgradeDisplaySlot(slotId, shopRenovation.value, budget.value, currentLevel.value)
+    if (!check.canUpgrade || !check.nextConfig) {
+      return { success: false, message: check.reason }
+    }
+    budget.value -= check.nextConfig.cost
+    const result = upgradeDisplaySlotData(slotId, shopRenovation.value, currentDay.value)
+    if (result.success) {
+      shopRenovation.value = result.newState
+    }
+    return { success: result.success, message: result.message }
+  }
+
   const goToNextLevel = () => {
     const next = getNextLevel(currentLevel.value)
     if (next) {
@@ -4748,6 +4852,22 @@ export const useGameStore = defineStore('game', () => {
     staff,
     upgradeStaffSkill,
     addStaffPoints,
+    shopRenovation,
+    shopRenovationBonus,
+    currentShopStyleConfig,
+    currentShopAreaConfig,
+    currentCustomerAttractionConfig,
+    currentRevenueBonusConfig,
+    canUpgradeShopStyle,
+    canUpgradeShopArea,
+    canUpgradeShopAttraction,
+    canUpgradeShopRevenue,
+    getCanUpgradeDisplaySlot,
+    upgradeShopStyle,
+    upgradeShopArea,
+    upgradeShopAttraction,
+    upgradeShopRevenue,
+    upgradeDisplaySlotType,
     setCollectionSource,
     checkAndUpdateAchievements,
     updateCollectionStoryProgress,

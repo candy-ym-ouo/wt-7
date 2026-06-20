@@ -11,12 +11,14 @@ import CollectionView from './components/CollectionView.vue'
 import StaffView from './components/StaffView.vue'
 import AuctionView from './components/AuctionView.vue'
 import PresaleView from './components/PresaleView.vue'
+import ShopRenovationView from './components/ShopRenovationView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
 const showStaff = ref(false)
 const showAuction = ref(false)
 const showPresale = ref(false)
+const showRenovation = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -43,6 +45,10 @@ const toggleAuction = () => {
 const togglePresale = () => {
   showPresale.value = !showPresale.value
 }
+
+const toggleRenovation = () => {
+  showRenovation.value = !showRenovation.value
+}
 </script>
 
 <template>
@@ -51,6 +57,7 @@ const togglePresale = () => {
     <StaffView v-if="showStaff" @close="toggleStaff" />
     <AuctionView v-if="showAuction" @close="toggleAuction" />
     <PresaleView v-if="showPresale" @close="togglePresale" />
+    <ShopRenovationView v-if="showRenovation" @close="toggleRenovation" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -63,6 +70,7 @@ const togglePresale = () => {
         @staff="toggleStaff"
         @auction="toggleAuction"
         @presale="togglePresale"
+        @renovation="toggleRenovation"
       />
       
       <main class="main-content">
