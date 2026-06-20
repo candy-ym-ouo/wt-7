@@ -5134,20 +5134,20 @@ export const useGameStore = defineStore('game', () => {
       budget.value -= city.rentCost
       marketTour.value.currentMarketDayCost += city.rentCost
       
-      const repModifier = 1 + (shopReputation.value - 50) / 100
-      marketCustomers.value = generateDailyMarketCustomers(
-        city,
-        marketTour.value.customerFlow,
-        repModifier,
-        getUnlockedGenres(currentLevel.value)
-      )
-      currentMarketCustomerIndex.value = 0
+      marketTour.value.customerFlow = generateCustomerFlow(city.tier, 0)
+      adjustMarketCustomerFlow()
       
+      let eventTriggered = false
       if (Math.random() < city.eventDensity * 0.5) {
-        triggerMarketEvent()
+        eventTriggered = triggerMarketEvent()
       }
       
-      return { success: true, message: `市集第1天开始！今日${marketCustomers.value.length}位顾客`, phase: 'selling' }
+      if (!eventTriggered) {
+        regenerateTodayMarketCustomers()
+        return { success: true, message: `市集第1天开始！今日${marketCustomers.value.length}位顾客`, phase: 'selling' }
+      }
+      
+      return { success: true, message: `市集第1天开始！发生了一个事件，请选择应对方式`, phase: 'event' }
     }
     
     if (marketTour.value.phase === 'selling') {
@@ -5162,6 +5162,7 @@ export const useGameStore = defineStore('game', () => {
       
       marketTour.value.daysAtMarket++
       resetMarketDayStats()
+      advanceDayEventEffects()
       
       if (budget.value < city.rentCost) {
         marketTour.value.phase = 'settlement'
@@ -5172,20 +5173,17 @@ export const useGameStore = defineStore('game', () => {
       
       adjustMarketCustomerFlow()
       
-      const repModifier = 1 + (shopReputation.value - 50) / 100
-      marketCustomers.value = generateDailyMarketCustomers(
-        city,
-        marketTour.value.customerFlow,
-        repModifier,
-        getUnlockedGenres(currentLevel.value)
-      )
-      currentMarketCustomerIndex.value = 0
-      
+      let eventTriggered = false
       if (Math.random() < city.eventDensity) {
-        triggerMarketEvent()
+        eventTriggered = triggerMarketEvent()
       }
       
-      return { success: true, message: `市集第${marketTour.value.daysAtMarket}天开始！`, phase: 'selling' }
+      if (!eventTriggered) {
+        regenerateTodayMarketCustomers()
+        return { success: true, message: `市集第${marketTour.value.daysAtMarket}天开始！今日${marketCustomers.value.length}位顾客`, phase: 'selling' }
+      }
+      
+      return { success: true, message: `市集第${marketTour.value.daysAtMarket}天开始！发生了一个事件，请选择应对方式`, phase: 'event' }
     }
     
     return { success: false, message: '当前阶段无法推进' }
@@ -5208,8 +5206,8 @@ export const useGameStore = defineStore('game', () => {
       marketTour.value.customerFlow = generateCustomerFlow(city.tier, marketTour.value.daysAtMarket)
     }
     
-    if (marketTour.value.activeEvent && !marketTour.value.activeEvent.resolved) {
-      const eff = marketTour.value.activeEvent.activeEffects
+    for (const entry of marketTour.value.activeEventEffects) {
+      const eff = entry.effects
       marketTour.value.customerFlow.customerMultiplier = Math.max(0.2, 
         marketTour.value.customerFlow.customerMultiplier * (1 + eff.customerCountModifier)
       )
@@ -5218,6 +5216,33 @@ export const useGameStore = defineStore('game', () => {
       )
       marketTour.value.customerFlow.buyChanceBonus += eff.buyChanceModifier
     }
+  }
+
+  const regenerateTodayMarketCustomers = () => {
+    const city = currentMarketCity.value
+    if (!city) return
+    
+    const repModifier = 1 + (shopReputation.value - 50) / 100
+    marketCustomers.value = generateDailyMarketCustomers(
+      city,
+      marketTour.value.customerFlow,
+      repModifier,
+      getUnlockedGenres(currentLevel.value)
+    )
+    currentMarketCustomerIndex.value = 0
+  }
+
+  const advanceDayEventEffects = () => {
+    const remaining: typeof marketTour.value.activeEventEffects = []
+    for (const entry of marketTour.value.activeEventEffects) {
+      if (entry.remainingDays > 1) {
+        remaining.push({
+          ...entry,
+          remainingDays: entry.remainingDays - 1
+        })
+      }
+    }
+    marketTour.value.activeEventEffects = remaining
   }
 
   const getMarketRecommendations = (customer: MarketCustomer | null): {
@@ -5562,6 +5587,17 @@ export const useGameStore = defineStore('game', () => {
     activeEvent.resolved = true
     activeEvent.activeEffects = choice.effects
     
+    marketTour.value.activeEventEffects.push({
+      effects: choice.effects,
+      remainingDays: choice.effects.duration,
+      triggeredAtDay: marketTour.value.daysAtMarket,
+      eventName: activeEvent.config.name,
+      choiceLabel: choice.label
+    })
+    
+    adjustMarketCustomerFlow()
+    regenerateTodayMarketCustomers()
+    
     if (choice.effects.budgetChange !== 0) {
       budget.value += choice.effects.budgetChange
       if (choice.effects.budgetChange > 0) {
@@ -5600,9 +5636,16 @@ export const useGameStore = defineStore('game', () => {
     const city = currentMarketCity.value
     if (!city) return { success: false, message: '城市信息错误' }
     
+    if (marketTour.value.phase === 'selling' || marketTour.value.currentMarketDayRevenue > 0 || marketTour.value.currentMarketDayCost > 0 || marketTour.value.currentMarketDaySalesCount > 0) {
+      marketTour.value.dailyMarketRevenue.push(marketTour.value.currentMarketDayRevenue)
+      marketTour.value.dailyMarketCost.push(marketTour.value.currentMarketDayCost)
+      marketTour.value.dailyMarketSalesCount.push(marketTour.value.currentMarketDaySalesCount)
+      resetMarketDayStats()
+    }
+    
     const stats = getMarketSalesStats()
-    const totalRevenue = stats.totalRevenue + marketTour.value.dailyMarketRevenue.reduce((a, b) => a + b, 0)
-    const totalCost = stats.totalCost + marketTour.value.dailyMarketCost.reduce((a, b) => a + b, 0)
+    const totalRevenue = marketTour.value.dailyMarketRevenue.reduce((a, b) => a + b, 0)
+    const totalCost = marketTour.value.dailyMarketCost.reduce((a, b) => a + b, 0) + stats.totalCost
     const totalProfit = totalRevenue - totalCost
     
     const unsoldItems = marketTour.value.temporaryInventory
@@ -5695,6 +5738,7 @@ export const useGameStore = defineStore('game', () => {
     marketTour.value.currentCityId = null
     marketTour.value.pendingSettlement = null
     marketTour.value.activeEvent = null
+    marketTour.value.activeEventEffects = []
     marketTour.value.temporaryInventory = []
     marketCustomers.value = []
     currentMarketCustomerIndex.value = 0

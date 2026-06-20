@@ -686,6 +686,7 @@ export const createInitialMarketTourState = () => ({
   temporaryInventory: [],
   marketInventoryValue: 0,
   activeEvent: null,
+  activeEventEffects: [],
   eventHistory: [],
   customerFlow: {
     currentWave: 'normal' as const,

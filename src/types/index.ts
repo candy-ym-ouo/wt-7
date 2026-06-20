@@ -1475,6 +1475,14 @@ export interface ActiveMarketEvent {
   activeEffects: MarketEventEffect
 }
 
+export interface ActiveEventEffectEntry {
+  effects: MarketEventEffect
+  remainingDays: number
+  triggeredAtDay: number
+  eventName: string
+  choiceLabel: string
+}
+
 export type CustomerFlowWave = 'low' | 'normal' | 'peak' | 'surge'
 
 export interface CustomerFlowState {
@@ -1535,6 +1543,7 @@ export interface MarketTourState {
   temporaryInventory: MarketInventoryItem[]
   marketInventoryValue: number
   activeEvent: ActiveMarketEvent | null
+  activeEventEffects: ActiveEventEffectEntry[]
   eventHistory: ActiveMarketEvent[]
   customerFlow: CustomerFlowState
   marketSales: MarketSaleRecord[]
