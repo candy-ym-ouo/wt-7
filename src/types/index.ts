@@ -590,6 +590,8 @@ export interface SupplierInventoryItem {
   marketHeatValue: number
   marketPriceModifier: number
   marketTrend: MarketHeatTrend
+  isExclusiveSupply?: boolean
+  exclusiveSupplyId?: string
 }
 
 export interface RecordPerformance {
@@ -1346,8 +1348,11 @@ export interface SupplierGrowthMilestone {
 }
 
 export interface SupplierExclusiveSupply {
+  id: string
   genre: Genre
   minRarity: number
+  maxRarity: number
+  priceBonus: number
   bonusStockCount: number
   priceCap: number
   requiredContractTier: SupplierContractTier

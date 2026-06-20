@@ -222,7 +222,8 @@ import {
   getTierColor,
   getTierBgColor,
   getBreachTypeLabel,
-  getBreachTypeIcon
+  getBreachTypeIcon,
+  generateExclusiveSupplierInventory
 } from '@/data/supplierRelationship'
 
 export const useGameStore = defineStore('game', () => {
@@ -279,6 +280,7 @@ export const useGameStore = defineStore('game', () => {
   const supplierRelationships = ref<Map<string, SupplierRelationship>>(new Map())
   const dailyBreachRecords = ref<SupplierBreachRecord[]>([])
   const newlyUnlockedMilestones = ref<string[]>([])
+  const dailyPurchaseAmountPerSupplier = ref<Map<string, number>>(new Map())
 
   const currentTimeSlot = ref<TimeSlot>('afternoon')
   const afternoonCompleted = ref(false)
@@ -619,9 +621,12 @@ export const useGameStore = defineStore('game', () => {
     supplierRelationships.value.set(supplierId, updatedRelationship)
     dailyBreachRecords.value.push(breachRecord)
     shopReputation.value = Math.max(0, shopReputation.value - breachRecord.reputationPenalty)
+    if (breachRecord.fineAmount > 0) {
+      budget.value = Math.max(0, budget.value - breachRecord.fineAmount)
+    }
     return {
       success: true,
-      message: `已解除合约，扣除信任 ${breachRecord.trustPenalty} 点，声望 -${breachRecord.reputationPenalty}`,
+      message: `已解除合约，扣除信任 ${breachRecord.trustPenalty} 点，声望 -${breachRecord.reputationPenalty}，罚款 ¥${breachRecord.fineAmount}`,
       breachRecord
     }
   }
@@ -2031,6 +2036,7 @@ export const useGameStore = defineStore('game', () => {
     supplierRelationships.value = new Map()
     dailyBreachRecords.value = []
     newlyUnlockedMilestones.value = []
+    dailyPurchaseAmountPerSupplier.value = new Map()
     overstockPenalties.value = new Map()
     dailyOverstockPenalty.value = null
     totalOverstockPenaltyAccumulated.value = 0
@@ -2132,7 +2138,7 @@ export const useGameStore = defineStore('game', () => {
     const unlockedGenres = getUnlockedGenres(currentLevel.value)
     const excludeIds = inventory.value.map(i => i.record.id)
     
-    supplierInventory.value = generateSupplierInventory(
+    const regularInventory = generateSupplierInventory(
       supplier,
       unlockedGenres,
       recordPerformances.value,
@@ -2141,6 +2147,17 @@ export const useGameStore = defineStore('game', () => {
       8,
       recordUnlockBonus.value
     )
+    
+    const relationship = getSupplierRelationship(supplier.id)
+    const exclusiveInventory = generateExclusiveSupplierInventory(
+      supplier,
+      relationship,
+      recordPerformances.value,
+      genreMarketHeat.value,
+      [...excludeIds, ...regularInventory.map(i => i.record.id)]
+    )
+    
+    supplierInventory.value = [...exclusiveInventory, ...regularInventory]
   }
 
   const getSupplierInventoryItem = (recordId: string): SupplierInventoryItem | undefined => {
@@ -2154,11 +2171,32 @@ export const useGameStore = defineStore('game', () => {
     if (budget.value < totalCost) return { success: false, message: '预算不足！' }
     
     const supplier = getSupplierById(supplierItem.supplierId)
-    if (supplier && totalCost < supplier.minOrderAmount) {
-      return { success: false, message: `未达到最低订货金额 ¥${supplier.minOrderAmount}！` }
+    const relationship = getSupplierRelationship(supplierItem.supplierId)
+    
+    for (const [otherSupplierId, otherRel] of supplierRelationships.value.entries()) {
+      if (otherSupplierId === supplierItem.supplierId) continue
+      if (otherRel.contractTier !== 'exclusive') continue
+      
+      const otherSupplier = getSupplierById(otherSupplierId)
+      if (otherSupplier && supplier && otherSupplier.type === supplier.type) {
+        triggerBreach(supplierItem.supplierId, 'exclusive_violation', totalCost)
+        return { 
+          success: false, 
+          message: `违规！您与${otherSupplier.name}签有独家协议，不得从同类型其他供应商采购。已触发违约惩罚。` 
+        }
+      }
+    }
+    
+    if (supplier && relationship.isActive && totalCost < supplier.minOrderAmount) {
+      const currentDailyTotal = dailyPurchaseAmountPerSupplier.value.get(supplierItem.supplierId) || 0
+      if (currentDailyTotal + totalCost < supplier.minOrderAmount) {
+        return { 
+          success: false, 
+          message: `本次采购后当日累计 ¥${currentDailyTotal + totalCost} 仍未达最低订货金额 ¥${supplier.minOrderAmount}！继续采购或解约将触发违约惩罚。` 
+        }
+      }
     }
 
-    const relationship = getSupplierRelationship(supplierItem.supplierId)
     const discountRate = calculateTotalDiscount(relationship)
     if (discountRate > 0) {
       const discountAmount = Math.floor(totalCost * discountRate)
@@ -2192,6 +2230,9 @@ export const useGameStore = defineStore('game', () => {
       totalSpent: supplierHistory.totalSpent + totalCost,
       totalItems: supplierHistory.totalItems + actualQty
     })
+
+    const currentDailyTotal = dailyPurchaseAmountPerSupplier.value.get(supplierItem.supplierId) || 0
+    dailyPurchaseAmountPerSupplier.value.set(supplierItem.supplierId, currentDailyTotal + totalCost)
 
     const updatedRelationship = updateRelationshipOnPurchase(
       relationship,
@@ -2232,6 +2273,9 @@ export const useGameStore = defineStore('game', () => {
     
     const riskApplied = Math.random() < supplierItem.riskFactor * 0.3
     let finalMessage = `成功购入 ${actualQty} 张《${supplierItem.record.title}》！`
+    if (supplierItem.isExclusiveSupply) {
+      finalMessage = `【专属货源】${finalMessage}`
+    }
     if (discountRate > 0) {
       finalMessage += ` 合约折扣 -${Math.round(discountRate * 100)}%，省 ¥${Math.floor(supplierItem.adjustedCostPrice * actualQty * discountRate)}！`
     }
@@ -2566,6 +2610,22 @@ export const useGameStore = defineStore('game', () => {
 
   const startBusinessPhase = () => {
     if (!baseLevelConfig.value) return
+
+    for (const [supplierId, relationship] of supplierRelationships.value.entries()) {
+      if (!relationship.isActive) continue
+      
+      const supplier = getSupplierById(supplierId)
+      if (!supplier) continue
+      
+      const dailyTotal = dailyPurchaseAmountPerSupplier.value.get(supplierId) || 0
+      if (dailyTotal < supplier.minOrderAmount) {
+        const tierConfig = getContractTierConfig(relationship.contractTier)
+        const minOrderRequired = tierConfig.minOrderDiscount > 0 ? supplier.minOrderAmount : 0
+        if (minOrderRequired > 0 && dailyTotal < minOrderRequired) {
+          triggerBreach(supplierId, 'min_order_missed', supplier.minOrderAmount)
+        }
+      }
+    }
 
     triggerDailyEvent()
 
@@ -4256,6 +4316,7 @@ export const useGameStore = defineStore('game', () => {
           generateReservationsForNextDay()
           currentDay.value++
           resetDailyStats()
+          dailyPurchaseAmountPerSupplier.value.clear()
           phase.value = 'purchase'
           stopPlaying()
           incrementCollectionDaysOwned()
@@ -4937,6 +4998,7 @@ export const useGameStore = defineStore('game', () => {
     supplierRelationships,
     dailyBreachRecords,
     newlyUnlockedMilestones,
+    dailyPurchaseAmountPerSupplier,
     getSupplierRelationship,
     currentSupplierRelationship,
     currentSupplierBonusSummary,

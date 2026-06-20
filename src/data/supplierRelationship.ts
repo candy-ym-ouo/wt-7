@@ -7,8 +7,16 @@ import type {
   SupplierRelationship,
   SupplierRelationshipBonusSummary,
   Supplier,
-  SupplierType
+  SupplierType,
+  Record as VinylRecord,
+  RecordPerformance,
+  SupplierInventoryItem,
+  GenreMarketHeat,
+  Genre
 } from '@/types'
+import { allRecords } from './records'
+import { getGenreMarketHeat } from './marketHeat'
+import { calculateStockRisk, calculateExpectedTurnoverRate, calculateHistoricalProfitMargin, calculateSalePerformanceScore } from './suppliers'
 
 export const contractTiers: SupplierContractConfig[] = [
   {
@@ -199,31 +207,31 @@ export const growthMilestones: SupplierGrowthMilestone[] = [
   }
 ]
 
-export const exclusiveSupplies: Record<SupplierType, SupplierExclusiveSupply[]> = {
+export const exclusiveSupplies: globalThis.Record<SupplierType, SupplierExclusiveSupply[]> = {
   wholesaler: [
-    { genre: 'Jazz', minRarity: 3, bonusStockCount: 2, priceCap: 400, requiredContractTier: 'standard' },
-    { genre: 'Rock', minRarity: 4, bonusStockCount: 1, priceCap: 600, requiredContractTier: 'preferred' },
-    { genre: 'Pop', minRarity: 2, bonusStockCount: 3, priceCap: 250, requiredContractTier: 'trial' }
+    { id: 'ws-1', genre: 'Jazz', minRarity: 3, maxRarity: 5, priceBonus: 0.10, bonusStockCount: 2, priceCap: 400, requiredContractTier: 'standard' },
+    { id: 'ws-2', genre: 'Rock', minRarity: 4, maxRarity: 5, priceBonus: 0.12, bonusStockCount: 1, priceCap: 600, requiredContractTier: 'preferred' },
+    { id: 'ws-3', genre: 'Pop', minRarity: 2, maxRarity: 4, priceBonus: 0.08, bonusStockCount: 3, priceCap: 250, requiredContractTier: 'trial' }
   ],
   specialist: [
-    { genre: 'Jazz', minRarity: 4, bonusStockCount: 2, priceCap: 800, requiredContractTier: 'standard' },
-    { genre: 'Blues', minRarity: 3, bonusStockCount: 2, priceCap: 500, requiredContractTier: 'preferred' },
-    { genre: 'Classical', minRarity: 4, bonusStockCount: 1, priceCap: 900, requiredContractTier: 'strategic' }
+    { id: 'sp-1', genre: 'Jazz', minRarity: 4, maxRarity: 5, priceBonus: 0.12, bonusStockCount: 2, priceCap: 800, requiredContractTier: 'standard' },
+    { id: 'sp-2', genre: 'Blues', minRarity: 3, maxRarity: 5, priceBonus: 0.10, bonusStockCount: 2, priceCap: 500, requiredContractTier: 'preferred' },
+    { id: 'sp-3', genre: 'Classical', minRarity: 4, maxRarity: 5, priceBonus: 0.15, bonusStockCount: 1, priceCap: 900, requiredContractTier: 'strategic' }
   ],
   collector: [
-    { genre: 'Jazz', minRarity: 5, bonusStockCount: 1, priceCap: 1500, requiredContractTier: 'preferred' },
-    { genre: 'Rock', minRarity: 5, bonusStockCount: 1, priceCap: 1200, requiredContractTier: 'strategic' },
-    { genre: 'Folk', minRarity: 4, bonusStockCount: 2, priceCap: 700, requiredContractTier: 'standard' }
+    { id: 'cl-1', genre: 'Jazz', minRarity: 5, maxRarity: 5, priceBonus: 0.15, bonusStockCount: 1, priceCap: 1500, requiredContractTier: 'preferred' },
+    { id: 'cl-2', genre: 'Rock', minRarity: 5, maxRarity: 5, priceBonus: 0.15, bonusStockCount: 1, priceCap: 1200, requiredContractTier: 'strategic' },
+    { id: 'cl-3', genre: 'Folk', minRarity: 4, maxRarity: 5, priceBonus: 0.12, bonusStockCount: 2, priceCap: 700, requiredContractTier: 'standard' }
   ],
   importer: [
-    { genre: 'Electronic', minRarity: 4, bonusStockCount: 2, priceCap: 700, requiredContractTier: 'standard' },
-    { genre: 'Disco', minRarity: 3, bonusStockCount: 2, priceCap: 450, requiredContractTier: 'trial' },
-    { genre: 'Funk', minRarity: 4, bonusStockCount: 1, priceCap: 600, requiredContractTier: 'preferred' }
+    { id: 'im-1', genre: 'Electronic', minRarity: 4, maxRarity: 5, priceBonus: 0.12, bonusStockCount: 2, priceCap: 700, requiredContractTier: 'standard' },
+    { id: 'im-2', genre: 'Disco', minRarity: 3, maxRarity: 4, priceBonus: 0.08, bonusStockCount: 2, priceCap: 450, requiredContractTier: 'trial' },
+    { id: 'im-3', genre: 'Funk', minRarity: 4, maxRarity: 5, priceBonus: 0.10, bonusStockCount: 1, priceCap: 600, requiredContractTier: 'preferred' }
   ],
   discount: [
-    { genre: 'Pop', minRarity: 2, bonusStockCount: 4, priceCap: 150, requiredContractTier: 'trial' },
-    { genre: 'Rock', minRarity: 3, bonusStockCount: 3, priceCap: 300, requiredContractTier: 'standard' },
-    { genre: 'Disco', minRarity: 3, bonusStockCount: 2, priceCap: 350, requiredContractTier: 'preferred' }
+    { id: 'dc-1', genre: 'Pop', minRarity: 2, maxRarity: 3, priceBonus: 0.06, bonusStockCount: 4, priceCap: 150, requiredContractTier: 'trial' },
+    { id: 'dc-2', genre: 'Rock', minRarity: 3, maxRarity: 4, priceBonus: 0.08, bonusStockCount: 3, priceCap: 300, requiredContractTier: 'standard' },
+    { id: 'dc-3', genre: 'Disco', minRarity: 3, maxRarity: 4, priceBonus: 0.09, bonusStockCount: 2, priceCap: 350, requiredContractTier: 'preferred' }
   ]
 }
 
@@ -281,7 +289,7 @@ export const getNextContractTier = (currentTier: SupplierContractTier): Supplier
 }
 
 export const getTierColor = (tier: SupplierContractTier): string => {
-  const colors: Record<SupplierContractTier, string> = {
+  const colors: globalThis.Record<SupplierContractTier, string> = {
     none: '#a0aec0',
     trial: '#90cdf4',
     standard: '#68d391',
@@ -293,7 +301,7 @@ export const getTierColor = (tier: SupplierContractTier): string => {
 }
 
 export const getTierBgColor = (tier: SupplierContractTier): string => {
-  const colors: Record<SupplierContractTier, string> = {
+  const colors: globalThis.Record<SupplierContractTier, string> = {
     none: 'rgba(160,174,192,0.12)',
     trial: 'rgba(144,205,244,0.12)',
     standard: 'rgba(104,211,145,0.12)',
@@ -395,7 +403,7 @@ export const getExclusiveSuppliesForSupplier = (
   relationship: SupplierRelationship
 ): SupplierExclusiveSupply[] => {
   const supplies = exclusiveSupplies[supplier.type] || []
-  return supplies.filter(s => {
+  return supplies.filter((s: SupplierExclusiveSupply) => {
     const tierIndex = contractTiers.findIndex(t => t.tier === s.requiredContractTier)
     const currentTierIndex = contractTiers.findIndex(t => t.tier === relationship.contractTier)
     return currentTierIndex >= tierIndex
@@ -576,11 +584,94 @@ export const getBreachTypeLabel = (type: SupplierBreachRecord['type']): string =
 }
 
 export const getBreachTypeIcon = (type: SupplierBreachRecord['type']): string => {
-  const icons: Record<SupplierBreachRecord['type'], string> = {
+  const icons: globalThis.Record<SupplierBreachRecord['type'], string> = {
     min_order_missed: '📦',
     contract_cancelled: '❌',
     payment_delayed: '⏰',
     exclusive_violation: '🔒'
   }
   return icons[type]
+}
+
+export const generateExclusiveInventoryItem = (
+  supplier: Supplier,
+  exclusiveSupply: SupplierExclusiveSupply,
+  performances: RecordPerformance[],
+  marketHeatMap: Map<Genre, GenreMarketHeat>
+): SupplierInventoryItem | null => {
+  const availableRecords = allRecords.filter((r: VinylRecord) => 
+    r.genre === exclusiveSupply.genre && 
+    r.rarity >= exclusiveSupply.minRarity &&
+    r.rarity <= exclusiveSupply.maxRarity
+  )
+
+  if (availableRecords.length === 0) return null
+
+  const randomIndex = Math.floor(Math.random() * availableRecords.length)
+  const record = availableRecords[randomIndex] as VinylRecord
+
+  const genreHeat = getGenreMarketHeat(marketHeatMap, record.genre)
+  
+  const basePrice = record.costPrice * supplier.priceModifier
+  const heatAdjustedBasePrice = basePrice * genreHeat.priceModifier
+  const exclusiveDiscount = exclusiveSupply.priceBonus
+  const adjustedCostPrice = Math.round(heatAdjustedBasePrice * (1 - exclusiveDiscount))
+  
+  const stockRisk = calculateStockRisk(record, supplier, performances)
+  const baseTurnover = calculateExpectedTurnoverRate(record, performances)
+  const heatAdjustedTurnover = Math.max(0.05, Math.min(0.98, baseTurnover * genreHeat.demandModifier))
+  const baseProfitMargin = calculateHistoricalProfitMargin(record, performances, adjustedCostPrice)
+  const heatAdjustedProfitMargin = Math.max(0.05, baseProfitMargin * genreHeat.profitMarginModifier)
+  const basePerformance = calculateSalePerformanceScore(record, performances, adjustedCostPrice)
+  const heatPerformanceBonus = Math.round(genreHeat.heatValue * 15 - 7)
+  const salePerformanceScore = Math.max(0, Math.min(100, basePerformance + heatPerformanceBonus))
+  
+  const heatQuantityBoost = genreHeat.heatValue > 0.7 ? 1 : genreHeat.heatValue < 0.35 ? -1 : 0
+  const quantityAvailable = Math.max(2, Math.floor(2 + Math.random() * 4) + heatQuantityBoost)
+  
+  return {
+    record,
+    supplierId: supplier.id,
+    adjustedCostPrice,
+    stockRisk: stockRisk.risk,
+    riskFactor: stockRisk.factor,
+    expectedTurnoverRate: heatAdjustedTurnover,
+    historicalProfitMargin: heatAdjustedProfitMargin,
+    salePerformanceScore,
+    quantityAvailable,
+    isSpecialOffer: false,
+    discountPercent: Math.round(exclusiveDiscount * 100),
+    marketHeat: genreHeat.heatLevel,
+    marketHeatValue: genreHeat.heatValue,
+    marketPriceModifier: genreHeat.priceModifier,
+    marketTrend: genreHeat.trend,
+    isExclusiveSupply: true,
+    exclusiveSupplyId: exclusiveSupply.id
+  }
+}
+
+export const generateExclusiveSupplierInventory = (
+  supplier: Supplier,
+  relationship: SupplierRelationship,
+  performances: RecordPerformance[],
+  marketHeatMap: Map<Genre, GenreMarketHeat>,
+  excludeRecordIds: string[] = []
+): SupplierInventoryItem[] => {
+  const exclusiveSupplies = getExclusiveSuppliesForSupplier(supplier, relationship)
+  const tierConfig = getContractTierConfig(relationship.contractTier)
+  
+  const items: SupplierInventoryItem[] = []
+  const usedRecordIds = new Set(excludeRecordIds)
+  
+  for (let i = 0; i < tierConfig.exclusiveSlotCount && i < exclusiveSupplies.length; i++) {
+    const supply = exclusiveSupplies[i]
+    const item = generateExclusiveInventoryItem(supplier, supply, performances, marketHeatMap)
+    
+    if (item && !usedRecordIds.has(item.record.id)) {
+      items.push(item)
+      usedRecordIds.add(item.record.id)
+    }
+  }
+  
+  return items
 }

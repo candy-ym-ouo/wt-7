@@ -564,6 +564,13 @@ const currentSupplierMilestones = computed(() => {
             </div>
             
             <div 
+              v-if="supplierItem.isExclusiveSupply" 
+              class="exclusive-supply-badge"
+            >
+              💎 专属货源 -{{ supplierItem.discountPercent }}%
+            </div>
+            
+            <div 
               v-if="shouldShowHeatBadge(supplierItem.marketHeat)" 
               class="market-heat-badge"
               :style="{ background: getHeatColor(supplierItem.marketHeat), color: '#fff' }"
@@ -839,6 +846,10 @@ const currentSupplierMilestones = computed(() => {
           <div class="modal-body">
             <div v-if="selectedSupplierItem.isSpecialOffer" class="modal-special-banner">
               🔥 限时特价！立省 {{ selectedSupplierItem.discountPercent }}%
+            </div>
+
+            <div v-if="selectedSupplierItem.isExclusiveSupply" class="modal-exclusive-banner">
+              💎 专属合约货源！立省 {{ selectedSupplierItem.discountPercent }}%
             </div>
 
             <RecordCard 
@@ -1310,6 +1321,22 @@ const currentSupplierMilestones = computed(() => {
   box-shadow: 0 2px 8px rgba(245, 101, 101, 0.4);
 }
 
+.exclusive-supply-badge {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  padding: 4px 12px;
+  background: linear-gradient(135deg, #d4af37, #f7e273, #d4af37);
+  color: #4a3728;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.5);
+  border: 1px solid #b8941f;
+}
+
 .recommendation-badge {
   position: absolute;
   top: -8px;
@@ -1505,6 +1532,18 @@ const currentSupplierMilestones = computed(() => {
   font-size: 13px;
   font-weight: 600;
   color: #f56565;
+}
+
+.modal-exclusive-banner {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(247, 226, 115, 0.2));
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d4af37;
+  margin-top: 8px;
 }
 
 .condition-info-row {

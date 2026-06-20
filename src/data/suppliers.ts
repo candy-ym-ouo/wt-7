@@ -111,7 +111,7 @@ export const getSupplierTypeColor = (type: SupplierType): string => {
   return colors[type]
 }
 
-const calculateStockRisk = (
+export const calculateStockRisk = (
   record: Record,
   supplier: Supplier,
   performances: RecordPerformance[]
@@ -145,7 +145,7 @@ const calculateStockRisk = (
   return { risk: 'high', factor: totalRisk }
 }
 
-const calculateExpectedTurnoverRate = (
+export const calculateExpectedTurnoverRate = (
   record: Record,
   performances: RecordPerformance[]
 ): number => {
@@ -163,7 +163,7 @@ const calculateExpectedTurnoverRate = (
   return Math.max(0.1, Math.min(0.95, baseRate + rarityModifier + conditionModifier))
 }
 
-const calculateHistoricalProfitMargin = (
+export const calculateHistoricalProfitMargin = (
   record: Record,
   performances: RecordPerformance[],
   adjustedCostPrice?: number
@@ -178,7 +178,7 @@ const calculateHistoricalProfitMargin = (
   return (record.marketPrice - costBasis) / record.marketPrice
 }
 
-const calculateSalePerformanceScore = (
+export const calculateSalePerformanceScore = (
   record: Record,
   performances: RecordPerformance[],
   adjustedCostPrice?: number
