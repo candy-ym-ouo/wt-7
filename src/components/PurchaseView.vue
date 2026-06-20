@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useGameStore } from '@/stores/game'
 import RecordCard from './RecordCard.vue'
-import type { Record, SupplierInventoryItem } from '@/types'
+import type { Record, SupplierInventoryItem, Genre } from '@/types'
 import { ref, computed } from 'vue'
 import { getConditionColor, getConditionScoreFromLabel } from '@/data/condition'
 import { 
@@ -118,6 +118,75 @@ const formatPriceModifier = (mod: number) => {
   if (pct < 0) return `${pct}%`
   return '持平'
 }
+
+const nextDayReservations = computed(() => {
+  const nextDay = gameStore.currentDay + 1
+  return gameStore.reservations.filter(r => r.targetDay === nextDay && (r.status === 'pending' || r.status === 'confirmed'))
+})
+
+const nextDayRequiredRecords = computed(() => {
+  const recordMap = new Map<string, { count: number; title: string; genre: Genre; marketPrice: number }>()
+  for (const r of nextDayReservations.value) {
+    for (const item of r.items) {
+      if (!item.isFulfilled) {
+        const existing = recordMap.get(item.recordId)
+        if (existing) {
+          existing.count += item.quantity
+        } else {
+          const rec = gameStore.getRecordById(item.recordId)
+          recordMap.set(item.recordId, {
+            count: item.quantity,
+            title: item.recordTitle,
+            genre: item.genre,
+            marketPrice: rec?.marketPrice || 300
+          })
+        }
+      }
+    }
+  }
+  return Array.from(recordMap.entries()).map(([id, data]) => ({ id, ...data }))
+})
+
+const nextDayRequiredGenres = computed(() => {
+  const genreMap = new Map<Genre, number>()
+  for (const item of nextDayRequiredRecords.value) {
+    const existing = genreMap.get(item.genre) || 0
+    genreMap.set(item.genre, existing + item.count)
+  }
+  return Array.from(genreMap.entries())
+    .map(([genre, count]) => ({ genre, count }))
+    .sort((a, b) => b.count - a.count)
+})
+
+const nextDayReservationEstimatedRevenue = computed(() => {
+  return nextDayRequiredRecords.value.reduce((sum, item) => sum + item.marketPrice * item.count, 0)
+})
+
+const nextDayReservationDeposit = computed(() => {
+  return nextDayReservations.value.reduce((sum, r) => sum + r.deposit, 0)
+})
+
+const isRecordInInventory = (recordId: string) => {
+  return gameStore.inventory.some(i => i.record.id === recordId)
+}
+
+const getInventoryStock = (recordId: string) => {
+  const item = gameStore.inventory.find(i => i.record.id === recordId)
+  return item ? item.quantity : 0
+}
+
+const genreEmoji: { [key in Genre]: string } = {
+  Jazz: '🎷',
+  Rock: '🎸',
+  Soul: '🎤',
+  Funk: '🕺',
+  Disco: '💃',
+  Classical: '🎻',
+  Blues: '🎹',
+  Pop: '🎵',
+  Electronic: '🎧',
+  Folk: '🪕'
+}
 </script>
 
 <template>
@@ -195,6 +264,112 @@ const formatPriceModifier = (mod: number) => {
           <span class="rec-text">{{ rec.reason }}</span>
         </div>
       </div>
+    </div>
+
+    <div v-if="nextDayReservations.length > 0" class="reservation-prep-card card">
+      <div class="rp-header">
+        <span class="rp-icon">📋</span>
+        <span class="rp-title">明日预约备货清单</span>
+        <span class="rp-badge">{{ nextDayReservations.length }} 单</span>
+      </div>
+
+      <div class="rp-stats">
+        <div class="rp-stat">
+          <span class="rp-stat-icon">💰</span>
+          <div class="rp-stat-info">
+            <span class="rp-stat-label">已收定金</span>
+            <span class="rp-stat-value">+¥{{ nextDayReservationDeposit }}</span>
+          </div>
+        </div>
+        <div class="rp-stat">
+          <span class="rp-stat-icon">📈</span>
+          <div class="rp-stat-info">
+            <span class="rp-stat-label">预估营收</span>
+            <span class="rp-stat-value">¥{{ nextDayReservationEstimatedRevenue }}</span>
+          </div>
+        </div>
+        <div class="rp-stat">
+          <span class="rp-stat-icon">🎯</span>
+          <div class="rp-stat-info">
+            <span class="rp-stat-label">需备货</span>
+            <span class="rp-stat-value">{{ nextDayRequiredRecords.length }} 种</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="nextDayRequiredGenres.length > 0" class="rp-genres">
+        <span class="rp-section-label">📊 需求流派分布</span>
+        <div class="rp-genre-tags">
+          <span 
+            v-for="g in nextDayRequiredGenres" 
+            :key="g.genre" 
+            class="rp-genre-tag"
+          >
+            {{ genreEmoji[g.genre] }} {{ g.genre }} ×{{ g.count }}
+          </span>
+        </div>
+      </div>
+
+      <div class="rp-records-section">
+        <span class="rp-section-label">🎵 需准备唱片清单</span>
+        <div class="rp-records-list">
+          <div 
+            v-for="rec in nextDayRequiredRecords" 
+            :key="rec.id"
+            class="rp-record-item"
+            :class="{ 'in-stock': isRecordInInventory(rec.id) }"
+          >
+            <div class="rp-record-info">
+              <span class="rp-record-genre">{{ genreEmoji[rec.genre] }}</span>
+              <div class="rp-record-detail">
+                <span class="rp-record-title">{{ rec.title }}</span>
+                <span class="rp-record-price">市价 ¥{{ rec.marketPrice }}</span>
+              </div>
+            </div>
+            <div class="rp-record-qty">
+              <span class="rp-qty-label">需 ×{{ rec.count }}</span>
+              <span 
+                class="rp-stock-status" 
+                :class="{ 
+                  sufficient: getInventoryStock(rec.id) >= rec.count,
+                  insufficient: getInventoryStock(rec.id) > 0 && getInventoryStock(rec.id) < rec.count,
+                  'out-of-stock': getInventoryStock(rec.id) === 0
+                }"
+              >
+                {{ getInventoryStock(rec.id) === 0 ? '❌ 缺货' : 
+                   getInventoryStock(rec.id) >= rec.count ? '✅ 备齐' : 
+                   `⚠️ 差${rec.count - getInventoryStock(rec.id)}张` }}
+                <span class="rp-stock-count">(库存 {{ getInventoryStock(rec.id) }})</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="nextDayReservations.length > 0" class="rp-customers">
+        <span class="rp-section-label">👥 预约顾客名单</span>
+        <div class="rp-customer-list">
+          <div v-for="res in nextDayReservations" :key="res.id" class="rp-customer-item">
+            <span class="rp-customer-avatar">{{ res.customerAvatar }}</span>
+            <div class="rp-customer-info">
+              <span class="rp-customer-name">{{ res.customerName }}</span>
+              <span class="rp-customer-meta">
+                {{ res.timeSlot === 'afternoon' ? '☀️ 午后' : '🌙 夜场' }}
+                <span v-if="res.memberLevel"> · {{ res.memberLevel }}会员</span>
+                · 预算 ¥{{ res.totalBudget }}
+              </span>
+            </div>
+            <span class="rp-customer-items">{{ res.items.length }} 张</span>
+          </div>
+        </div>
+      </div>
+
+      <p v-if="nextDayRequiredRecords.some(r => getInventoryStock(r.id) < r.count)" class="rp-warning">
+        ⚠️ 有 {{ nextDayRequiredRecords.filter(r => getInventoryStock(r.id) < r.count).length }} 种唱片库存不足，请及时补货！
+      </p>
+      <p v-else class="rp-success">
+        ✅ 所有预约唱片备货充足！
+      </p>
     </div>
 
     <div class="view-tabs">
@@ -1518,5 +1693,284 @@ const formatPriceModifier = (mod: number) => {
 .inventory-section .section-header {
   padding: 0;
   margin-bottom: 12px;
+}
+
+.reservation-prep-card {
+  margin: 0 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(159, 122, 234, 0.08) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+
+.rp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rp-icon {
+  font-size: 20px;
+}
+
+.rp-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rp-badge {
+  padding: 3px 10px;
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rp-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.rp-stat-icon {
+  font-size: 18px;
+}
+
+.rp-stat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rp-stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.rp-stat-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rp-section-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.rp-genres {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.rp-genre-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rp-genre-tag {
+  font-size: 11px;
+  padding: 4px 10px;
+  background: rgba(102, 126, 234, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 12px;
+  color: #667eea;
+  font-weight: 500;
+}
+
+.rp-records-section {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.rp-records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-record-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+
+.rp-record-item.in-stock {
+  border-color: rgba(72, 187, 120, 0.3);
+  background: rgba(72, 187, 120, 0.05);
+}
+
+.rp-record-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rp-record-genre {
+  font-size: 20px;
+}
+
+.rp-record-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rp-record-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rp-record-price {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.rp-record-qty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.rp-qty-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-orange);
+}
+
+.rp-stock-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rp-stock-status.sufficient {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--success);
+}
+
+.rp-stock-status.insufficient {
+  background: rgba(237, 137, 54, 0.15);
+  color: var(--warning);
+}
+
+.rp-stock-status.out-of-stock {
+  background: rgba(245, 101, 101, 0.15);
+  color: var(--danger);
+}
+
+.rp-stock-count {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.rp-customers {
+  margin-bottom: 12px;
+}
+
+.rp-customer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-customer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.rp-customer-avatar {
+  font-size: 20px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border-radius: 50%;
+}
+
+.rp-customer-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rp-customer-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rp-customer-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.rp-customer-items {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-gold);
+}
+
+.rp-warning {
+  margin: 12px 0 0 0;
+  padding: 10px 12px;
+  background: rgba(245, 101, 101, 0.1);
+  border: 1px solid rgba(245, 101, 101, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--danger);
+  font-weight: 500;
+  text-align: center;
+}
+
+.rp-success {
+  margin: 12px 0 0 0;
+  padding: 10px 12px;
+  background: rgba(72, 187, 120, 0.1);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--success);
+  font-weight: 500;
+  text-align: center;
 }
 </style>

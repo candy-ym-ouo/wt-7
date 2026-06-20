@@ -118,6 +118,39 @@ const nextWordOfMouth = computed(() => {
   return next ? next.name : null
 })
 
+const todaysReservations = computed(() => {
+  return gameStore.reservations.filter(r => r.targetDay === gameStore.currentDay)
+})
+
+const fulfilledReservations = computed(() => {
+  return todaysReservations.value.filter(r => r.status === 'fulfilled')
+})
+
+const missedReservations = computed(() => {
+  return todaysReservations.value.filter(r => r.status === 'no_show' || r.status === 'cancelled')
+})
+
+const reservationTotalDeposit = computed(() => {
+  return todaysReservations.value.reduce((sum, r) => sum + r.deposit, 0)
+})
+
+const reservationReputationImpact = computed(() => {
+  const fulfilledBonus = fulfilledReservations.value.length * 2
+  const missedPenalty = missedReservations.value.length * 3
+  return fulfilledBonus - missedPenalty
+})
+
+const getReservationStatusLabel = (status: string) => {
+  const labels: Record<string, { label: string; color: string; icon: string }> = {
+    pending: { label: '待处理', color: '#ed8936', icon: '⏳' },
+    confirmed: { label: '已确认', color: '#4299e1', icon: '✅' },
+    fulfilled: { label: '已完成', color: '#48bb78', icon: '🎉' },
+    cancelled: { label: '已取消', color: '#a0aec0', icon: '❌' },
+    no_show: { label: '未到店', color: '#f56565', icon: '⚠️' }
+  }
+  return labels[status] || { label: status, color: '#666', icon: '❓' }
+}
+
 const todayEvents = computed(() => {
   if (!todayStats.value) return []
   return todayStats.value.events || []
@@ -293,6 +326,81 @@ const backToMenu = () => {
         <div class="member-total">
           <span>会员总数：</span>
           <span class="member-total-count">{{ gameStore.members.length }} 人</span>
+        </div>
+      </div>
+
+      <div v-if="todaysReservations.length > 0" class="reservation-settlement-card card">
+        <h3 class="rs-title">📋 预约订单结算</h3>
+
+        <div class="rs-stats-grid">
+          <div class="rs-stat-card total">
+            <span class="rs-stat-icon">📋</span>
+            <span class="rs-stat-value">{{ todaysReservations.length }}</span>
+            <span class="rs-stat-label">今日预约总数</span>
+          </div>
+          <div class="rs-stat-card fulfilled">
+            <span class="rs-stat-icon">✅</span>
+            <span class="rs-stat-value">{{ fulfilledReservations.length }}</span>
+            <span class="rs-stat-label">已完成订单</span>
+          </div>
+          <div class="rs-stat-card missed">
+            <span class="rs-stat-icon">⚠️</span>
+            <span class="rs-stat-value">{{ missedReservations.length }}</span>
+            <span class="rs-stat-label">失约/取消</span>
+          </div>
+          <div class="rs-stat-card deposit">
+            <span class="rs-stat-icon">💰</span>
+            <span class="rs-stat-value">¥{{ reservationTotalDeposit }}</span>
+            <span class="rs-stat-label">定金收入</span>
+          </div>
+        </div>
+
+        <div class="rs-reputation-impact" :class="{ positive: reservationReputationImpact >= 0, negative: reservationReputationImpact < 0 }">
+          <span class="rs-ri-label">声望影响</span>
+          <span class="rs-ri-value">
+            {{ reservationReputationImpact >= 0 ? '+' : '' }}{{ reservationReputationImpact }}
+            <span class="rs-ri-detail">
+              (完成+{{ fulfilledReservations.length * 2 }}，失约-{{ missedReservations.length * 3 }})
+            </span>
+          </span>
+        </div>
+
+        <div v-if="todaysReservations.length > 0" class="rs-list">
+          <span class="rs-list-label">预约明细</span>
+          <div class="rs-items">
+            <div v-for="res in todaysReservations" :key="res.id" class="rs-item">
+              <div class="rs-item-header">
+                <span class="rs-item-avatar">{{ res.customerAvatar }}</span>
+                <div class="rs-item-info">
+                  <span class="rs-item-name">{{ res.customerName }}</span>
+                  <span v-if="res.memberLevel" class="rs-item-level" :style="{ color: getLevelColor(res.memberLevel) }">
+                    {{ getLevelIcon(res.memberLevel) }} {{ memberBenefits.find(b => b.level === res.memberLevel)?.levelName }}
+                  </span>
+                </div>
+                <span 
+                  class="rs-item-status" 
+                  :style="{ background: getReservationStatusLabel(res.status).color + '20', color: getReservationStatusLabel(res.status).color }"
+                >
+                  {{ getReservationStatusLabel(res.status).icon }} {{ getReservationStatusLabel(res.status).label }}
+                </span>
+              </div>
+              <div class="rs-item-records">
+                <span v-for="(item, idx) in res.items" :key="idx" class="rs-record-tag" :class="{ fulfilled: item.isFulfilled }">
+                  {{ item.recordTitle }}
+                  <span v-if="item.isFulfilled" class="rs-record-check">✓</span>
+                </span>
+              </div>
+              <div class="rs-item-footer">
+                <span class="rs-item-time">
+                  {{ res.timeSlot === 'afternoon' ? '☀️ 午后' : '🌙 夜场' }}
+                </span>
+                <span class="rs-item-budget">
+                  预算 ¥{{ res.totalBudget }} · 定金 ¥{{ res.deposit }}
+                </span>
+              </div>
+              <p v-if="res.note" class="rs-item-note">"{{ res.note }}"</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2418,5 +2526,244 @@ const backToMenu = () => {
   font-weight: 600;
   color: var(--success);
   margin: 0;
+}
+
+.reservation-settlement-card {
+  margin: 0 16px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(159, 122, 234, 0.08) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+
+.rs-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.rs-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.rs-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 6px;
+  border-radius: 8px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.rs-stat-card.total {
+  background: rgba(102, 126, 234, 0.1);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+.rs-stat-card.fulfilled {
+  background: rgba(72, 187, 120, 0.1);
+  border-color: rgba(72, 187, 120, 0.3);
+}
+
+.rs-stat-card.missed {
+  background: rgba(245, 101, 101, 0.1);
+  border-color: rgba(245, 101, 101, 0.3);
+}
+
+.rs-stat-card.deposit {
+  background: rgba(246, 224, 94, 0.1);
+  border-color: rgba(246, 224, 94, 0.3);
+}
+
+.rs-stat-icon {
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+
+.rs-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.rs-stat-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.rs-reputation-impact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+
+.rs-reputation-impact.positive {
+  background: rgba(72, 187, 120, 0.1);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.rs-reputation-impact.negative {
+  background: rgba(245, 101, 101, 0.1);
+  border: 1px solid rgba(245, 101, 101, 0.3);
+}
+
+.rs-ri-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.rs-ri-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.rs-reputation-impact.positive .rs-ri-value {
+  color: var(--success);
+}
+
+.rs-reputation-impact.negative .rs-ri-value {
+  color: var(--danger);
+}
+
+.rs-ri-detail {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.rs-list {
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+.rs-list-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.rs-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rs-item {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+}
+
+.rs-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rs-item-avatar {
+  font-size: 24px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border-radius: 50%;
+}
+
+.rs-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rs-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rs-item-level {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.rs-item-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.rs-item-records {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.rs-record-tag {
+  font-size: 10px;
+  padding: 3px 8px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rs-record-tag.fulfilled {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--success);
+}
+
+.rs-record-check {
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.rs-item-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.rs-item-time {
+  font-weight: 500;
+}
+
+.rs-item-budget {
+  font-weight: 500;
+}
+
+.rs-item-note {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 0;
+  padding: 6px 8px;
+  background: rgba(159, 122, 234, 0.08);
+  border-radius: 6px;
+  border-left: 2px solid #9f7aea;
 }
 </style>
