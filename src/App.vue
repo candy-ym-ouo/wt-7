@@ -12,6 +12,7 @@ import StaffView from './components/StaffView.vue'
 import AuctionView from './components/AuctionView.vue'
 import PresaleView from './components/PresaleView.vue'
 import ShopRenovationView from './components/ShopRenovationView.vue'
+import MarketTourView from './components/MarketTourView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -19,6 +20,7 @@ const showStaff = ref(false)
 const showAuction = ref(false)
 const showPresale = ref(false)
 const showRenovation = ref(false)
+const showMarketTour = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -49,6 +51,10 @@ const togglePresale = () => {
 const toggleRenovation = () => {
   showRenovation.value = !showRenovation.value
 }
+
+const toggleMarketTour = () => {
+  showMarketTour.value = !showMarketTour.value
+}
 </script>
 
 <template>
@@ -58,6 +64,7 @@ const toggleRenovation = () => {
     <AuctionView v-if="showAuction" @close="toggleAuction" />
     <PresaleView v-if="showPresale" @close="togglePresale" />
     <ShopRenovationView v-if="showRenovation" @close="toggleRenovation" />
+    <MarketTourView v-if="showMarketTour" @close="toggleMarketTour" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -71,6 +78,7 @@ const toggleRenovation = () => {
         @auction="toggleAuction"
         @presale="togglePresale"
         @renovation="toggleRenovation"
+        @market-tour="toggleMarketTour"
       />
       
       <main class="main-content">

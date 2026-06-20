@@ -1397,3 +1397,188 @@ export interface SupplierRelationshipBonusSummary {
   nextContractTier: SupplierContractConfig | null
   trustProgressPercent: number
 }
+
+export type MarketTourPhase = 'planning' | 'traveling' | 'setup' | 'selling' | 'event' | 'settlement' | 'return'
+
+export type CityTier = 'small' | 'medium' | 'large' | 'metropolis'
+
+export interface MarketCity {
+  id: string
+  name: string
+  tier: CityTier
+  icon: string
+  description: string
+  travelCost: number
+  travelDays: number
+  minLevel: number
+  baseCustomerCount: number
+  baseBudgetMultiplier: number
+  preferredGenres: Genre[]
+  rentCost: number
+  eventDensity: number
+  reputationReward: number
+  unlockCost?: number
+  isUnlocked: boolean
+}
+
+export interface MarketInventoryItem {
+  record: Record
+  quantity: number
+  conditionScore: number
+  actualCostPrice: number
+  sourceInventoryId: string
+  soldQuantity: number
+  salePrice: number
+}
+
+export type MarketEventCategory = 'weather' | 'crowd' | 'media' | 'special_guest' | 'competition' | 'accident' | 'opportunity'
+
+export type MarketEventRarity = 'common' | 'uncommon' | 'rare' | 'legendary'
+
+export interface MarketEventEffect {
+  customerCountModifier: number
+  budgetModifier: number
+  buyChanceModifier: number
+  priceModifier: number
+  reputationChange: number
+  budgetChange: number
+  duration: number
+}
+
+export interface MarketEventChoice {
+  id: string
+  label: string
+  description: string
+  icon: string
+  effects: MarketEventEffect
+  cost?: number
+  probabilityModifier?: number
+}
+
+export interface MarketEventConfig {
+  id: string
+  name: string
+  icon: string
+  description: string
+  category: MarketEventCategory
+  rarity: MarketEventRarity
+  minCityTier: CityTier
+  choices: MarketEventChoice[]
+  triggerMessage: string
+}
+
+export interface ActiveMarketEvent {
+  config: MarketEventConfig
+  selectedChoice: MarketEventChoice | null
+  triggeredAt: number
+  resolved: boolean
+  activeEffects: MarketEventEffect
+}
+
+export type CustomerFlowWave = 'low' | 'normal' | 'peak' | 'surge'
+
+export interface CustomerFlowState {
+  currentWave: CustomerFlowWave
+  waveLabel: string
+  waveIcon: string
+  customerMultiplier: number
+  budgetMultiplier: number
+  buyChanceBonus: number
+  nextWaveIn: number
+  waveProgress: number
+}
+
+export interface MarketSaleRecord {
+  id: string
+  recordId: string
+  recordTitle: string
+  salePrice: number
+  costPrice: number
+  profit: number
+  customerName: string
+  customerAvatar: string
+  satisfaction: number
+  wasBargained: boolean
+  wave: CustomerFlowWave
+  timestamp: number
+}
+
+export interface MarketSettlement {
+  cityId: string
+  cityName: string
+  startDay: number
+  endDay: number
+  totalDays: number
+  totalRevenue: number
+  totalCost: number
+  totalProfit: number
+  salesCount: number
+  avgSatisfaction: number
+  peakSalesWave: CustomerFlowWave
+  eventsEncountered: number
+  travelCost: number
+  rentCost: number
+  otherCosts: number
+  reputationGained: number
+  unsoldItems: { recordId: string; title: string; quantity: number }[]
+  bonusRewards: string[]
+}
+
+export interface MarketTourState {
+  isActive: boolean
+  phase: MarketTourPhase
+  currentCityId: string | null
+  selectedCityId: string | null
+  travelDaysRemaining: number
+  daysAtMarket: number
+  maxDaysAtMarket: number
+  temporaryInventory: MarketInventoryItem[]
+  marketInventoryValue: number
+  activeEvent: ActiveMarketEvent | null
+  eventHistory: ActiveMarketEvent[]
+  customerFlow: CustomerFlowState
+  marketSales: MarketSaleRecord[]
+  dailyMarketRevenue: number[]
+  dailyMarketCost: number[]
+  dailyMarketSalesCount: number[]
+  currentMarketDayRevenue: number
+  currentMarketDayCost: number
+  currentMarketDaySalesCount: number
+  currentMarketDaySatisfactionSum: number
+  currentMarketDayCustomersServed: number
+  pendingSettlement: MarketSettlement | null
+  settlementHistory: MarketSettlement[]
+  unlockedCityIds: string[]
+  totalMarketProfit: number
+  totalMarketSales: number
+  reputationFromMarkets: number
+  preferredCityIds: string[]
+}
+
+export interface MarketCityStats {
+  totalVisits: number
+  totalRevenue: number
+  totalProfit: number
+  avgSatisfaction: number
+  bestEvent: string | null
+  peakDay: number
+}
+
+export interface MarketCustomer {
+  id: string
+  name: string
+  avatar: string
+  budget: number
+  favoriteGenres: Genre[]
+  priceRange: [number, number]
+  preferredRarity: number[]
+  patience: number
+  maxPatience: number
+  satisfaction: number
+  willBargain: boolean
+  arrivalOrder: number
+  isLocalCollector: boolean
+  isTourist: boolean
+  tipMultiplier: number
+  quote: string
+}

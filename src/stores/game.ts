@@ -225,6 +225,23 @@ import {
   getBreachTypeIcon,
   generateExclusiveSupplierInventory
 } from '@/data/supplierRelationship'
+import {
+  createInitialMarketTourState,
+  getCitiesForLevel,
+  getCityById,
+  getRandomMarketEvent,
+  generateCustomerFlow,
+  generateDailyMarketCustomers,
+  createMarketInventoryFromStore
+} from '@/data/marketTour'
+import type {
+  MarketTourState,
+  MarketCity,
+  MarketInventoryItem,
+  MarketCustomer,
+  MarketSettlement,
+  CustomerFlowWave
+} from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -370,6 +387,19 @@ export const useGameStore = defineStore('game', () => {
   const presaleStats = ref<PresaleStats>(createInitialPresaleStats())
   const nextPresaleRefresh = ref(1)
   const selectedPresaleEventId = ref<string | null>(null)
+
+  const marketTour = ref<MarketTourState>(createInitialMarketTourState())
+  const marketCustomers = ref<MarketCustomer[]>([])
+  const currentMarketCustomerIndex = ref(0)
+  const currentMarketBargain = ref<{
+    active: boolean
+    recordId: string | null
+    initialPrice: number
+    customerOffer: number | null
+    sellerCounter: number | null
+    round: number
+    maxRounds: number
+  } | null>(null)
 
   const totalFrozenFunds = computed(() => {
     return frozenFunds.value
@@ -4903,6 +4933,778 @@ export const useGameStore = defineStore('game', () => {
     startLevel(currentLevel.value)
   }
 
+  const availableMarketCities = computed((): MarketCity[] => {
+    const levelCities = getCitiesForLevel(currentLevel.value)
+    return levelCities.map(c => ({
+      ...c,
+      isUnlocked: marketTour.value.unlockedCityIds.includes(c.id)
+    }))
+  })
+
+  const currentMarketCity = computed((): MarketCity | null => {
+    if (!marketTour.value.currentCityId) return null
+    return getCityById(marketTour.value.currentCityId)
+  })
+
+  const getCurrentMarketCustomer = (): MarketCustomer | null => {
+    if (marketCustomers.value.length === 0) return null
+    return marketCustomers.value[currentMarketCustomerIndex.value] || null
+  }
+
+  const getMarketInventoryValue = (): number => {
+    return marketTour.value.temporaryInventory.reduce((sum, item) => {
+      const remaining = item.quantity - item.soldQuantity
+      return sum + remaining * item.actualCostPrice
+    }, 0)
+  }
+
+  const getMarketSalesStats = () => {
+    const totalRevenue = marketTour.value.marketSales.reduce((s, r) => s + r.salePrice, 0)
+    const totalCost = marketTour.value.marketSales.reduce((s, r) => s + r.costPrice, 0)
+    const avgSatisfaction = marketTour.value.marketSales.length > 0
+      ? marketTour.value.marketSales.reduce((s, r) => s + r.satisfaction, 0) / marketTour.value.marketSales.length
+      : 0
+    const waveCounts: { [key in CustomerFlowWave]: number } = { low: 0, normal: 0, peak: 0, surge: 0 }
+    for (const s of marketTour.value.marketSales) {
+      waveCounts[s.wave] = (waveCounts[s.wave] || 0) + 1
+    }
+    let peakWave: CustomerFlowWave = 'normal'
+    let peakCount = 0
+    for (const [w, c] of Object.entries(waveCounts) as [CustomerFlowWave, number][]) {
+      if (c > peakCount) {
+        peakCount = c
+        peakWave = w
+      }
+    }
+    return {
+      totalRevenue,
+      totalCost,
+      totalProfit: totalRevenue - totalCost,
+      salesCount: marketTour.value.marketSales.length,
+      avgSatisfaction,
+      peakSalesWave: peakWave
+    }
+  }
+
+  const startMarketPlanning = () => {
+    marketTour.value = {
+      ...createInitialMarketTourState(),
+      settlementHistory: marketTour.value.settlementHistory,
+      unlockedCityIds: marketTour.value.unlockedCityIds,
+      totalMarketProfit: marketTour.value.totalMarketProfit,
+      totalMarketSales: marketTour.value.totalMarketSales,
+      reputationFromMarkets: marketTour.value.reputationFromMarkets,
+      preferredCityIds: marketTour.value.preferredCityIds,
+      isActive: true,
+      phase: 'planning'
+    }
+    marketCustomers.value = []
+    currentMarketCustomerIndex.value = 0
+    currentMarketBargain.value = null
+  }
+
+  const selectMarketCity = (cityId: string): { success: boolean; message: string } => {
+    const city = getCityById(cityId)
+    if (!city) return { success: false, message: '城市不存在' }
+    if (!marketTour.value.unlockedCityIds.includes(cityId)) {
+      return { success: false, message: '该城市尚未解锁' }
+    }
+    if (city.minLevel > currentLevel.value) {
+      return { success: false, message: `需要达到第${city.minLevel}关才能前往` }
+    }
+    marketTour.value.selectedCityId = cityId
+    return { success: true, message: `已选择${city.name}` }
+  }
+
+  const unlockMarketCity = (cityId: string): { success: boolean; message: string } => {
+    const city = getCityById(cityId)
+    if (!city) return { success: false, message: '城市不存在' }
+    if (marketTour.value.unlockedCityIds.includes(cityId)) {
+      return { success: false, message: '该城市已解锁' }
+    }
+    const cost = city.unlockCost || 0
+    if (budget.value < cost) {
+      return { success: false, message: `资金不足！需要¥${cost}` }
+    }
+    budget.value -= cost
+    marketTour.value.unlockedCityIds.push(cityId)
+    return { success: true, message: `成功解锁${city.name}！` }
+  }
+
+  const setMarketInventory = (
+    selectedRecordIds: string[],
+    quantities: Map<string, number>
+  ): { success: boolean; message: string } => {
+    if (!marketTour.value.selectedCityId) {
+      return { success: false, message: '请先选择目的地城市' }
+    }
+    
+    const tempInv = createMarketInventoryFromStore(inventory.value, selectedRecordIds, quantities)
+    
+    if (tempInv.length === 0) {
+      return { success: false, message: '请选择至少一张唱片' }
+    }
+    
+    for (const item of tempInv) {
+      const storeItem = inventory.value.find(i => i.record.id === item.record.id)
+      if (storeItem) {
+        if (storeItem.quantity < item.quantity) {
+          return { success: false, message: `《${item.record.title}》库存不足` }
+        }
+      }
+    }
+    
+    for (const item of tempInv) {
+      const storeItem = inventory.value.find(i => i.record.id === item.record.id)
+      if (storeItem) {
+        storeItem.quantity -= item.quantity
+      }
+    }
+    
+    inventory.value = inventory.value.filter(i => i.quantity > 0)
+    
+    marketTour.value.temporaryInventory = tempInv
+    marketTour.value.marketInventoryValue = getMarketInventoryValue()
+    
+    return { success: true, message: `已选${tempInv.length}种唱片，准备出发！` }
+  }
+
+  const adjustMarketSalePrice = (recordId: string, newPrice: number): { success: boolean; message: string } => {
+    const item = marketTour.value.temporaryInventory.find(i => i.record.id === recordId)
+    if (!item) return { success: false, message: '商品不存在' }
+    if (newPrice < item.actualCostPrice) {
+      return { success: false, message: '售价不能低于进价' }
+    }
+    item.salePrice = newPrice
+    return { success: true, message: '售价已调整' }
+  }
+
+  const startMarketTrip = (): { success: boolean; message: string } => {
+    if (!marketTour.value.selectedCityId) {
+      return { success: false, message: '请先选择目的地' }
+    }
+    const city = getCityById(marketTour.value.selectedCityId)
+    if (!city) return { success: false, message: '城市不存在' }
+    
+    if (marketTour.value.temporaryInventory.length === 0) {
+      return { success: false, message: '请先准备临时库存' }
+    }
+    
+    if (budget.value < city.travelCost) {
+      return { success: false, message: `旅费不足！需要¥${city.travelCost}` }
+    }
+    
+    budget.value -= city.travelCost
+    marketTour.value.currentMarketDayCost += city.travelCost
+    
+    marketTour.value.currentCityId = marketTour.value.selectedCityId
+    marketTour.value.travelDaysRemaining = city.travelDays
+    marketTour.value.daysAtMarket = 0
+    marketTour.value.phase = 'traveling'
+    
+    return { success: true, message: `出发前往${city.name}！` }
+  }
+
+  const advanceMarketDay = (): { success: boolean; message: string; phase?: string } => {
+    if (!marketTour.value.isActive) {
+      return { success: false, message: '没有进行中的市集' }
+    }
+    
+    const city = currentMarketCity.value
+    if (!city) return { success: false, message: '城市信息错误' }
+    
+    if (marketTour.value.phase === 'traveling') {
+      marketTour.value.travelDaysRemaining--
+      if (marketTour.value.travelDaysRemaining <= 0) {
+        marketTour.value.phase = 'setup'
+        marketTour.value.daysAtMarket = 0
+        marketTour.value.customerFlow = generateCustomerFlow(city.tier, 0)
+        return { success: true, message: `已抵达${city.name}！准备布置摊位`, phase: 'setup' }
+      }
+      return { success: true, message: `旅途中...还剩${marketTour.value.travelDaysRemaining}天`, phase: 'traveling' }
+    }
+    
+    if (marketTour.value.phase === 'setup') {
+      marketTour.value.phase = 'selling'
+      marketTour.value.daysAtMarket = 1
+      
+      if (budget.value < city.rentCost) {
+        return { success: false, message: `摊位租金不足！需要¥${city.rentCost}` }
+      }
+      budget.value -= city.rentCost
+      marketTour.value.currentMarketDayCost += city.rentCost
+      
+      const repModifier = 1 + (shopReputation.value - 50) / 100
+      marketCustomers.value = generateDailyMarketCustomers(
+        city,
+        marketTour.value.customerFlow,
+        repModifier,
+        getUnlockedGenres(currentLevel.value)
+      )
+      currentMarketCustomerIndex.value = 0
+      
+      if (Math.random() < city.eventDensity * 0.5) {
+        triggerMarketEvent()
+      }
+      
+      return { success: true, message: `市集第1天开始！今日${marketCustomers.value.length}位顾客`, phase: 'selling' }
+    }
+    
+    if (marketTour.value.phase === 'selling') {
+      marketTour.value.dailyMarketRevenue.push(marketTour.value.currentMarketDayRevenue)
+      marketTour.value.dailyMarketCost.push(marketTour.value.currentMarketDayCost)
+      marketTour.value.dailyMarketSalesCount.push(marketTour.value.currentMarketDaySalesCount)
+      
+      if (marketTour.value.daysAtMarket >= marketTour.value.maxDaysAtMarket) {
+        marketTour.value.phase = 'settlement'
+        return { success: true, message: '市集结束，准备结算', phase: 'settlement' }
+      }
+      
+      marketTour.value.daysAtMarket++
+      resetMarketDayStats()
+      
+      if (budget.value < city.rentCost) {
+        marketTour.value.phase = 'settlement'
+        return { success: false, message: `租金不足，提前结束市集`, phase: 'settlement' }
+      }
+      budget.value -= city.rentCost
+      marketTour.value.currentMarketDayCost += city.rentCost
+      
+      adjustMarketCustomerFlow()
+      
+      const repModifier = 1 + (shopReputation.value - 50) / 100
+      marketCustomers.value = generateDailyMarketCustomers(
+        city,
+        marketTour.value.customerFlow,
+        repModifier,
+        getUnlockedGenres(currentLevel.value)
+      )
+      currentMarketCustomerIndex.value = 0
+      
+      if (Math.random() < city.eventDensity) {
+        triggerMarketEvent()
+      }
+      
+      return { success: true, message: `市集第${marketTour.value.daysAtMarket}天开始！`, phase: 'selling' }
+    }
+    
+    return { success: false, message: '当前阶段无法推进' }
+  }
+
+  const resetMarketDayStats = () => {
+    marketTour.value.currentMarketDayRevenue = 0
+    marketTour.value.currentMarketDayCost = 0
+    marketTour.value.currentMarketDaySalesCount = 0
+    marketTour.value.currentMarketDaySatisfactionSum = 0
+    marketTour.value.currentMarketDayCustomersServed = 0
+  }
+
+  const adjustMarketCustomerFlow = () => {
+    const city = currentMarketCity.value
+    if (!city) return
+    
+    marketTour.value.customerFlow.nextWaveIn--
+    if (marketTour.value.customerFlow.nextWaveIn <= 0) {
+      marketTour.value.customerFlow = generateCustomerFlow(city.tier, marketTour.value.daysAtMarket)
+    }
+    
+    if (marketTour.value.activeEvent && !marketTour.value.activeEvent.resolved) {
+      const eff = marketTour.value.activeEvent.activeEffects
+      marketTour.value.customerFlow.customerMultiplier = Math.max(0.2, 
+        marketTour.value.customerFlow.customerMultiplier * (1 + eff.customerCountModifier)
+      )
+      marketTour.value.customerFlow.budgetMultiplier = Math.max(0.5,
+        marketTour.value.customerFlow.budgetMultiplier * (1 + eff.budgetModifier)
+      )
+      marketTour.value.customerFlow.buyChanceBonus += eff.buyChanceModifier
+    }
+  }
+
+  const getMarketRecommendations = (customer: MarketCustomer | null): {
+    item: MarketInventoryItem
+    score: number
+    matchReasons: string[]
+  }[] => {
+    if (!customer) return []
+    
+    const results: { item: MarketInventoryItem; score: number; matchReasons: string[] }[] = []
+    
+    for (const item of marketTour.value.temporaryInventory) {
+      if (item.quantity - item.soldQuantity <= 0) continue
+      
+      let score = 50
+      const reasons: string[] = []
+      
+      const genreMatch = customer.favoriteGenres.includes(item.record.genre)
+      if (genreMatch) {
+        score += 25
+        reasons.push('风格匹配')
+      }
+      
+      const rarityMatch = customer.preferredRarity.includes(item.record.rarity)
+      if (rarityMatch) {
+        score += 15
+        reasons.push('稀有度偏好')
+      }
+      
+      const priceInRange = item.salePrice >= customer.priceRange[0] && item.salePrice <= customer.priceRange[1]
+      if (priceInRange) {
+        score += 15
+        reasons.push('价格合适')
+      } else if (item.salePrice < customer.priceRange[0]) {
+        score += 5
+      } else {
+        score -= 10
+      }
+      
+      const conditionBonus = (item.conditionScore - 50) / 10
+      score += conditionBonus
+      
+      score += marketTour.value.customerFlow.buyChanceBonus * 20
+      
+      if (customer.isLocalCollector && item.record.rarity >= 3) {
+        score += 20
+        reasons.push('本地藏家偏好')
+      }
+      
+      if (customer.isTourist && genreMatch) {
+        score += 10
+        reasons.push('游客纪念')
+      }
+      
+      score = Math.max(0, Math.min(100, score))
+      
+      results.push({ item, score, matchReasons: reasons })
+    }
+    
+    return results.sort((a, b) => b.score - a.score)
+  }
+
+  const tryMarketSale = (
+    recordId: string,
+    askPrice: number
+  ): { success: boolean; message: string; profit?: number } => {
+    const customer = getCurrentMarketCustomer()
+    if (!customer) return { success: false, message: '没有顾客' }
+    
+    const item = marketTour.value.temporaryInventory.find(i => i.record.id === recordId)
+    if (!item) return { success: false, message: '商品不存在' }
+    if (item.quantity - item.soldQuantity <= 0) {
+      return { success: false, message: '已售罄' }
+    }
+    
+    const finalPrice = askPrice
+    if (finalPrice < item.actualCostPrice) {
+      return { success: false, message: '售价低于进价' }
+    }
+    
+    const recs = getMarketRecommendations(customer)
+    const rec = recs.find(r => r.item.record.id === recordId)
+    const matchScore = rec?.score || 30
+    
+    const priceModifier = marketTour.value.activeEvent?.activeEffects.priceModifier || 0
+    const effectivePrice = finalPrice * (1 + priceModifier)
+    
+    if (customer.budget < effectivePrice) {
+      return { success: false, message: '顾客预算不足' }
+    }
+    
+    let buyChance = 0.3 + (matchScore - 50) / 100
+    buyChance += marketTour.value.customerFlow.buyChanceBonus
+    
+    if (finalPrice > customer.priceRange[1]) {
+      buyChance -= 0.3
+    }
+    
+    buyChance = Math.max(0.05, Math.min(0.95, buyChance))
+    
+    if (customer.willBargain && matchScore > 50 && finalPrice > customer.priceRange[0] * 1.2) {
+      return { success: false, message: '顾客想议价，试试议价模式' }
+    }
+    
+    if (Math.random() > buyChance) {
+      customer.patience -= 15
+      customer.satisfaction = Math.max(0, customer.satisfaction - 10)
+      return { success: false, message: '顾客不太满意，离开了' }
+    }
+    
+    const profit = finalPrice - item.actualCostPrice
+    const satisfaction = 50 + matchScore / 2
+    
+    item.soldQuantity++
+    budget.value += Math.floor(finalPrice * customer.tipMultiplier)
+    marketTour.value.currentMarketDayRevenue += Math.floor(finalPrice * customer.tipMultiplier)
+    marketTour.value.currentMarketDaySalesCount++
+    marketTour.value.currentMarketDaySatisfactionSum += satisfaction
+    marketTour.value.currentMarketDayCustomersServed++
+    
+    customer.satisfaction = satisfaction
+    
+    marketTour.value.marketSales.push({
+      id: `ms-${Date.now()}-${Math.random()}`,
+      recordId: item.record.id,
+      recordTitle: item.record.title,
+      salePrice: Math.floor(finalPrice * customer.tipMultiplier),
+      costPrice: item.actualCostPrice,
+      profit,
+      customerName: customer.name,
+      customerAvatar: customer.avatar,
+      satisfaction,
+      wasBargained: false,
+      wave: marketTour.value.customerFlow.currentWave,
+      timestamp: Date.now()
+    })
+    
+    return {
+      success: true,
+      message: `成交！《${item.record.title}》售出，利润+¥${profit}${customer.tipMultiplier > 1 ? '（含小费）' : ''}`,
+      profit
+    }
+  }
+
+  const startMarketBargain = (
+    recordId: string,
+    askPrice: number
+  ): { success: boolean; message: string; offerPrice?: number } => {
+    const customer = getCurrentMarketCustomer()
+    if (!customer) return { success: false, message: '没有顾客' }
+    if (!customer.willBargain) return { success: false, message: '这位顾客不想议价' }
+    
+    const item = marketTour.value.temporaryInventory.find(i => i.record.id === recordId)
+    if (!item) return { success: false, message: '商品不存在' }
+    
+    currentMarketBargain.value = {
+      active: true,
+      recordId,
+      initialPrice: askPrice,
+      customerOffer: null,
+      sellerCounter: null,
+      round: 0,
+      maxRounds: 3
+    }
+    
+    const minAccept = Math.max(item.actualCostPrice * 1.1, customer.priceRange[0] * 0.9)
+    const offerVariance = 0.85 + Math.random() * 0.2
+    const customerOffer = Math.floor(Math.min(askPrice, Math.max(minAccept, askPrice * offerVariance)))
+    
+    currentMarketBargain.value.customerOffer = customerOffer
+    currentMarketBargain.value.round = 1
+    
+    return {
+      success: true,
+      message: `${customer.name}报价¥${customerOffer}，要还价吗？`,
+      offerPrice: customerOffer
+    }
+  }
+
+  const makeMarketCounterOffer = (
+    counterPrice: number
+  ): { success: boolean; message: string; accepted?: boolean; finalPrice?: number; failed?: boolean; nextOffer?: number } => {
+    const bargain = currentMarketBargain.value
+    const customer = getCurrentMarketCustomer()
+    const item = bargain?.recordId ? marketTour.value.temporaryInventory.find(i => i.record.id === bargain.recordId) : null
+    
+    if (!bargain || !customer || !item) {
+      return { success: false, message: '议价状态错误' }
+    }
+    if (counterPrice < item.actualCostPrice) {
+      return { success: false, message: '不能低于进价！' }
+    }
+    
+    bargain.sellerCounter = counterPrice
+    bargain.round++
+    
+    const offer = bargain.customerOffer || 0
+    const customerMax = Math.max(customer.priceRange[1], item.record.marketPrice * 1.2)
+    
+    if (counterPrice <= offer * 1.05) {
+      return acceptMarketBargainResult(counterPrice, item, customer)
+    }
+    
+    if (counterPrice > customerMax * 1.1 || bargain.round > bargain.maxRounds) {
+      currentMarketBargain.value = null
+      customer.patience -= 20
+      customer.satisfaction = Math.max(0, customer.satisfaction - 15)
+      return { success: true, message: '顾客不接受报价，生气地走了', failed: true }
+    }
+    
+    const nextOffer = Math.floor(offer + (counterPrice - offer) * (0.3 + Math.random() * 0.4))
+    bargain.customerOffer = nextOffer
+    
+    return {
+      success: true,
+      message: `${customer.name}加价到¥${nextOffer}`,
+      nextOffer
+    }
+  }
+
+  const acceptMarketOffer = (): { success: boolean; message: string; finalPrice?: number } => {
+    const bargain = currentMarketBargain.value
+    const customer = getCurrentMarketCustomer()
+    const item = bargain?.recordId ? marketTour.value.temporaryInventory.find(i => i.record.id === bargain.recordId) : null
+    
+    if (!bargain || !customer || !item || !bargain.customerOffer) {
+      return { success: false, message: '没有可接受的报价' }
+    }
+    
+    return acceptMarketBargainResult(bargain.customerOffer, item, customer)
+  }
+
+  const acceptMarketBargainResult = (
+    finalPrice: number,
+    item: MarketInventoryItem,
+    customer: MarketCustomer
+  ): { success: boolean; message: string; accepted: boolean; finalPrice: number } => {
+    const profit = finalPrice - item.actualCostPrice
+    const satisfaction = 60 + (profit / Math.max(1, item.actualCostPrice)) * 50
+    
+    item.soldQuantity++
+    budget.value += Math.floor(finalPrice * customer.tipMultiplier)
+    marketTour.value.currentMarketDayRevenue += Math.floor(finalPrice * customer.tipMultiplier)
+    marketTour.value.currentMarketDaySalesCount++
+    marketTour.value.currentMarketDaySatisfactionSum += satisfaction
+    marketTour.value.currentMarketDayCustomersServed++
+    
+    customer.satisfaction = Math.min(100, satisfaction)
+    
+    marketTour.value.marketSales.push({
+      id: `ms-${Date.now()}-${Math.random()}`,
+      recordId: item.record.id,
+      recordTitle: item.record.title,
+      salePrice: Math.floor(finalPrice * customer.tipMultiplier),
+      costPrice: item.actualCostPrice,
+      profit,
+      customerName: customer.name,
+      customerAvatar: customer.avatar,
+      satisfaction,
+      wasBargained: true,
+      wave: marketTour.value.customerFlow.currentWave,
+      timestamp: Date.now()
+    })
+    
+    currentMarketBargain.value = null
+    
+    return {
+      success: true,
+      message: `议价成交！《${item.record.title}》¥${finalPrice}，利润¥${profit}`,
+      accepted: true,
+      finalPrice
+    }
+  }
+
+  const rejectMarketBargain = () => {
+    currentMarketBargain.value = null
+    const customer = getCurrentMarketCustomer()
+    if (customer) {
+      customer.patience -= 25
+      customer.satisfaction = Math.max(0, customer.satisfaction - 20)
+    }
+  }
+
+  const cancelMarketBargain = () => {
+    currentMarketBargain.value = null
+  }
+
+  const advanceMarketCustomer = (): { hasMore: boolean; message: string } => {
+    currentMarketCustomerIndex.value++
+    if (currentMarketCustomerIndex.value >= marketCustomers.value.length) {
+      return { hasMore: false, message: '今日顾客已全部接待完毕' }
+    }
+    const next = getCurrentMarketCustomer()
+    return { hasMore: true, message: `下一位：${next?.name || '顾客'}` }
+  }
+
+  const triggerMarketEvent = (): boolean => {
+    const city = currentMarketCity.value
+    if (!city) return false
+    
+    const event = getRandomMarketEvent(city.tier)
+    if (!event) return false
+    
+    marketTour.value.activeEvent = {
+      config: event,
+      selectedChoice: null,
+      triggeredAt: Date.now(),
+      resolved: false,
+      activeEffects: {
+        customerCountModifier: 0,
+        budgetModifier: 0,
+        buyChanceModifier: 0,
+        priceModifier: 0,
+        reputationChange: 0,
+        budgetChange: 0,
+        duration: 1
+      }
+    }
+    
+    marketTour.value.phase = 'event'
+    return true
+  }
+
+  const resolveMarketEvent = (
+    choiceId: string
+  ): { success: boolean; message: string; effects?: string[] } => {
+    const activeEvent = marketTour.value.activeEvent
+    if (!activeEvent) return { success: false, message: '没有进行中的事件' }
+    
+    const choice = activeEvent.config.choices.find(c => c.id === choiceId)
+    if (!choice) return { success: false, message: '选项不存在' }
+    
+    if (choice.cost && choice.cost > 0) {
+      if (budget.value < choice.cost) {
+        return { success: false, message: `资金不足！需要¥${choice.cost}` }
+      }
+      budget.value -= choice.cost
+      marketTour.value.currentMarketDayCost += choice.cost
+    }
+    
+    activeEvent.selectedChoice = choice
+    activeEvent.resolved = true
+    activeEvent.activeEffects = choice.effects
+    
+    if (choice.effects.budgetChange !== 0) {
+      budget.value += choice.effects.budgetChange
+      if (choice.effects.budgetChange > 0) {
+        marketTour.value.currentMarketDayRevenue += choice.effects.budgetChange
+      } else {
+        marketTour.value.currentMarketDayCost += Math.abs(choice.effects.budgetChange)
+      }
+    }
+    
+    if (choice.effects.reputationChange !== 0) {
+      shopReputation.value = Math.max(0, Math.min(100, shopReputation.value + choice.effects.reputationChange))
+      marketTour.value.reputationFromMarkets += choice.effects.reputationChange
+    }
+    
+    const effectDescs: string[] = []
+    const eff = choice.effects
+    if (eff.customerCountModifier !== 0) effectDescs.push(`客流${eff.customerCountModifier > 0 ? '+' : ''}${Math.round(eff.customerCountModifier * 100)}%`)
+    if (eff.budgetModifier !== 0) effectDescs.push(`顾客预算${eff.budgetModifier > 0 ? '+' : ''}${Math.round(eff.budgetModifier * 100)}%`)
+    if (eff.buyChanceModifier !== 0) effectDescs.push(`购买意愿${eff.buyChanceModifier > 0 ? '+' : ''}${Math.round(eff.buyChanceModifier * 100)}%`)
+    if (eff.priceModifier !== 0) effectDescs.push(`售价影响${eff.priceModifier > 0 ? '+' : ''}${Math.round(eff.priceModifier * 100)}%`)
+    if (eff.reputationChange !== 0) effectDescs.push(`声望${eff.reputationChange > 0 ? '+' : ''}${eff.reputationChange}`)
+    if (eff.budgetChange !== 0) effectDescs.push(`资金${eff.budgetChange > 0 ? '+' : ''}¥${eff.budgetChange}`)
+    
+    marketTour.value.eventHistory.push({ ...activeEvent })
+    
+    marketTour.value.phase = 'selling'
+    
+    return {
+      success: true,
+      message: `已选择：${choice.label}`,
+      effects: effectDescs
+    }
+  }
+
+  const settleMarketTour = (): { success: boolean; message: string; settlement?: MarketSettlement } => {
+    const city = currentMarketCity.value
+    if (!city) return { success: false, message: '城市信息错误' }
+    
+    const stats = getMarketSalesStats()
+    const totalRevenue = stats.totalRevenue + marketTour.value.dailyMarketRevenue.reduce((a, b) => a + b, 0)
+    const totalCost = stats.totalCost + marketTour.value.dailyMarketCost.reduce((a, b) => a + b, 0)
+    const totalProfit = totalRevenue - totalCost
+    
+    const unsoldItems = marketTour.value.temporaryInventory
+      .filter(i => i.quantity - i.soldQuantity > 0)
+      .map(i => ({
+        recordId: i.record.id,
+        title: i.record.title,
+        quantity: i.quantity - i.soldQuantity
+      }))
+    
+    const repGain = city.reputationReward + (stats.avgSatisfaction >= 70 ? 3 : 0)
+    
+    const bonuses: string[] = []
+    if (stats.salesCount >= 15) bonuses.push('销售之星（15+单）')
+    if (stats.avgSatisfaction >= 80) bonuses.push('好评如潮')
+    if (totalProfit >= city.rentCost * 5) bonuses.push('高额利润')
+    if (unsoldItems.length === 0) bonuses.push('售罄完美！')
+    
+    const settlement: MarketSettlement = {
+      cityId: city.id,
+      cityName: city.name,
+      startDay: currentDay.value,
+      endDay: currentDay.value + marketTour.value.daysAtMarket + city.travelDays * 2,
+      totalDays: marketTour.value.daysAtMarket,
+      totalRevenue,
+      totalCost,
+      totalProfit,
+      salesCount: stats.salesCount,
+      avgSatisfaction: stats.avgSatisfaction,
+      peakSalesWave: stats.peakSalesWave,
+      eventsEncountered: marketTour.value.eventHistory.length,
+      travelCost: city.travelCost,
+      rentCost: city.rentCost * marketTour.value.daysAtMarket,
+      otherCosts: totalCost - city.travelCost - city.rentCost * marketTour.value.daysAtMarket,
+      reputationGained: repGain,
+      unsoldItems,
+      bonusRewards: bonuses
+    }
+    
+    shopReputation.value = Math.min(100, shopReputation.value + repGain)
+    marketTour.value.reputationFromMarkets += repGain
+    marketTour.value.totalMarketProfit += totalProfit
+    marketTour.value.totalMarketSales += stats.salesCount
+    
+    for (const item of marketTour.value.temporaryInventory) {
+      const remaining = item.quantity - item.soldQuantity
+      if (remaining <= 0) continue
+      
+      const existing = inventory.value.find(i => i.record.id === item.record.id)
+      if (existing) {
+        const totalQtyBefore = existing.quantity
+        const totalScoreBefore = existing.conditionScore * totalQtyBefore
+        const totalCostBefore = existing.actualCostPrice * totalQtyBefore
+        existing.quantity += remaining
+        existing.conditionScore = Math.round((totalScoreBefore + item.conditionScore * remaining) / existing.quantity)
+        existing.actualCostPrice = Math.round((totalCostBefore + item.actualCostPrice * remaining) / existing.quantity)
+      } else {
+        inventory.value.push({
+          record: item.record,
+          quantity: remaining,
+          purchaseDate: item.sourceInventoryId ? currentDay.value : item.record.id ? currentDay.value : currentDay.value,
+          conditionScore: item.conditionScore,
+          actualCostPrice: item.actualCostPrice
+        })
+      }
+    }
+    
+    marketTour.value.pendingSettlement = settlement
+    marketTour.value.settlementHistory.push(settlement)
+    marketTour.value.phase = 'return'
+    
+    return {
+      success: true,
+      message: `${city.name}市集结算完成！利润¥${totalProfit}`,
+      settlement
+    }
+  }
+
+  const returnFromMarket = (): { success: boolean; message: string } => {
+    const city = currentMarketCity.value
+    if (!city) return { success: false, message: '城市信息错误' }
+    
+    currentDay.value = Math.min(
+      currentDay.value + city.travelDays + marketTour.value.daysAtMarket,
+      (baseLevelConfig.value?.days || currentDay.value)
+    )
+    
+    marketTour.value.isActive = false
+    marketTour.value.phase = 'planning'
+    marketTour.value.currentCityId = null
+    marketTour.value.pendingSettlement = null
+    marketTour.value.activeEvent = null
+    marketTour.value.temporaryInventory = []
+    marketCustomers.value = []
+    currentMarketCustomerIndex.value = 0
+    
+    return {
+      success: true,
+      message: `已返回本店，可继续正常经营`
+    }
+  }
+
   return {
     currentLevel,
     currentDay,
@@ -5200,6 +6002,36 @@ export const useGameStore = defineStore('game', () => {
     getTierBgColor,
     getBreachTypeLabel,
     getBreachTypeIcon,
-    calculateTotalDiscount
+    calculateTotalDiscount,
+    marketTour,
+    marketCustomers,
+    currentMarketCustomerIndex,
+    currentMarketBargain,
+    availableMarketCities,
+    currentMarketCity,
+    startMarketPlanning,
+    selectMarketCity,
+    unlockMarketCity,
+    setMarketInventory,
+    adjustMarketSalePrice,
+    startMarketTrip,
+    advanceMarketDay,
+    getCurrentMarketCustomer,
+    getMarketRecommendations,
+    tryMarketSale,
+    startMarketBargain,
+    makeMarketCounterOffer,
+    acceptMarketOffer,
+    rejectMarketBargain,
+    cancelMarketBargain,
+    advanceMarketCustomer,
+    triggerMarketEvent,
+    resolveMarketEvent,
+    settleMarketTour,
+    returnFromMarket,
+    adjustMarketCustomerFlow,
+    resetMarketDayStats,
+    getMarketInventoryValue,
+    getMarketSalesStats
   }
 })

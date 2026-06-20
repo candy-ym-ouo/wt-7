@@ -10,6 +10,7 @@ const emit = defineEmits<{
   auction: []
   presale: []
   renovation: []
+  'market-tour': []
 }>()
 
 const gameStore = useGameStore()
@@ -54,6 +55,10 @@ const timeSlotLabel = computed(() => {
       </div>
 
       <div class="header-buttons">
+        <button class="icon-btn market-tour-btn" @click="emit('market-tour')">
+          🚛
+          <span v-if="gameStore.marketTour.totalMarketSales > 0 && !gameStore.marketTour.isActive" class="badge active-dot">●</span>
+        </button>
         <button class="icon-btn renovation-btn" @click="emit('renovation')">
           🏗️
         </button>
