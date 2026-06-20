@@ -1591,3 +1591,97 @@ export interface MarketCustomer {
   tipMultiplier: number
   quote: string
 }
+
+export type RepairMaterialType = 'cleaner' | 'scratch_remover' | 'sleeve' | 'stabilizer' | 'polish'
+
+export interface RepairMaterial {
+  type: RepairMaterialType
+  name: string
+  icon: string
+  description: string
+  unitCost: number
+  conditionBoost: number
+  priceBoostPercent: number
+  rarityBoostChance: number
+}
+
+export interface RepairMaterialInventory {
+  type: RepairMaterialType
+  quantity: number
+}
+
+export type RepairStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
+
+export type RepairQuality = 'basic' | 'professional' | 'master'
+
+export interface RepairQualityConfig {
+  quality: RepairQuality
+  qualityName: string
+  icon: string
+  conditionMultiplier: number
+  priceMultiplier: number
+  successRate: number
+  rarityUpChance: number
+  costMultiplier: number
+  description: string
+}
+
+export interface RepairTask {
+  id: string
+  inventoryId: string
+  record: Record
+  initialConditionScore: number
+  targetConditionScore: number
+  materials: RepairMaterialType[]
+  quality: RepairQuality
+  status: RepairStatus
+  totalCost: number
+  materialCost: number
+  laborCost: number
+  startTime: number | null
+  endTime: number | null
+  durationMinutes: number
+  progress: number
+  finalConditionScore: number | null
+  finalMarketPrice: number | null
+  collectionValueChange: number | null
+  priceIncrease: number | null
+  rarityUpgraded: boolean
+  notes: string
+}
+
+export interface RepairHistoryEntry {
+  id: string
+  recordId: string
+  recordTitle: string
+  day: number
+  initialCondition: number
+  finalCondition: number
+  priceIncrease: number
+  rarityUpgraded: boolean
+  totalCost: number
+  quality: RepairQuality
+  materialsUsed: RepairMaterialType[]
+  success: boolean
+}
+
+export interface RepairWorkshopStats {
+  totalRepairsCompleted: number
+  totalRepairsFailed: number
+  totalMaterialCost: number
+  totalLaborCost: number
+  totalPriceIncrease: number
+  totalCollectionValueGain: number
+  rarityUpgrades: number
+  successRate: number
+}
+
+export interface RepairWorkshopState {
+  materials: RepairMaterialInventory[]
+  activeTasks: RepairTask[]
+  completedTasks: RepairTask[]
+  history: RepairHistoryEntry[]
+  stats: RepairWorkshopStats
+  maxActiveTasks: number
+  unlockedQualities: RepairQuality[]
+}

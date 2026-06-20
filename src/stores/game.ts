@@ -242,6 +242,30 @@ import type {
   MarketSettlement,
   CustomerFlowWave
 } from '@/types'
+import {
+  createInitialRepairWorkshopState,
+  getRepairMaterial,
+  getRepairQualityConfig,
+  getRecommendedMaterials,
+  calculateMaterialCost,
+  calculateTotalConditionBoost,
+  calculateRepairLaborCost,
+  calculateRepairDuration,
+  simulateRepairResult,
+  getRepairableInventory,
+  generateRepairTaskId,
+  canAffordMaterials,
+  getRepairProfitEstimate,
+  calculateTotalPriceBoost,
+  calculateRarityUpChance
+} from '@/data/repairWorkshop'
+import type {
+  RepairWorkshopState,
+  RepairTask,
+  RepairMaterialType,
+  RepairQuality,
+  RepairHistoryEntry
+} from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -400,6 +424,24 @@ export const useGameStore = defineStore('game', () => {
     round: number
     maxRounds: number
   } | null>(null)
+
+  const repairWorkshop = ref<RepairWorkshopState>(createInitialRepairWorkshopState())
+
+  const repairableInventory = computed(() => {
+    const repairingIds = repairWorkshop.value.activeTasks.map(t => t.inventoryId)
+    return getRepairableInventory(inventory.value).filter(
+      item => !repairingIds.includes(inventory.value.indexOf(item).toString())
+    )
+  })
+
+  const activeRepairTasks = computed(() => repairWorkshop.value.activeTasks)
+  const completedRepairTasks = computed(() => repairWorkshop.value.completedTasks.slice(-10).reverse())
+  const repairHistory = computed(() => repairWorkshop.value.history.slice(-20).reverse())
+  const repairStats = computed(() => repairWorkshop.value.stats)
+  const repairMaterials = computed(() => repairWorkshop.value.materials)
+  const canStartNewRepair = computed(() => {
+    return repairWorkshop.value.activeTasks.length < repairWorkshop.value.maxActiveTasks
+  })
 
   const totalFrozenFunds = computed(() => {
     return frozenFunds.value
@@ -5749,6 +5791,240 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  const buyRepairMaterial = (type: RepairMaterialType, quantity: number = 1): { success: boolean; message: string } => {
+    const mat = getRepairMaterial(type)
+    const totalCost = mat.unitCost * quantity
+    if (budget.value < totalCost) {
+      return { success: false, message: '预算不足' }
+    }
+    budget.value -= totalCost
+    const inv = repairWorkshop.value.materials.find(m => m.type === type)
+    if (inv) {
+      inv.quantity += quantity
+    }
+    return { success: true, message: `成功购买 ${quantity} 个${mat.name}，花费 ¥${totalCost}` }
+  }
+
+  const startRepairTask = (
+    inventoryItem: InventoryItem,
+    targetCondition: number,
+    quality: RepairQuality,
+    customMaterials?: RepairMaterialType[]
+  ): { success: boolean; message: string; taskId?: string } => {
+    if (!canStartNewRepair.value) {
+      return { success: false, message: '修复工坊已满，请等待现有任务完成' }
+    }
+    if (!repairWorkshop.value.unlockedQualities.includes(quality)) {
+      return { success: false, message: '该修复品质尚未解锁' }
+    }
+
+    const materials = customMaterials || getRecommendedMaterials(inventoryItem.conditionScore, targetCondition)
+    if (!canAffordMaterials(repairWorkshop.value.materials, materials)) {
+      return { success: false, message: '修复耗材不足，请先购买' }
+    }
+
+    const materialCost = calculateMaterialCost(materials)
+    const laborCost = calculateRepairLaborCost(
+      inventoryItem.conditionScore,
+      targetCondition,
+      inventoryItem.record.rarity,
+      quality
+    )
+    const totalCost = materialCost + laborCost
+
+    if (budget.value < totalCost) {
+      return { success: false, message: `预算不足，需要 ¥${totalCost}` }
+    }
+
+    budget.value -= totalCost
+    for (const matType of materials) {
+      const inv = repairWorkshop.value.materials.find(m => m.type === matType)
+      if (inv) inv.quantity -= 1
+    }
+
+    const task: RepairTask = {
+      id: generateRepairTaskId(),
+      inventoryId: inventory.value.indexOf(inventoryItem).toString(),
+      record: inventoryItem.record,
+      initialConditionScore: inventoryItem.conditionScore,
+      targetConditionScore: targetCondition,
+      materials,
+      quality,
+      status: 'in_progress',
+      totalCost,
+      materialCost,
+      laborCost,
+      startTime: Date.now(),
+      endTime: null,
+      durationMinutes: calculateRepairDuration(quality, materials.length),
+      progress: 0,
+      finalConditionScore: null,
+      finalMarketPrice: null,
+      collectionValueChange: null,
+      priceIncrease: null,
+      rarityUpgraded: false,
+      notes: ''
+    }
+
+    repairWorkshop.value.activeTasks.push(task)
+
+    setTimeout(() => {
+      completeRepairTask(task.id)
+    }, 2000)
+
+    return { success: true, message: `开始修复「${inventoryItem.record.title}」`, taskId: task.id }
+  }
+
+  const completeRepairTask = (taskId: string) => {
+    const taskIndex = repairWorkshop.value.activeTasks.findIndex(t => t.id === taskId)
+    if (taskIndex === -1) return
+
+    const task = repairWorkshop.value.activeTasks[taskIndex]
+    const result = simulateRepairResult(
+      task.initialConditionScore,
+      task.targetConditionScore,
+      task.materials,
+      task.quality,
+      task.record.marketPrice,
+      task.record.rarity
+    )
+
+    task.status = result.success ? 'completed' : 'failed'
+    task.progress = 100
+    task.endTime = Date.now()
+    task.finalConditionScore = result.finalCondition
+    task.finalMarketPrice = result.finalMarketPrice
+    task.collectionValueChange = result.collectionValueChange
+    task.priceIncrease = result.priceIncrease
+    task.rarityUpgraded = result.rarityUpgraded
+    task.notes = result.notes
+
+    const invItem = inventory.value[parseInt(task.inventoryId)]
+    if (invItem && result.success) {
+      invItem.conditionScore = result.finalCondition
+      invItem.record.marketPrice = result.finalMarketPrice
+      if (result.rarityUpgraded && invItem.record.rarity < 5) {
+        invItem.record.rarity = (invItem.record.rarity + 1) as 1 | 2 | 3 | 4 | 5
+      }
+    } else if (invItem && !result.success) {
+      invItem.conditionScore = result.finalCondition
+      invItem.record.marketPrice = result.finalMarketPrice
+    }
+
+    repairWorkshop.value.activeTasks.splice(taskIndex, 1)
+    repairWorkshop.value.completedTasks.push(task)
+
+    const historyEntry: RepairHistoryEntry = {
+      id: task.id,
+      recordId: task.record.id,
+      recordTitle: task.record.title,
+      day: currentDay.value,
+      initialCondition: task.initialConditionScore,
+      finalCondition: result.finalCondition,
+      priceIncrease: result.priceIncrease,
+      rarityUpgraded: result.rarityUpgraded,
+      totalCost: task.totalCost,
+      quality: task.quality,
+      materialsUsed: task.materials,
+      success: result.success
+    }
+    repairWorkshop.value.history.push(historyEntry)
+
+    const stats = repairWorkshop.value.stats
+    if (result.success) {
+      stats.totalRepairsCompleted += 1
+      stats.totalPriceIncrease += result.priceIncrease
+      stats.totalCollectionValueGain += result.collectionValueChange
+      if (result.rarityUpgraded) stats.rarityUpgrades += 1
+    } else {
+      stats.totalRepairsFailed += 1
+    }
+    stats.totalMaterialCost += task.materialCost
+    stats.totalLaborCost += task.laborCost
+    const total = stats.totalRepairsCompleted + stats.totalRepairsFailed
+    stats.successRate = total > 0 ? Math.round((stats.totalRepairsCompleted / total) * 100) : 0
+
+    const collectionItem = collection.value.find(c => c.record.id === task.record.id)
+    if (collectionItem) {
+      collectionItem.conditionScore = result.finalCondition
+      collectionItem.collectionValue += result.collectionValueChange
+      if (result.rarityUpgraded && collectionItem.record.rarity < 5) {
+        collectionItem.record.rarity = (collectionItem.record.rarity + 1) as 1 | 2 | 3 | 4 | 5
+      }
+    }
+  }
+
+  const getRepairTaskEstimate = (
+    inventoryItem: InventoryItem,
+    targetCondition: number,
+    quality: RepairQuality
+  ) => {
+    const materials = getRecommendedMaterials(inventoryItem.conditionScore, targetCondition)
+    const materialCost = calculateMaterialCost(materials)
+    const laborCost = calculateRepairLaborCost(
+      inventoryItem.conditionScore,
+      targetCondition,
+      inventoryItem.record.rarity,
+      quality
+    )
+    const totalCost = materialCost + laborCost
+    const conditionBoost = calculateTotalConditionBoost(materials, quality)
+    const estimatedFinalCondition = Math.min(100, inventoryItem.conditionScore + Math.floor(conditionBoost * 0.9))
+    const profitEstimate = getRepairProfitEstimate(
+      inventoryItem.conditionScore,
+      estimatedFinalCondition,
+      inventoryItem.record.marketPrice,
+      totalCost
+    )
+    const qualityConfig = getRepairQualityConfig(quality)
+    const rarityUpChance = calculateRarityUpChance(materials, quality)
+    const priceBoostPercent = calculateTotalPriceBoost(materials, quality)
+
+    return {
+      materials,
+      materialCost,
+      laborCost,
+      totalCost,
+      estimatedFinalCondition,
+      estimatedPrice: profitEstimate.estimatedPrice,
+      estimatedProfit: profitEstimate.estimatedProfit,
+      roi: profitEstimate.roi,
+      successRate: Math.round(qualityConfig.successRate * 100),
+      rarityUpChance: Math.round(rarityUpChance * 100),
+      priceBoostPercent: Math.round(priceBoostPercent * 100),
+      duration: calculateRepairDuration(quality, materials.length)
+    }
+  }
+
+  const unlockMasterQuality = (): { success: boolean; message: string } => {
+    if (repairWorkshop.value.unlockedQualities.includes('master')) {
+      return { success: false, message: '大师修复已解锁' }
+    }
+    const cost = 2000
+    if (budget.value < cost) {
+      return { success: false, message: `预算不足，需要 ¥${cost}` }
+    }
+    if (repairWorkshop.value.stats.totalRepairsCompleted < 10) {
+      return { success: false, message: '需要完成至少10次修复才能解锁' }
+    }
+    budget.value -= cost
+    repairWorkshop.value.unlockedQualities.push('master')
+    return { success: true, message: '成功解锁大师修复！' }
+  }
+
+  const expandRepairCapacity = (): { success: boolean; message: string } => {
+    const cost = repairWorkshop.value.maxActiveTasks * 1500
+    if (budget.value < cost) {
+      return { success: false, message: `预算不足，需要 ¥${cost}` }
+    }
+    if (repairWorkshop.value.maxActiveTasks >= 6) {
+      return { success: false, message: '修复工坊已达最大容量' }
+    }
+    budget.value -= cost
+    repairWorkshop.value.maxActiveTasks += 1
+    return { success: true, message: `修复容量已提升至 ${repairWorkshop.value.maxActiveTasks} 个任务` }
+  }
+
   return {
     currentLevel,
     currentDay,
@@ -6076,6 +6352,20 @@ export const useGameStore = defineStore('game', () => {
     adjustMarketCustomerFlow,
     resetMarketDayStats,
     getMarketInventoryValue,
-    getMarketSalesStats
+    getMarketSalesStats,
+    repairWorkshop,
+    repairableInventory,
+    activeRepairTasks,
+    completedRepairTasks,
+    repairHistory,
+    repairStats,
+    repairMaterials,
+    canStartNewRepair,
+    buyRepairMaterial,
+    startRepairTask,
+    completeRepairTask,
+    getRepairTaskEstimate,
+    unlockMasterQuality,
+    expandRepairCapacity
   }
 })
