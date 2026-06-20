@@ -153,7 +153,8 @@ const getIdentityConfig = (tag: CustomerIdentityTag): CustomerIdentityConfig => 
 
 export const generateIdentityTag = (
   unlockedAlbumIds: string[] = [],
-  reputation: number = 50
+  reputation: number = 50,
+  specialCustomerWeightBoost: number = 0
 ): CustomerIdentityTag | null => {
   const availableConfigs = customerIdentityConfigs.filter(config => {
     if (config.unlockedByAlbumIds && config.unlockedByAlbumIds.length > 0) {
@@ -168,7 +169,7 @@ export const generateIdentityTag = (
   const weights = availableConfigs.map(config => {
     let weight = config.baseWeight
     if (config.tag === 'collector' || config.tag === 'connoisseur') {
-      weight *= (1 + reputationBoost)
+      weight *= (1 + reputationBoost + specialCustomerWeightBoost)
     }
     if (config.tag === 'newbie') {
       weight *= (1 - reputationBoost * 0.5)
@@ -617,7 +618,8 @@ export const generateDailyCustomers = (
   inventoryGenres: Genre[] = [],
   timeSlot: TimeSlot = 'afternoon',
   unlockedAlbumIds: string[] = [],
-  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map()
+  marketHeatMap: Map<Genre, GenreMarketHeat> = new Map(),
+  specialCustomerWeightBoost: number = 0
 ): { customers: Customer[]; newMembers: MemberProfile[] } => {
   const customers: Customer[] = []
   const newMemberProfiles: MemberProfile[] = []
@@ -632,7 +634,7 @@ export const generateDailyCustomers = (
 
   for (let i = 0; i < selectedReturningMembers.length; i++) {
     const member = selectedReturningMembers[i]
-    const memberIdentityTag = generateIdentityTag(unlockedAlbumIds, reputation)
+    const memberIdentityTag = generateIdentityTag(unlockedAlbumIds, reputation, specialCustomerWeightBoost)
     const customer = generateCustomer(
       `cust-${day}-return-${i}-${Date.now()}`,
       member,
@@ -649,7 +651,7 @@ export const generateDailyCustomers = (
 
   const newCustomerCount = count - selectedReturningMembers.length
   for (let i = 0; i < newCustomerCount; i++) {
-    const identityTag = generateIdentityTag(unlockedAlbumIds, reputation)
+    const identityTag = generateIdentityTag(unlockedAlbumIds, reputation, specialCustomerWeightBoost)
     const customer = generateCustomer(
       `cust-${day}-new-${i}-${Date.now()}`,
       null,

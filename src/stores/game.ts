@@ -1896,7 +1896,8 @@ export const useGameStore = defineStore('game', () => {
     members.value = []
     lastLevelReward.value = null
     levelStartReputation.value = shopReputation.value
-    initializeDisplaySlots(config.displaySlots)
+    const totalSlots = Math.max(config.displaySlots, shopRenovationBonus.value.totalDisplaySlots)
+    initializeDisplaySlots(totalSlots)
     resetDailyStats()
     dailyEvent.value = null
     levelEvents.value = []
@@ -2211,11 +2212,35 @@ export const useGameStore = defineStore('game', () => {
   }
 
   const applyCustomerBonuses = (customerList: Customer[]): Customer[] => {
-    const budgetMultiplier = 1 + customerBudgetBonus.value + eventBudgetModifier.value
-    return customerList.map(c => ({
-      ...c,
-      budget: Math.floor(c.budget * budgetMultiplier)
-    }))
+    const budgetMultiplier = 1 + customerBudgetBonus.value + eventBudgetModifier.value + (shopRenovationBonus.value.budgetModifier - 1)
+    const highBudgetChance = shopRenovationBonus.value.highBudgetCustomerChance
+    const memberChanceBonus = shopRenovationBonus.value.memberChanceBonus
+    
+    return customerList.map(c => {
+      let newBudget = Math.floor(c.budget * budgetMultiplier)
+      
+      if (Math.random() < highBudgetChance) {
+        newBudget = Math.floor(newBudget * 1.5)
+      }
+      
+      let newCustomer = {
+        ...c,
+        budget: newBudget
+      }
+      
+      if (!newCustomer.memberProfile && Math.random() < memberChanceBonus) {
+        newCustomer.memberProfile = createMemberProfile({
+          id: newCustomer.id,
+          name: newCustomer.name,
+          avatar: newCustomer.avatar,
+          preference: newCustomer.preference
+        })
+        newCustomer.memberDiscount = calculateMemberDiscount(newCustomer.memberProfile.level)
+        newCustomer.isReturningCustomer = true
+      }
+      
+      return newCustomer
+    })
   }
 
   const getActivatedAlbumIds = (): string[] => {
@@ -2309,7 +2334,8 @@ export const useGameStore = defineStore('game', () => {
           inventoryGenres,
           timeSlot,
           activatedAlbumIds,
-          genreMarketHeat.value
+          genreMarketHeat.value,
+          shopRenovationBonus.value.specialCustomerWeightBoost
         )
       : { customers: [] as Customer[], newMembers: [] as MemberProfile[] }
 
@@ -2403,6 +2429,7 @@ export const useGameStore = defineStore('game', () => {
     let totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
     totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
     totalCustomerCount = Math.floor(totalCustomerCount * (1 + staff.value.dailyCapacityBonus))
+    totalCustomerCount = Math.floor(totalCustomerCount * (1 + shopRenovationBonus.value.customerCountModifier))
     const slotCount = getCustomerCountForSlot(totalCustomerCount, currentTimeSlot.value)
 
     customers.value = generateCustomersWithSpecial(
@@ -2450,6 +2477,7 @@ export const useGameStore = defineStore('game', () => {
     let totalCustomerCount = getCustomerCountWithReputation(baseCount, shopReputation.value)
     totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
     totalCustomerCount = Math.floor(totalCustomerCount * (1 + staff.value.dailyCapacityBonus))
+    totalCustomerCount = Math.floor(totalCustomerCount * (1 + shopRenovationBonus.value.customerCountModifier))
     const nightCount = getCustomerCountForSlot(totalCustomerCount, 'night')
 
     customers.value = generateCustomersWithSpecial(
@@ -3038,6 +3066,10 @@ export const useGameStore = defineStore('game', () => {
       baseSalePrice = Math.floor(baseSalePrice * (1 + priceBonusFromCollection.value))
     }
 
+    if (shopRenovationBonus.value.salePriceBonus > 0) {
+      baseSalePrice = Math.floor(baseSalePrice * (1 + shopRenovationBonus.value.salePriceBonus))
+    }
+
     const promotionResult = getRecordPromotionPrice(baseSalePrice, record)
     let salePrice = promotionResult.finalPrice
     const wasPromotionApplied = promotionResult.appliedPromotionId !== null
@@ -3060,7 +3092,7 @@ export const useGameStore = defineStore('game', () => {
     const playbackThemeBonusVal = playbackThemeBonus.value
     const themeBuyBonus = themeBuyChanceBonus.value
 
-    let baseScore = score + collectionMatchBonus + themeBonus
+    let baseScore = score + collectionMatchBonus + themeBonus + shopRenovationBonus.value.matchScoreBonus
     if (currentPlayingRecord.value?.id === record.id) {
       baseScore += playBoost + playbackThemeBonusVal
     }
@@ -3074,6 +3106,7 @@ export const useGameStore = defineStore('game', () => {
     buyChance += eventBuyChanceModifier.value
     buyChance += getAtmosphereBuyChanceBoost(record.genre)
     buyChance += getPromotionBuyChanceForRecord(record)
+    buyChance += shopRenovationBonus.value.buyChanceBonus
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (!isGiftItem && salePrice > customer.budget) {
@@ -3113,7 +3146,8 @@ export const useGameStore = defineStore('game', () => {
       : (Math.random() < buyChance)
 
     if (success) {
-      const profit = salePrice - invItem.actualCostPrice
+      const baseProfit = salePrice - invItem.actualCostPrice
+      const profit = Math.floor(baseProfit * (1 + shopRenovationBonus.value.profitMarginBonus))
       const reservationSatisfactionBonus = isReservationTarget ? 15 : 0
       const baseSatisfaction = 50 + finalScore * 0.5 - (!isGiftItem && salePrice > record.marketPrice ? 20 : 0) + reservationSatisfactionBonus
       const memberBonus = customer.isReturningCustomer ? 5 : 0
@@ -3156,7 +3190,7 @@ export const useGameStore = defineStore('game', () => {
           baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier +
           bargainSatisfactionBonus + eventSatisfactionModifier.value +
           patienceSatisfactionMod + fastServiceBonus + identitySatisfactionMod +
-          promotionSatisfactionBonus
+          promotionSatisfactionBonus + shopRenovationBonus.value.satisfactionBonus
         )
       )
 
