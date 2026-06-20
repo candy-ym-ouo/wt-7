@@ -527,7 +527,9 @@ export const generateCustomer = (
       willBargain: Math.random() < (0.35 + memberBargainBias + updatedMember.visitCount * 0.01),
       isImpatient: false,
       hasLeftAngrily: false,
-      identityTag
+      identityTag,
+      reservationId: null,
+      reservedRecordIds: []
     }
 
     customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, arrivalOrder)
@@ -597,7 +599,9 @@ export const generateCustomer = (
       willBargain: Math.random() < (0.45 + bargainModifier),
       isImpatient: false,
       hasLeftAngrily: false,
-      identityTag
+      identityTag,
+      reservationId: null,
+      reservedRecordIds: []
     }
 
     customer.priorityScore = calculatePriorityScore(customer, defaultPatienceConfig, arrivalOrder)

@@ -195,6 +195,8 @@ export interface Customer {
   isImpatient: boolean
   hasLeftAngrily: boolean
   identityTag: CustomerIdentityTag | null
+  reservationId: string | null
+  reservedRecordIds: string[]
 }
 
 export type PatienceLevel = 'calm' | 'waiting' | 'restless' | 'impatient' | 'furious'
@@ -813,6 +815,50 @@ export interface StaffState {
   dailyCapacityBonus: number
 }
 
+export type ReservationStatus = 'pending' | 'confirmed' | 'fulfilled' | 'cancelled' | 'no_show'
+
+export interface ReservationItem {
+  recordId: string
+  recordTitle: string
+  genre: Genre
+  targetRarity: number[]
+  minCondition: number
+  quantity: number
+  isFulfilled: boolean
+  reservedInventoryId: string | null
+}
+
+export interface Reservation {
+  id: string
+  customerName: string
+  customerAvatar: string
+  memberProfile: MemberProfile | null
+  isReturningCustomer: boolean
+  memberLevel: MemberLevel | null
+  dayCreated: number
+  targetDay: number
+  timeSlot: TimeSlot
+  status: ReservationStatus
+  items: ReservationItem[]
+  deposit: number
+  totalBudget: number
+  note: string
+  priorityScore: number
+  satisfactionBonus: number
+  customerId: string | null
+  arrivalOrder: number
+}
+
+export interface ReservationSummary {
+  totalReservations: number
+  pendingCount: number
+  fulfilledCount: number
+  totalDeposit: number
+  estimatedRevenue: number
+  requiredRecordIds: string[]
+  requiredGenres: { genre: Genre; count: number }[]
+}
+
 export interface GameState {
   currentLevel: number
   currentDay: number
@@ -851,4 +897,7 @@ export interface GameState {
   levelStartReputation: number
   completedLevels: number[]
   staff: StaffState
+  reservations: Reservation[]
+  dailyReservationFulfilledCount: number
+  dailyReservationMissedCount: number
 }

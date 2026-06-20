@@ -9,7 +9,8 @@ import type {
   ActiveBusinessEvent, LostSaleReason, HotGenre,
   CustomerProfileSnapshot, CustomerProfileShift, DailySuggestion, DailyBusinessReview,
   OverstockInfo, OverstockStatus, DailyOverstockPenalty,
-  ActivePromotion, PromotionApplicationResult
+  ActivePromotion, PromotionApplicationResult,
+  Reservation, ReservationItem, ReservationSummary
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -263,6 +264,11 @@ export const useGameStore = defineStore('game', () => {
   const genreMarketHeat = ref<Map<Genre, GenreMarketHeat>>(new Map())
   const previousDayHotGenres = ref<HotGenre[]>([])
 
+  const reservations = ref<Reservation[]>([])
+  const dailyReservationFulfilledCount = ref(0)
+  const dailyReservationMissedCount = ref(0)
+  const reservationNotes = ref<Map<string, string>>(new Map())
+
   const totalCollectionValue = computed(() => {
     return collection.value.reduce((sum, item) => sum + item.collectionValue, 0)
   })
@@ -291,6 +297,47 @@ export const useGameStore = defineStore('game', () => {
   const specialCustomerBonus = computed(() => getAlbumBonus('special_customer'))
   const priceBonusFromCollection = computed(() => getAlbumBonus('price_bonus'))
   const recordUnlockBonus = computed(() => getAlbumBonus('record_unlock'))
+
+  const reservationSummary = computed<ReservationSummary>(() => {
+    const pendingList = reservations.value.filter(r =>
+      r.targetDay === currentDay.value && (r.status === 'pending' || r.status === 'confirmed')
+    )
+    const fulfilledList = reservations.value.filter(r =>
+      r.targetDay === currentDay.value && r.status === 'fulfilled'
+    )
+    const requiredRecordIds: string[] = []
+    const genreCountMap = new Map<Genre, number>()
+    let estimatedRevenue = 0
+
+    for (const r of pendingList) {
+      for (const item of r.items) {
+        if (!item.isFulfilled) {
+          requiredRecordIds.push(item.recordId)
+          const count = genreCountMap.get(item.genre) || 0
+          genreCountMap.set(item.genre, count + 1)
+          const rec = getRecordById(item.recordId)
+          if (rec) {
+            estimatedRevenue += rec.marketPrice * item.quantity
+          }
+        }
+      }
+    }
+
+    const requiredGenres: { genre: Genre; count: number }[] = []
+    for (const [genre, count] of genreCountMap.entries()) {
+      requiredGenres.push({ genre, count })
+    }
+
+    return {
+      totalReservations: pendingList.length + fulfilledList.length,
+      pendingCount: pendingList.length,
+      fulfilledCount: fulfilledList.length,
+      totalDeposit: pendingList.reduce((sum, r) => sum + r.deposit, 0),
+      estimatedRevenue,
+      requiredRecordIds: [...new Set(requiredRecordIds)],
+      requiredGenres: requiredGenres.sort((a, b) => b.count - a.count)
+    }
+  })
 
   const baseLevelConfig = computed(() => getLevelById(currentLevel.value))
   const currentLevelConfig = computed(() => getScaledLevelConfig(currentLevel.value, shopReputation.value))
@@ -555,6 +602,219 @@ export const useGameStore = defineStore('game', () => {
 
   const getPromotionReputationBonus = (): number => {
     return getPromotionReputationImpact(activePromotions.value, dailyPromotionSales.value)
+  }
+
+  const generateReservationNote = (member: MemberProfile | null, preferredGenres: Genre[]): string => {
+    const genreStr = preferredGenres.length > 0 ? preferredGenres.slice(0, 2).join('、') : ''
+    const notes = [
+      '上次在店里淘到的那张唱片太喜欢了，这次想再找找类似的！',
+      '朋友推荐我来预约，听说你们的选品很有品味~',
+      '一直关注你们店的更新，特地提前来留个位子！',
+      '上次和老板聊得很投机，这次提前约好再来逛逛！',
+      '家里的收藏柜还缺一张这个风格的精品！',
+      '听说最近到了一批好货，先预约确保能抢到！',
+      '是老顾客推荐我来预约的，据说品质有保障！',
+      '最近在研究这个流派，想找一些经典专辑收藏！',
+      genreStr ? `特别喜欢${genreStr}这类风格，希望能找到惊喜！` : '想多探索一些不同风格的好唱片！'
+    ]
+    if (member) {
+      const levelNotes = [
+        `作为${member.level}会员，希望有惊喜！`,
+        '会员专享预约，期待专属服务~',
+        `来给我的${member.level}会员等级再添点收藏！`
+      ]
+      return levelNotes[Math.floor(Math.random() * levelNotes.length)] + ' ' + notes[Math.floor(Math.random() * notes.length)]
+    }
+    return notes[Math.floor(Math.random() * notes.length)]
+  }
+
+  const generateReservationsForNextDay = () => {
+    if (!baseLevelConfig.value) return
+    const nextDay = currentDay.value + 1
+    if (nextDay > baseLevelConfig.value.days) return
+
+    const eligibleMembers: MemberProfile[] = []
+    for (const m of members.value) {
+      const recentVisit = currentDay.value - m.lastVisitDate <= 3
+      const highActivity = m.visitCount >= 2 || m.totalSpent >= 500
+      const goodStanding = m.level !== 'Bronze' || m.visitCount >= 3
+      if ((recentVisit || highActivity) && goodStanding) {
+        eligibleMembers.push(m)
+      }
+    }
+
+    const highSatisfactionToday = customers.value.filter(c =>
+      c.isReturningCustomer && !c.memberProfile && c.satisfaction >= 70
+    )
+
+    const baseCount = Math.max(0, Math.min(
+      3 + Math.floor(shopReputation.value / 25),
+      eligibleMembers.length + Math.floor(highSatisfactionToday.length / 2)
+    ))
+
+    const levelModifier = Math.min(1, 0.4 + currentLevel.value * 0.1)
+    const finalCount = Math.floor(baseCount * levelModifier)
+
+    if (finalCount <= 0) return
+
+    const shuffledMembers = [...eligibleMembers].sort(() => Math.random() - 0.5)
+    const unlockedGenres = getUnlockedGenres(currentLevel.value)
+    let arrivalCounter = 0
+
+    for (let i = 0; i < Math.min(finalCount, shuffledMembers.length); i++) {
+      const member = shuffledMembers[i]
+      const timeSlot: TimeSlot = Math.random() < 0.5 ? 'afternoon' : 'night'
+      const itemCount = 1 + (member.level === 'Diamond' || member.level === 'Platinum' ? Math.floor(Math.random() * 2) : 0)
+
+      const items: ReservationItem[] = []
+      for (let j = 0; j < itemCount; j++) {
+        const preferredGenre = member.favoriteGenres[Math.floor(Math.random() * member.favoriteGenres.length)] || unlockedGenres[0]
+        const genreRecords = allRecords.filter(r =>
+          r.genre === preferredGenre &&
+          unlockedGenres.includes(r.genre) &&
+          member.preferredRarity.some(pr => Math.abs(pr - r.rarity) <= 1)
+        )
+        const candidateRecords = genreRecords.length > 0
+          ? genreRecords
+          : allRecords.filter(r => unlockedGenres.includes(r.genre))
+        const selectedRecord = candidateRecords[Math.floor(Math.random() * candidateRecords.length)]
+
+        if (selectedRecord) {
+          items.push({
+            recordId: selectedRecord.id,
+            recordTitle: selectedRecord.title,
+            genre: selectedRecord.genre,
+            targetRarity: member.preferredRarity,
+            minCondition: 60,
+            quantity: 1,
+            isFulfilled: false,
+            reservedInventoryId: null
+          })
+        }
+      }
+
+      if (items.length === 0) continue
+
+      const levelDepositMap: { [key: string]: number } = {
+        Diamond: 200,
+        Platinum: 150,
+        Gold: 100,
+        Silver: 60,
+        Bronze: 30
+      }
+      const estimatedTotal = items.reduce((sum, it) => {
+        const rec = getRecordById(it.recordId)
+        return sum + (rec ? rec.marketPrice : 300)
+      }, 0)
+
+      const reservation: Reservation = {
+        id: `res-${nextDay}-${i}-${Date.now()}`,
+        customerName: member.name,
+        customerAvatar: member.avatar,
+        memberProfile: member,
+        isReturningCustomer: true,
+        memberLevel: member.level,
+        dayCreated: currentDay.value,
+        targetDay: nextDay,
+        timeSlot,
+        status: 'confirmed',
+        items,
+        deposit: levelDepositMap[member.level] || 50,
+        totalBudget: Math.floor(estimatedTotal * (1.3 + Math.random() * 0.7)),
+        note: generateReservationNote(member, member.favoriteGenres),
+        priorityScore: 80 + (member.level === 'Diamond' ? 30 : member.level === 'Platinum' ? 20 : member.level === 'Gold' ? 10 : 0),
+        satisfactionBonus: 10,
+        customerId: null,
+        arrivalOrder: arrivalCounter++
+      }
+
+      reservations.value.push(reservation)
+    }
+
+    const nonMemberSlots = finalCount - reservations.value.filter(r => r.targetDay === nextDay).length
+    if (nonMemberSlots > 0 && highSatisfactionToday.length > 0) {
+      const shuffledReturning = [...highSatisfactionToday].sort(() => Math.random() - 0.5)
+      for (let i = 0; i < Math.min(nonMemberSlots, shuffledReturning.length); i++) {
+        const cust = shuffledReturning[i]
+        const timeSlot: TimeSlot = Math.random() < 0.5 ? 'afternoon' : 'night'
+        const preferredGenre = cust.preference.favoriteGenres[Math.floor(Math.random() * cust.preference.favoriteGenres.length)] || unlockedGenres[0]
+        const genreRecords = allRecords.filter(r =>
+          r.genre === preferredGenre &&
+          unlockedGenres.includes(r.genre)
+        )
+        const candidateRecords = genreRecords.length > 0
+          ? genreRecords
+          : allRecords.filter(r => unlockedGenres.includes(r.genre))
+        const selectedRecord = candidateRecords[Math.floor(Math.random() * candidateRecords.length)]
+
+        if (!selectedRecord) continue
+
+        const item: ReservationItem = {
+          recordId: selectedRecord.id,
+          recordTitle: selectedRecord.title,
+          genre: selectedRecord.genre,
+          targetRarity: cust.preference.preferredRarity,
+          minCondition: 50,
+          quantity: 1,
+          isFulfilled: false,
+          reservedInventoryId: null
+        }
+
+        const reservation: Reservation = {
+          id: `res-${nextDay}-ret-${i}-${Date.now()}`,
+          customerName: cust.name,
+          customerAvatar: cust.avatar,
+          memberProfile: null,
+          isReturningCustomer: true,
+          memberLevel: null,
+          dayCreated: currentDay.value,
+          targetDay: nextDay,
+          timeSlot,
+          status: 'pending',
+          items: [item],
+          deposit: 20,
+          totalBudget: Math.floor(cust.budget * (1.2 + Math.random() * 0.5)),
+          note: generateReservationNote(null, cust.preference.favoriteGenres),
+          priorityScore: 55,
+          satisfactionBonus: 5,
+          customerId: null,
+          arrivalOrder: arrivalCounter++
+        }
+
+        reservations.value.push(reservation)
+      }
+    }
+  }
+
+  const updateReservationOnSale = (recordId: string, customer: Customer) => {
+    if (!customer.reservationId) return
+
+    const reservation = reservations.value.find(r => r.id === customer.reservationId)
+    if (!reservation) return
+
+    for (const item of reservation.items) {
+      if (item.recordId === recordId && !item.isFulfilled) {
+        item.isFulfilled = true
+        item.reservedInventoryId = recordId
+      }
+    }
+
+    const allFulfilled = reservation.items.every(item => item.isFulfilled)
+    if (allFulfilled) {
+      reservation.status = 'fulfilled'
+      dailyReservationFulfilledCount.value++
+    }
+  }
+
+  const finalizeMissedReservations = () => {
+    const missedList = reservations.value.filter(r =>
+      r.targetDay === currentDay.value &&
+      (r.status === 'pending' || r.status === 'confirmed')
+    )
+    for (const r of missedList) {
+      r.status = 'no_show'
+      dailyReservationMissedCount.value++
+    }
   }
 
   const currentCustomer = computed(() => customers.value[currentCustomerIndex.value] || null)
@@ -908,6 +1168,10 @@ export const useGameStore = defineStore('game', () => {
     dailyOverstockPenalty.value = null
     totalOverstockPenaltyAccumulated.value = 0
     genreAtmosphere.value = createEmptyAtmosphereMap()
+    reservations.value = []
+    dailyReservationFulfilledCount.value = 0
+    dailyReservationMissedCount.value = 0
+    reservationNotes.value = new Map()
     
     checkAndActivateAlbums()
     updateCollectionBonuses()
@@ -950,6 +1214,8 @@ export const useGameStore = defineStore('game', () => {
     dailyOverstockPenalty.value = null
     genreAtmosphere.value = createEmptyAtmosphereMap()
     resetDailyPromotionStats()
+    dailyReservationFulfilledCount.value = 0
+    dailyReservationMissedCount.value = 0
   }
 
   const selectSupplier = (supplierId: string) => {
@@ -1195,18 +1461,86 @@ export const useGameStore = defineStore('game', () => {
   ): Customer[] => {
     const inventoryGenres = [...new Set(inventory.value.map(i => i.record.genre))]
     const activatedAlbumIds = getActivatedAlbumIds()
-    const result = generateDailyCustomers(
-      count,
-      day,
-      members.value,
-      shopReputation.value,
-      inventoryGenres,
-      timeSlot,
-      activatedAlbumIds,
-      genreMarketHeat.value
-    )
+    const slotReservations = reservations.value.filter(r =>
+      r.targetDay === day &&
+      r.timeSlot === timeSlot &&
+      (r.status === 'pending' || r.status === 'confirmed')
+    ).sort((a, b) => b.priorityScore - a.priorityScore)
 
-    let customers = applyCustomerBonuses(result.customers)
+    const reservationCustomers: Customer[] = []
+    const reservationsToInject = Math.min(slotReservations.length, Math.max(1, Math.floor(count * 0.3)))
+
+    for (let i = 0; i < reservationsToInject; i++) {
+      const res = slotReservations[i]
+      const reservedRecordIds = res.items.map(item => item.recordId)
+      const reservedGenres = [...new Set(res.items.map(item => item.genre))]
+      const prefGenres = res.memberProfile
+        ? [...new Set([...reservedGenres, ...res.memberProfile.favoriteGenres])]
+        : reservedGenres
+
+      const cust: Customer = {
+        id: `cust-res-${res.id}-${Date.now()}`,
+        name: res.customerName,
+        avatar: res.customerAvatar,
+        preference: {
+          favoriteGenres: prefGenres.slice(0, 5),
+          priceRange: res.memberProfile
+            ? res.memberProfile.priceRange
+            : [200, 500],
+          preferredRarity: res.memberProfile
+            ? res.memberProfile.preferredRarity
+            : [2, 3, 4],
+          preferenceStrength: res.memberProfile
+            ? res.memberProfile.preferenceStrength
+            : 0.7
+        },
+        budget: res.totalBudget,
+        patience: 60 + Math.floor(Math.random() * 40) + (res.memberLevel === 'Diamond' ? 30 : res.memberLevel === 'Platinum' ? 20 : res.memberLevel === 'Gold' ? 10 : 0),
+        maxPatience: 60 + Math.floor(Math.random() * 40) + (res.memberLevel === 'Diamond' ? 30 : res.memberLevel === 'Platinum' ? 20 : res.memberLevel === 'Gold' ? 10 : 0),
+        patienceDecayRate: defaultPatienceConfig.decayBaseRate * (res.memberProfile ? 0.85 : 0.95),
+        arrivalOrder: i,
+        priorityScore: res.priorityScore,
+        satisfaction: 55 + res.satisfactionBonus,
+        memberProfile: res.memberProfile,
+        isReturningCustomer: res.isReturningCustomer,
+        memberDiscount: res.memberProfile ? calculateMemberDiscount(res.memberProfile.level) : 0,
+        bargainAggressiveness: res.memberProfile
+          ? Math.max(0.1, 0.25 + Math.random() * 0.3)
+          : Math.max(0.1, 0.35 + Math.random() * 0.35),
+        bargainToughness: res.memberProfile
+          ? Math.max(0.2, 0.35 + Math.random() * 0.3)
+          : Math.max(0.2, 0.45 + Math.random() * 0.35),
+        willBargain: Math.random() < (res.memberProfile ? 0.25 : 0.4),
+        isImpatient: false,
+        hasLeftAngrily: false,
+        identityTag: res.memberProfile
+          ? (res.memberLevel === 'Diamond' || res.memberLevel === 'Platinum' ? 'collector' as const : 'connoisseur' as const)
+          : 'enthusiast' as const,
+        reservationId: res.id,
+        reservedRecordIds
+      }
+      res.customerId = cust.id
+      reservationCustomers.push(cust)
+    }
+
+    const remainingCount = count - reservationCustomers.length
+    const result = remainingCount > 0
+      ? generateDailyCustomers(
+          remainingCount,
+          day,
+          members.value,
+          shopReputation.value,
+          inventoryGenres,
+          timeSlot,
+          activatedAlbumIds,
+          genreMarketHeat.value
+        )
+      : { customers: [] as Customer[], newMembers: [] as MemberProfile[] }
+
+    let customers = [
+      ...reservationCustomers,
+      ...applyCustomerBonuses(result.customers)
+    ]
 
     const unlockedSpecialCustomers = specialCustomersState.value.filter(sc => sc.isUnlocked)
     const specialCustomersToAdd: Customer[] = []
@@ -1227,12 +1561,14 @@ export const useGameStore = defineStore('game', () => {
     }
 
     if (specialCustomersToAdd.length > 0) {
-      const slotsToReplace = Math.min(specialCustomersToAdd.length, Math.floor(customers.length * 0.3))
+      const slotsToReplace = Math.min(specialCustomersToAdd.length, Math.floor(customers.length * 0.2))
       for (let i = 0; i < slotsToReplace && i < specialCustomersToAdd.length; i++) {
-        const replaceIndex = Math.floor(Math.random() * customers.length)
-        const sp = specialCustomersToAdd[i]
-        sp.arrivalOrder = customers[replaceIndex]?.arrivalOrder || count + i
-        customers[replaceIndex] = sp
+        const replaceIndex = reservationCustomers.length + Math.floor(Math.random() * Math.max(1, customers.length - reservationCustomers.length))
+        if (replaceIndex < customers.length) {
+          const sp = specialCustomersToAdd[i]
+          sp.arrivalOrder = customers[replaceIndex]?.arrivalOrder || count + i
+          customers[replaceIndex] = sp
+        }
       }
     }
 
@@ -1614,7 +1950,10 @@ export const useGameStore = defineStore('game', () => {
     const urgencyMultiplier = customer.isImpatient ? 1.8 : (patienceRatio < 0.5 ? 1.0 + (0.5 - patienceRatio) : 1.0)
     const genreWeightBoost = patienceRatio < 0.5 ? (1 - patienceRatio) * 15 : 0
 
-    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; atmosphereBoost: number; urgencyHint: string | null; overstockStatus: OverstockStatus | null }
+    const isReservationCustomer = customer.reservationId !== null
+    const reservedRecordSet = new Set(customer.reservedRecordIds || [])
+
+    type ScoredRecord = { slot: DisplaySlot; item: InventoryItem; conditionScore: number; score: number; themeBonus: number; atmosphereBoost: number; urgencyHint: string | null; overstockStatus: OverstockStatus | null; isReservationTarget: boolean }
     const overstockMap = new Map(overstockInfos.value.map(i => [i.recordId, i]))
     const scored = displayed.map(d => {
       const score = calculateMatchScore(customer, d.item.record, shopReputation.value, genreMarketHeat.value)
@@ -1651,8 +1990,15 @@ export const useGameStore = defineStore('game', () => {
         finalScore += calculateDisplayPriorityBoost(overstockInfo.status)
       }
 
+      const isReservationTarget = isReservationCustomer && reservedRecordSet.has(d.item.record.id)
+      if (isReservationTarget) {
+        finalScore = Math.min(100, finalScore + 30)
+      }
+
       let urgencyHint: string | null = null
-      if (overstockStatus === 'deadstock') {
+      if (isReservationTarget) {
+        urgencyHint = '📋 预约目标！'
+      } else if (overstockStatus === 'deadstock') {
         urgencyHint = '🔥 严重积压！'
       } else if (overstockStatus === 'overstocked') {
         urgencyHint = '⚠️ 积压品'
@@ -1672,7 +2018,8 @@ export const useGameStore = defineStore('game', () => {
         themeBonus,
         atmosphereBoost,
         urgencyHint,
-        overstockStatus
+        overstockStatus,
+        isReservationTarget
       } as ScoredRecord
     }).sort((a, b) => b.score - a.score)
     return scored
@@ -1978,6 +2325,12 @@ export const useGameStore = defineStore('game', () => {
       buyChance = Math.min(1.0, buyChance * 2.2)
     }
 
+    const isReservationTarget = customer.reservationId !== null &&
+      (customer.reservedRecordIds || []).includes(record.id)
+    if (isReservationTarget) {
+      buyChance = Math.min(1.0, buyChance * 1.8 + 0.15)
+    }
+
     const bargainAgreed = currentBargain.value?.phase === 'agreed'
     const success = wasBargained && bargainAgreed
       ? (Math.random() < Math.min(1.0, buyChance * 0.95 + 0.05))
@@ -1985,7 +2338,8 @@ export const useGameStore = defineStore('game', () => {
 
     if (success) {
       const profit = salePrice - invItem.actualCostPrice
-      const baseSatisfaction = 50 + finalScore * 0.5 - (!isGiftItem && salePrice > record.marketPrice ? 20 : 0)
+      const reservationSatisfactionBonus = isReservationTarget ? 15 : 0
+      const baseSatisfaction = 50 + finalScore * 0.5 - (!isGiftItem && salePrice > record.marketPrice ? 20 : 0) + reservationSatisfactionBonus
       const memberBonus = customer.isReturningCustomer ? 5 : 0
       const bargainSatisfactionBonus = calculateBargainSatisfactionBonus(
         wasBargained,
@@ -2128,6 +2482,10 @@ export const useGameStore = defineStore('game', () => {
       slot.inventoryId = null
       slot.conditionScore = null
 
+      if (isReservationTarget) {
+        updateReservationOnSale(record.id, customer)
+      }
+
       const identityCollectionBonus = getIdentityCollectionChanceBonus(customer)
       const baseCollectionChance = 0.3
       const finalCollectionChance = Math.max(0, Math.min(1, baseCollectionChance + identityCollectionBonus))
@@ -2156,12 +2514,13 @@ export const useGameStore = defineStore('game', () => {
       const bargainNote = wasBargained ? `（砍价成交，初始报价¥${initialAskPrice}）` : ''
       const promotionNote = wasPromotionApplied ? `【促销立减¥${promotionDiscountAmount}】` : ''
       const giftNote = isGiftItem ? `🎁【赠品】` : ''
+      const reservationNote = isReservationTarget ? `📋【预约订单】` : ''
 
       currentBargain.value = null
 
       return {
         success: true,
-        message: `${giftNote}${customer.name} ${isGiftItem ? '获赠' : `以 ¥${salePrice} 购买了`}《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}${bargainNote}${promotionNote}【${slotLabel}】`,
+        message: `${giftNote}${customer.name} ${isGiftItem ? '获赠' : `以 ¥${salePrice} 购买了`}《${record.title}》！${customer.memberDiscount > 0 ? `（会员折扣${Math.round(customer.memberDiscount * 100)}%）` : ''}${growthPointsEarned > 0 ? ` 获得 ${growthPointsEarned} 成长值` : ''}${conditionImpact.priceModifier !== 1 ? ` 品相${conditionLabel}影响售价` : ''}${bargainNote}${promotionNote}${reservationNote}【${slotLabel}】`,
         satisfaction,
         profit,
         growthPoints: growthPointsEarned,
@@ -2169,7 +2528,8 @@ export const useGameStore = defineStore('game', () => {
         memberLevel: memberProfile?.level || null,
         wasPromotion: wasPromotionApplied || isGiftItem,
         promotionDiscount: promotionDiscountAmount,
-        isGift: isGiftItem
+        isGift: isGiftItem,
+        isReservationFulfillment: isReservationTarget
       }
     } else {
       dailyServedCustomers.value += 1
@@ -2844,6 +3204,16 @@ export const useGameStore = defineStore('game', () => {
     }
 
     applyDailyOverstockPenalty()
+    finalizeMissedReservations()
+
+    const missedRepPenalty = dailyReservationMissedCount.value * 2
+    if (missedRepPenalty > 0) {
+      shopReputation.value = Math.max(0, shopReputation.value - missedRepPenalty)
+    }
+    const fulfilledRepBonus = dailyReservationFulfilledCount.value
+    if (fulfilledRepBonus > 0) {
+      shopReputation.value = Math.min(100, shopReputation.value + fulfilledRepBonus)
+    }
 
     const currentSlotStats = getCurrentSlotStats()
     if (currentTimeSlot.value === 'afternoon') {
@@ -2924,6 +3294,7 @@ export const useGameStore = defineStore('game', () => {
             lastLevelReward.value = null
           }
         } else {
+          generateReservationsForNextDay()
           currentDay.value++
           resetDailyStats()
           phase.value = 'purchase'
@@ -3389,7 +3760,9 @@ export const useGameStore = defineStore('game', () => {
       willBargain: Math.random() < 0.2,
       isImpatient: false,
       hasLeftAngrily: false,
-      identityTag: 'collector' as const
+      identityTag: 'collector' as const,
+      reservationId: null,
+      reservedRecordIds: []
     }
   }
 
@@ -3620,6 +3993,13 @@ export const useGameStore = defineStore('game', () => {
     updateAllCollectionStoryProgress,
     addSaleToCollectionHistory,
     addLevelClearToCollectionHistory,
-    incrementCollectionDaysOwned
+    incrementCollectionDaysOwned,
+    reservations,
+    reservationSummary,
+    dailyReservationFulfilledCount,
+    dailyReservationMissedCount,
+    generateReservationsForNextDay,
+    finalizeMissedReservations,
+    updateReservationOnSale
   }
 })
