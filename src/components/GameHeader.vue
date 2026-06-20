@@ -12,6 +12,7 @@ const emit = defineEmits<{
   renovation: []
   'market-tour': []
   'repair-workshop': []
+  'encyclopedia': []
 }>()
 
 const gameStore = useGameStore()
@@ -81,6 +82,10 @@ const timeSlotLabel = computed(() => {
         </button>
         <button class="icon-btn" @click="emit('collection')">
           📚
+        </button>
+        <button class="icon-btn encyclopedia-btn" @click="emit('encyclopedia')">
+          📖
+          <span v-if="gameStore.getClaimableRewardsCount > 0" class="badge">{{ gameStore.getClaimableRewardsCount }}</span>
         </button>
       </div>
     </div>

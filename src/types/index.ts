@@ -1685,3 +1685,150 @@ export interface RepairWorkshopState {
   maxActiveTasks: number
   unlockedQualities: RepairQuality[]
 }
+
+export type EncyclopediaRarityTier = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+
+export interface EncyclopediaRarityConfig {
+  tier: EncyclopediaRarityTier
+  tierName: string
+  icon: string
+  color: string
+  minRarity: number
+  maxRarity: number
+  glowIntensity: number
+  description: string
+}
+
+export type EncyclopediaSeriesType = 
+  | 'genre' 
+  | 'artist' 
+  | 'decade' 
+  | 'theme' 
+  | 'special'
+
+export interface EncyclopediaSeries {
+  id: string
+  name: string
+  description: string
+  icon: string
+  type: EncyclopediaSeriesType
+  coverColor: string
+  requiredRecordIds: string[]
+  requiredMinCondition?: number
+  requiredMinRarity?: number
+  unlockLevel?: number
+  rewards: AlbumBonus[]
+  isUnlocked: boolean
+  isCompleted: boolean
+  completedDate: number | null
+  rewardClaimed: boolean
+  rewardClaimedDate: number | null
+}
+
+export interface EncyclopediaCategory {
+  id: string
+  name: string
+  description: string
+  icon: string
+  coverColor: string
+  genre: Genre | 'all'
+  series: EncyclopediaSeries[]
+  unlockLevel: number
+  isUnlocked: boolean
+}
+
+export interface EncyclopediaAchievement {
+  id: string
+  name: string
+  description: string
+  icon: string
+  category: 'collection' | 'series' | 'rarity' | 'condition' | 'special'
+  progressType: 'count' | 'percent' | 'boolean'
+  target: number
+  current: number
+  isUnlocked: boolean
+  unlockedDate: number | null
+  rewards: AlbumBonus[]
+  rewardClaimed: boolean
+  rewardClaimedDate: number | null
+}
+
+export interface EncyclopediaReward {
+  id: string
+  name: string
+  description: string
+  icon: string
+  bonuses: AlbumBonus[]
+  sourceType: 'series' | 'achievement' | 'milestone'
+  sourceId: string
+  isClaimable: boolean
+  isClaimed: boolean
+  claimedDate: number | null
+}
+
+export interface EncyclopediaMilestone {
+  id: string
+  name: string
+  description: string
+  icon: string
+  target: number
+  metric: 'total_collected' | 'total_value' | 'rare_count' | 'perfect_count' | 'series_completed'
+  rewards: AlbumBonus[]
+  isCompleted: boolean
+  isClaimed: boolean
+  claimedDate: number | null
+}
+
+export interface EncyclopediaStats {
+  totalRecords: number
+  collectedRecords: number
+  totalSeries: number
+  completedSeries: number
+  totalAchievements: number
+  unlockedAchievements: number
+  totalRarityScore: number
+  avgConditionScore: number
+  totalCollectionValue: number
+  rareRecordsCount: number
+  perfectRecordsCount: number
+  collectionProgress: number
+}
+
+export interface EncyclopediaEntry {
+  record: Record
+  isCollected: boolean
+  firstCollectedDate: number | null
+  collectedCount: number
+  bestConditionScore: number
+  totalSaleRevenue: number
+  totalSalesCount: number
+  isFavorite: boolean
+  seriesMemberships: string[]
+  rarityTier: EncyclopediaRarityTier
+}
+
+export interface EncyclopediaState {
+  categories: EncyclopediaCategory[]
+  achievements: EncyclopediaAchievement[]
+  milestones: EncyclopediaMilestone[]
+  rewards: EncyclopediaReward[]
+  entries: EncyclopediaEntry[]
+  stats: EncyclopediaStats
+  unlockedCategories: string[]
+  newlyUnlockedSeries: string[]
+  newlyUnlockedAchievements: string[]
+  newlyClaimableRewards: string[]
+}
+
+export interface EncyclopediaFilterOptions {
+  category: string
+  rarity: EncyclopediaRarityTier | 'all'
+  collected: 'all' | 'collected' | 'uncollected'
+  sortBy: 'rarity' | 'name' | 'date' | 'value'
+}
+
+export interface EncyclopediaRewardClaimResult {
+  success: boolean
+  message: string
+  rewards: AlbumBonus[]
+}

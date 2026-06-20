@@ -16,7 +16,12 @@ import type {
   AuctionHouseStats, CollectionSourceType, CollectionSource,
   ShopRenovationState, ShopRenovationBonusSummary,
   SupplierRelationship, SupplierContractTier, SupplierBreachRecord,
-  SupplierRelationshipBonusSummary
+  SupplierRelationshipBonusSummary,
+  EncyclopediaState, EncyclopediaSeries,
+  EncyclopediaRewardClaimResult,
+  EncyclopediaFilterOptions,
+  EncyclopediaEntry,
+  AlbumBonus
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -266,6 +271,17 @@ import type {
   RepairQuality,
   RepairHistoryEntry
 } from '@/types'
+import {
+  createInitialEncyclopediaState,
+  updateEncyclopediaOnCollectionAdd,
+  claimSeriesReward,
+  claimAchievementReward,
+  claimMilestoneReward,
+  getSeriesProgress,
+  rarityConfigs,
+  getRarityColor,
+  getRarityConfig
+} from '@/data/encyclopedia'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -426,6 +442,14 @@ export const useGameStore = defineStore('game', () => {
   } | null>(null)
 
   const repairWorkshop = ref<RepairWorkshopState>(createInitialRepairWorkshopState())
+
+  const encyclopedia = ref<EncyclopediaState>(createInitialEncyclopediaState())
+  const encyclopediaNotification = ref<{
+    show: boolean
+    type: 'series' | 'achievement' | 'milestone'
+    name: string
+    message: string
+  } | null>(null)
 
   const repairableInventory = computed(() => {
     const repairingIds = repairWorkshop.value.activeTasks.map(t => t.inventoryId)
@@ -4556,6 +4580,30 @@ export const useGameStore = defineStore('game', () => {
     updateCollectionBonuses()
     updateCollectionStoryProgress(record.id)
 
+    const { updatedState, newUnlocks } = updateEncyclopediaOnCollectionAdd(
+      encyclopedia.value,
+      collectionItem,
+      currentLevel.value
+    )
+    encyclopedia.value = updatedState
+
+    if (newUnlocks.series.length > 0) {
+      const seriesId = newUnlocks.series[0]
+      const series = encyclopedia.value.categories
+        .flatMap(c => c.series)
+        .find(s => s.id === seriesId)
+      if (series) {
+        showEncyclopediaNotification('series', series.name, '套系完成！可领取奖励')
+      }
+    }
+    if (newUnlocks.achievements.length > 0) {
+      const achId = newUnlocks.achievements[0]
+      const ach = encyclopedia.value.achievements.find(a => a.id === achId)
+      if (ach) {
+        showEncyclopediaNotification('achievement', ach.name, '成就解锁！可领取奖励')
+      }
+    }
+
     return newlyActivated
   }
 
@@ -6025,6 +6073,164 @@ export const useGameStore = defineStore('game', () => {
     return { success: true, message: `修复容量已提升至 ${repairWorkshop.value.maxActiveTasks} 个任务` }
   }
 
+  const showEncyclopediaNotification = (
+    type: 'series' | 'achievement' | 'milestone',
+    name: string,
+    message: string
+  ) => {
+    encyclopediaNotification.value = {
+      show: true,
+      type,
+      name,
+      message
+    }
+    setTimeout(() => {
+      encyclopediaNotification.value = null
+    }, 3000)
+  }
+
+  const claimEncyclopediaSeriesReward = (seriesId: string): EncyclopediaRewardClaimResult => {
+    const result = claimSeriesReward(encyclopedia.value, seriesId)
+    if (result.success) {
+      for (const bonus of result.rewards) {
+        applyEncyclopediaBonus(bonus)
+      }
+      showEncyclopediaNotification('series', result.message, '奖励已发放')
+    }
+    return result
+  }
+
+  const claimEncyclopediaAchievementReward = (achievementId: string): EncyclopediaRewardClaimResult => {
+    const result = claimAchievementReward(encyclopedia.value, achievementId)
+    if (result.success) {
+      for (const bonus of result.rewards) {
+        applyEncyclopediaBonus(bonus)
+      }
+      showEncyclopediaNotification('achievement', result.message, '奖励已发放')
+    }
+    return result
+  }
+
+  const claimEncyclopediaMilestoneReward = (milestoneId: string): EncyclopediaRewardClaimResult => {
+    const result = claimMilestoneReward(encyclopedia.value, milestoneId)
+    if (result.success) {
+      for (const bonus of result.rewards) {
+        applyEncyclopediaBonus(bonus)
+      }
+      showEncyclopediaNotification('milestone', result.message, '奖励已发放')
+    }
+    return result
+  }
+
+  const applyEncyclopediaBonus = (bonus: AlbumBonus) => {
+    switch (bonus.type) {
+      case 'reputation':
+        shopReputation.value = Math.min(100, shopReputation.value + bonus.value)
+        break
+      case 'price_bonus':
+        collectionBonuses.value.push({
+          source: 'album',
+          sourceId: `encyclopedia-${Date.now()}`,
+          bonusType: bonus.type,
+          value: bonus.value,
+          description: bonus.description
+        })
+        break
+      case 'customer_budget':
+      case 'buy_chance':
+      case 'match_score':
+      case 'level_reward':
+      case 'special_customer':
+      case 'record_unlock':
+        collectionBonuses.value.push({
+          source: 'album',
+          sourceId: `encyclopedia-${Date.now()}`,
+          bonusType: bonus.type,
+          value: bonus.value,
+          description: bonus.description
+        })
+        break
+    }
+  }
+
+  const getEncyclopediaSeriesProgress = (series: EncyclopediaSeries): number => {
+    return getSeriesProgress(series, collection.value)
+  }
+
+  const getFilteredEncyclopediaEntries = (
+    filters: EncyclopediaFilterOptions
+  ): EncyclopediaEntry[] => {
+    let entries = [...encyclopedia.value.entries]
+
+    if (filters.category !== 'all') {
+      const category = encyclopedia.value.categories.find(c => c.id === filters.category)
+      if (category) {
+        const seriesRecordIds = new Set(
+          category.series.flatMap(s => s.requiredRecordIds)
+        )
+        entries = entries.filter(e => seriesRecordIds.has(e.record.id))
+      }
+    }
+
+    if (filters.rarity !== 'all') {
+      const config = rarityConfigs.find(r => r.tier === filters.rarity)
+      if (config) {
+        entries = entries.filter(e => 
+          e.record.rarity >= config.minRarity && e.record.rarity <= config.maxRarity
+        )
+      }
+    }
+
+    if (filters.collected === 'collected') {
+      entries = entries.filter(e => e.isCollected)
+    } else if (filters.collected === 'uncollected') {
+      entries = entries.filter(e => !e.isCollected)
+    }
+
+    switch (filters.sortBy) {
+      case 'rarity':
+        entries.sort((a, b) => b.record.rarity - a.record.rarity)
+        break
+      case 'name':
+        entries.sort((a, b) => a.record.title.localeCompare(b.record.title))
+        break
+      case 'date':
+        entries.sort((a, b) => {
+          if (!a.firstCollectedDate) return 1
+          if (!b.firstCollectedDate) return -1
+          return b.firstCollectedDate - a.firstCollectedDate
+        })
+        break
+      case 'value':
+        entries.sort((a, b) => b.record.marketPrice - a.record.marketPrice)
+        break
+    }
+
+    return entries
+  }
+
+  const getClaimableRewardsCount = computed(() => {
+    let count = 0
+    for (const category of encyclopedia.value.categories) {
+      for (const series of category.series) {
+        if (series.isCompleted && !series.rewardClaimed) count++
+      }
+    }
+    for (const ach of encyclopedia.value.achievements) {
+      if (ach.isUnlocked && !ach.rewardClaimed) count++
+    }
+    for (const mile of encyclopedia.value.milestones) {
+      if (mile.isCompleted && !mile.isClaimed) count++
+    }
+    return count
+  })
+
+  const clearNewEncyclopediaNotifications = () => {
+    encyclopedia.value.newlyUnlockedSeries = []
+    encyclopedia.value.newlyUnlockedAchievements = []
+    encyclopedia.value.newlyClaimableRewards = []
+  }
+
   return {
     currentLevel,
     currentDay,
@@ -6366,6 +6572,18 @@ export const useGameStore = defineStore('game', () => {
     completeRepairTask,
     getRepairTaskEstimate,
     unlockMasterQuality,
-    expandRepairCapacity
+    expandRepairCapacity,
+    encyclopedia,
+    encyclopediaNotification,
+    getClaimableRewardsCount,
+    claimEncyclopediaSeriesReward,
+    claimEncyclopediaAchievementReward,
+    claimEncyclopediaMilestoneReward,
+    getEncyclopediaSeriesProgress,
+    getFilteredEncyclopediaEntries,
+    clearNewEncyclopediaNotifications,
+    rarityConfigs,
+    getRarityColor,
+    getRarityConfig
   }
 })
