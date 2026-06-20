@@ -197,6 +197,9 @@ export interface Customer {
   identityTag: CustomerIdentityTag | null
   reservationId: string | null
   reservedRecordIds: string[]
+  isFestivalCustomer?: boolean
+  festivalCustomerId?: string
+  festivalCustomerRarity?: 'rare' | 'epic' | 'legendary'
 }
 
 export type PatienceLevel = 'calm' | 'waiting' | 'restless' | 'impatient' | 'furious'

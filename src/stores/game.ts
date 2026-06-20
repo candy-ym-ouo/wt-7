@@ -22,7 +22,7 @@ import type {
   EncyclopediaFilterOptions,
   EncyclopediaEntry,
   AlbumBonus,
-  FestivalState, FestivalTheme, FestivalSettlement, FestivalTaskConfig
+  FestivalState, FestivalTheme, FestivalSettlement, FestivalTaskConfig, FestivalCustomerConfig
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -2679,6 +2679,39 @@ export const useGameStore = defineStore('game', () => {
       }
     }
 
+    if (festival.value.isFestivalActive && festival.value.customers.length > 0) {
+      const unlockedCustomers = festival.value.customers.filter(c => c.isUnlocked)
+      const festivalCustomersToAdd: Customer[] = []
+
+      for (const fc of unlockedCustomers) {
+        if (Math.random() < fc.appearanceChance) {
+          const festivalCust = generateFestivalCustomer(
+            fc.id,
+            fc,
+            shopReputation.value,
+            timeSlot
+          )
+          festivalCust.priorityScore = 93
+          festivalCustomersToAdd.push(festivalCust)
+        }
+      }
+
+      if (festivalCustomersToAdd.length > 0) {
+        const slotsToReplace = Math.min(festivalCustomersToAdd.length, Math.max(1, Math.floor(customers.length * 0.15)))
+        for (let i = 0; i < slotsToReplace && i < festivalCustomersToAdd.length; i++) {
+          const replaceIndex = Math.min(
+            customers.length - 1,
+            reservationCustomers.length + Math.floor(Math.random() * Math.max(1, customers.length - reservationCustomers.length))
+          )
+          if (replaceIndex >= 0 && replaceIndex < customers.length) {
+            const fc = festivalCustomersToAdd[i]
+            fc.arrivalOrder = customers[replaceIndex]?.arrivalOrder || count + i + 100
+            customers[replaceIndex] = fc
+          }
+        }
+      }
+    }
+
     return sortCustomerQueue(customers)
   }
 
@@ -2759,6 +2792,14 @@ export const useGameStore = defineStore('game', () => {
       currentTimeSlot.value
     )
 
+    if (festival.value.isFestivalActive) {
+      const maxAtmosphere = Math.max(0, ...allGenreAtmospheres.value.map(a => a.value))
+      if (maxAtmosphere > 0) {
+        updateFestivalTaskProgress('atmosphere', Math.round(maxAtmosphere), { absoluteValue: true })
+      }
+      updateFestivalTaskProgress('collection', Math.round(totalCollectionValue.value))
+    }
+
     dailyReturningCustomers.value = customers.value.filter(c => c.isReturningCustomer).length
     currentLevelReturningVisits.value += dailyReturningCustomers.value
     customersLeftAngrily.value = 0
@@ -2807,6 +2848,13 @@ export const useGameStore = defineStore('game', () => {
       'night'
     )
 
+    if (festival.value.isFestivalActive) {
+      const maxAtmosphere = Math.max(0, ...allGenreAtmospheres.value.map(a => a.value))
+      if (maxAtmosphere > 0) {
+        updateFestivalTaskProgress('atmosphere', Math.round(maxAtmosphere), { absoluteValue: true })
+      }
+    }
+
     dailyReturningCustomers.value += customers.value.filter(c => c.isReturningCustomer).length
     currentLevelReturningVisits.value += customers.value.filter(c => c.isReturningCustomer).length
     currentCustomerIndex.value = 0
@@ -2823,6 +2871,11 @@ export const useGameStore = defineStore('game', () => {
     isPlaying.value = true
     currentPlayingRecord.value = record
     genreAtmosphere.value = applyPlaybackAtmosphere(genreAtmosphere.value, record)
+
+    if (festival.value.isFestivalActive) {
+      const atm = getAtmosphereForGenre(record.genre)
+      updateFestivalTaskProgress('atmosphere', Math.round(atm.value))
+    }
   }
 
   const stopPlaying = () => {
@@ -3640,6 +3693,19 @@ export const useGameStore = defineStore('game', () => {
       }
       shopReputation.value = Math.min(100, Math.max(0, shopReputation.value + reputationDelta))
 
+      if (festival.value.isFestivalActive) {
+        updateFestivalTaskProgress('sales', 1)
+        updateFestivalTaskProgress('genre', 1, { genre: record.genre as Genre })
+        if (customer.isFestivalCustomer && customer.festivalCustomerId) {
+          recordFestivalCustomerEncounter(
+            customer.festivalCustomerId,
+            satisfaction,
+            record.id
+          )
+        }
+        updateFestivalTaskProgress('collection', Math.round(totalCollectionValue.value))
+      }
+
       const conditionLabel = getConditionLabel(slotConditionScore)
       const slotLabel = currentTimeSlot.value === 'afternoon' ? '午后' : '夜场'
       const bargainNote = wasBargained ? `（砍价成交，初始报价¥${initialAskPrice}）` : ''
@@ -3671,6 +3737,14 @@ export const useGameStore = defineStore('game', () => {
       dailySatisfactionSum.value += finalDissatisfaction
       slotSatisfactionSum.value += finalDissatisfaction
       shopReputation.value = Math.max(0, shopReputation.value - (wasBargained ? 2 : 1) - (patienceRatio < 0.3 ? 1 : 0))
+
+      if (festival.value.isFestivalActive && customer.isFestivalCustomer && customer.festivalCustomerId) {
+        recordFestivalCustomerEncounter(
+          customer.festivalCustomerId,
+          finalDissatisfaction,
+          null
+        )
+      }
 
       currentLevelSatisfactionSum.value += finalDissatisfaction
       currentLevelSatisfactionCount.value += 1
@@ -3708,6 +3782,16 @@ export const useGameStore = defineStore('game', () => {
       const customer = currentCustomer.value
       dailyServedCustomers.value += 1
       recordLostSale('customer_skipped')
+
+      if (festival.value.isFestivalActive && customer.isFestivalCustomer && customer.festivalCustomerId) {
+        const patienceRatio = customer.patience / customer.maxPatience
+        const encounterSatisfaction = Math.max(10, 30 + (patienceRatio < 0.3 ? -5 : 0))
+        recordFestivalCustomerEncounter(
+          customer.festivalCustomerId,
+          encounterSatisfaction,
+          null
+        )
+      }
 
       const skipLossReduction = staff.value.skipLossReduction
       const patienceRatio = customer.patience / customer.maxPatience
@@ -4429,6 +4513,7 @@ export const useGameStore = defineStore('game', () => {
         } else {
           generateReservationsForNextDay()
           currentDay.value++
+          advanceFestivalDay()
           resetDailyStats()
           dailyPurchaseAmountPerSupplier.value.clear()
           phase.value = 'purchase'
@@ -4980,6 +5065,62 @@ export const useGameStore = defineStore('game', () => {
       identityTag: 'collector' as const,
       reservationId: null,
       reservedRecordIds: []
+    }
+  }
+
+  const generateFestivalCustomer = (
+    baseId: string,
+    fc: FestivalCustomerConfig,
+    reputation: number,
+    timeSlot: TimeSlot
+  ): Customer => {
+    const prefGenres = fc.favoriteGenres.length >= 3
+      ? [...fc.favoriteGenres]
+      : [...fc.favoriteGenres, 'Jazz', 'Rock', 'Soul'].slice(0, 3)
+
+    const preference = {
+      favoriteGenres: prefGenres as Genre[],
+      priceRange: [
+        Math.round(300 * fc.budgetMultiplier),
+        Math.round(1200 * fc.budgetMultiplier)
+      ] as [number, number],
+      preferredRarity: fc.rarity === 'legendary' ? [3, 4, 5] : fc.rarity === 'epic' ? [3, 4] : [2, 3, 4],
+      preferenceStrength: 0.7 + Math.random() * 0.25
+    }
+
+    const slotConfig = getTimeSlotConfig(timeSlot)
+    const baseBudget = preference.priceRange[1] * (1.8 + Math.random() * 1.2)
+    const budget = Math.floor(getBudgetWithReputation(baseBudget, reputation) * slotConfig.budgetModifier * fc.budgetMultiplier)
+    const basePatience = 80 + Math.floor(Math.random() * 40)
+
+    const identityTag = fc.rarity === 'legendary' ? 'collector' : fc.rarity === 'epic' ? 'connoisseur' : 'enthusiast'
+
+    return {
+      id: `cust-festival-${baseId}-${Date.now()}`,
+      name: fc.name,
+      avatar: fc.avatar,
+      preference,
+      budget,
+      patience: basePatience,
+      maxPatience: basePatience,
+      patienceDecayRate: defaultPatienceConfig.decayBaseRate * 0.8,
+      arrivalOrder: 999,
+      priorityScore: 92,
+      satisfaction: 65 + fc.satisfactionBonus,
+      memberProfile: null,
+      isReturningCustomer: false,
+      memberDiscount: 0,
+      bargainAggressiveness: 0.05 + Math.random() * 0.2,
+      bargainToughness: 0.15 + Math.random() * 0.25,
+      willBargain: fc.rarity === 'legendary' ? Math.random() < 0.1 : Math.random() < 0.2,
+      isImpatient: false,
+      hasLeftAngrily: false,
+      identityTag: identityTag as any,
+      reservationId: null,
+      reservedRecordIds: [],
+      isFestivalCustomer: true,
+      festivalCustomerId: fc.id,
+      festivalCustomerRarity: fc.rarity
     }
   }
 
@@ -6490,30 +6631,78 @@ export const useGameStore = defineStore('game', () => {
     return { success: true, message: `成功购买${item.isFeatured ? '热门' : ''}节日商品！` }
   }
 
-  const updateFestivalTaskProgress = (type: FestivalTaskConfig['type'], amount: number) => {
+  const updateFestivalTaskProgress = (
+    type: FestivalTaskConfig['type'],
+    amount: number,
+    context?: {
+      genre?: Genre
+      absoluteValue?: boolean
+      festivalTheme?: FestivalTheme | null
+    }
+  ) => {
     if (!festival.value.isFestivalActive) return
+
+    const theme = context?.festivalTheme || festival.value.activeFestival
+    const themeConfig = theme ? getFestivalThemeConfig(theme) : null
 
     for (const task of festival.value.tasks) {
       if (task.status !== 'active') continue
-      if (task.type === type) {
-        task.current = Math.min(task.target, task.current + amount)
-        if (task.current >= task.target) {
-          task.status = 'completed'
-          festival.value.tasksCompleted++
+      if (task.type !== type) continue
+
+      if (type === 'genre' && themeConfig && context?.genre) {
+        if (!themeConfig.genreAffinity.includes(context.genre)) {
+          continue
         }
+      }
+
+      if (type === 'atmosphere') {
+        if (context?.absoluteValue) {
+          task.current = Math.min(task.target, Math.max(task.current, amount))
+        } else {
+          task.current = Math.min(task.target, Math.max(task.current, amount))
+        }
+      } else if (type === 'collection') {
+        task.current = Math.min(task.target, Math.max(task.current, amount))
+      } else {
+        task.current = Math.min(task.target, task.current + amount)
+      }
+
+      if (task.current >= task.target) {
+        task.status = 'completed'
+        festival.value.tasksCompleted++
+        festival.value.hasUnclaimedRewards = true
       }
     }
 
-    const specialTask = festival.value.tasks.find(t => t.type === 'special' && t.id.includes('special_1') && t.status === 'locked')
-    if (specialTask) {
-      const depsMet = specialTask.requiredTaskIds.every(id => {
+    for (const task of festival.value.tasks) {
+      if (task.status !== 'locked') continue
+      const dayMet = festival.value.festivalDay >= task.requiredDay
+      const depsMet = task.requiredTaskIds.every(id => {
         const dep = festival.value.tasks.find(t => t.id === id)
         return dep && (dep.status === 'completed' || dep.status === 'claimed')
       })
-      if (depsMet) {
+      if (dayMet && depsMet) {
+        task.status = 'active'
+      }
+    }
+
+    const specialTask = festival.value.tasks.find(
+      t => t.type === 'special' && t.id.includes('_special_1') && t.status !== 'completed' && t.status !== 'claimed'
+    )
+    if (specialTask) {
+      const allDepsComplete = specialTask.requiredTaskIds.every(id => {
+        const dep = festival.value.tasks.find(t => t.id === id)
+        return dep && (dep.status === 'completed' || dep.status === 'claimed')
+      })
+      if (allDepsComplete) {
         specialTask.current = 1
-        specialTask.status = 'completed'
-        festival.value.tasksCompleted++
+        if (specialTask.requiredDay > festival.value.festivalDay) {
+          // not day requirement yet
+        } else {
+          specialTask.status = 'completed'
+          festival.value.tasksCompleted++
+          festival.value.hasUnclaimedRewards = true
+        }
       }
     }
   }
