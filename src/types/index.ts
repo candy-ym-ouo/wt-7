@@ -1982,3 +1982,193 @@ export interface FestivalState {
   isFestivalActive: boolean
   hasUnclaimedRewards: boolean
 }
+
+export type SecondHandSource = 'recycle' | 'consignment'
+export type SecondHandStatus = 'pending_appraisal' | 'appraised' | 'accepted' | 'rejected' | 'in_stock' | 'sold' | 'settled' | 'cancelled'
+export type AppraisalQuality = 'poor' | 'fair' | 'good' | 'excellent' | 'perfect'
+
+export interface SecondHandAppraisal {
+  id: string
+  recordId: string
+  record: Record
+  source: SecondHandSource
+  sourceName: string
+  sellerName: string
+  sellerAvatar: string
+  submittedAt: number
+  conditionDescription: string
+  photosCount: number
+  hasProvenance: boolean
+  provenanceNote?: string
+  estimatedMinPrice: number
+  estimatedMaxPrice: number
+  finalAppraisalValue: number | null
+  appraisalQuality: AppraisalQuality | null
+  appraisalNote: string | null
+  appraisedAt: number | null
+  status: SecondHandStatus
+  isMember: boolean
+  memberLevel: MemberLevel | null
+  urgency: 'low' | 'normal' | 'high'
+  authenticityRisk: 'low' | 'medium' | 'high'
+  marketHeatBonus: number
+  reputationImpact: number | null
+}
+
+export interface ConsignmentTerms {
+  shopCommissionRate: number
+  sellerPayoutRate: number
+  basePrice: number
+  minPrice: number
+  maxPrice: number
+  durationDays: number
+  startDay: number
+  endDay: number
+  priceReductionSchedule: { day: number; discountRate: number }[]
+  settlementMethod: 'immediate' | 'weekly' | 'monthly'
+  autoPriceAdjust: boolean
+}
+
+export interface SecondHandInventoryItem {
+  id: string
+  appraisalId: string
+  record: Record
+  source: SecondHandSource
+  sourceName: string
+  sellerName: string
+  sellerAvatar: string
+  acquiredAt: number
+  actualCostPrice: number
+  conditionScore: number
+  listedPrice: number
+  currentPrice: number
+  consignmentTerms: ConsignmentTerms | null
+  isConsignment: boolean
+  daysInStock: number
+  viewCount: number
+  inquiryCount: number
+  isPromoted: boolean
+  status: SecondHandStatus
+  qualityTag: AppraisalQuality
+  authenticityGuaranteed: boolean
+  hasRepairHistory: boolean
+  repairNotes: string | null
+  genreMarketHeatBonus: number
+}
+
+export interface SecondHandSaleRecord {
+  id: string
+  inventoryId: string
+  appraisalId: string
+  recordId: string
+  recordTitle: string
+  recordArtist: string
+  source: SecondHandSource
+  sourceName: string
+  sellerName: string
+  sellerAvatar: string
+  buyerName: string
+  buyerAvatar: string
+  buyerMemberLevel: MemberLevel | null
+  isBuyerMember: boolean
+  finalSalePrice: number
+  originalListedPrice: number
+  discountApplied: number
+  shopCommission: number
+  sellerPayout: number
+  shopProfit: number
+  soldAt: number
+  soldDay: number
+  buyerSatisfaction: number
+  sellerSatisfaction: number
+  bargainingRounds: number
+  wasBargained: boolean
+  paymentMethod: 'cash' | 'card' | 'member_credit' | 'trade'
+  settlementStatus: 'pending' | 'completed' | 'disputed'
+  settlementDate: number | null
+  reputationImpact: number
+  reviewFromBuyer: string | null
+  reviewFromSeller: string | null
+  ratingFromBuyer: number | null
+  ratingFromSeller: number | null
+}
+
+export interface ReputationChangeLog {
+  id: string
+  timestamp: number
+  day: number
+  changeAmount: number
+  changeType: 'secondhand_sale' | 'appraisal_rejection' | 'seller_complaint' | 'buyer_complaint' | 'authenticity_issue' | 'fast_settlement' | 'positive_review' | 'negative_review' | 'fair_price' | 'overpriced' | 'consignment_success'
+  changeTypeName: string
+  description: string
+  relatedRecordId: string | null
+  relatedSaleId: string | null
+  relatedAppraisalId: string | null
+  sellerName: string | null
+  buyerName: string | null
+}
+
+export interface SecondHandSellerProfile {
+  id: string
+  name: string
+  avatar: string
+  totalItemsSubmitted: number
+  totalItemsAccepted: number
+  totalItemsSold: number
+  totalEarnings: number
+  acceptanceRate: number
+  avgRating: number
+  ratingCount: number
+  isTrustedSeller: boolean
+  isMember: boolean
+  memberLevel: MemberLevel | null
+  firstTransactionDate: number | null
+  lastTransactionDate: number | null
+  notes: string
+  preferredGenres: Genre[]
+  trustScore: number
+  disputeCount: number
+  authenticItemsCount: number
+}
+
+export interface SecondHandStats {
+  totalAppraisals: number
+  pendingAppraisals: number
+  acceptedAppraisals: number
+  rejectedAppraisals: number
+  totalInventoryItems: number
+  consignmentItems: number
+  recycleItems: number
+  totalSales: number
+  totalRevenue: number
+  totalShopProfit: number
+  totalSellerPayouts: number
+  avgSaleToAppraisalRatio: number
+  avgDaysToSell: number
+  totalReputationImpact: number
+  positiveReputationChanges: number
+  negativeReputationChanges: number
+  trustedSellers: number
+  activeSellers: number
+  topSoldGenre: Genre | null
+  avgBuyerSatisfaction: number
+  avgSellerSatisfaction: number
+  disputeRate: number
+}
+
+export interface SecondHandGameState {
+  appraisals: SecondHandAppraisal[]
+  inventory: SecondHandInventoryItem[]
+  sales: SecondHandSaleRecord[]
+  sellerProfiles: SecondHandSellerProfile[]
+  reputationChanges: ReputationChangeLog[]
+  stats: SecondHandStats
+  appraisalQueueSize: number
+  nextAppraisalRefresh: number
+  autoAcceptLowValue: boolean
+  autoAcceptThreshold: number
+  defaultConsignmentRate: number
+  defaultRecycleMarkup: number
+  selectedFilter: 'all' | 'pending' | 'in_stock' | 'sold' | 'consignment' | 'recycle'
+  notifications: { id: string; message: string; type: 'success' | 'warning' | 'error' | 'info'; read: boolean; createdAt: number }[]
+}

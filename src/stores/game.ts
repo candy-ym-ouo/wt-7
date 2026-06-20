@@ -22,7 +22,8 @@ import type {
   EncyclopediaFilterOptions,
   EncyclopediaEntry,
   AlbumBonus,
-  FestivalState, FestivalTheme, FestivalSettlement, FestivalTaskConfig, FestivalCustomerConfig
+  FestivalState, FestivalTheme, FestivalSettlement, FestivalTaskConfig, FestivalCustomerConfig,
+  SecondHandGameState
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -294,6 +295,25 @@ import {
   calculateFestivalScore,
   shouldFestivalAppear
 } from '@/data/festival'
+import {
+  createInitialSecondHandState,
+  generateDailyAppraisals,
+  performAppraisal as performAppraisalData,
+  acceptAppraisal as acceptAppraisalData,
+  rejectAppraisal as rejectAppraisalData,
+  updateSecondHandStats,
+  getOrCreateSellerProfile,
+  updateSellerProfileOnAccept,
+  addNotification as addSecondHandNotification,
+  markNotificationsRead as markSecondHandNotificationsReadData,
+  getUnreadNotificationCount,
+  getAppraisalQualityLabel,
+  getAppraisalQualityColor,
+  getSourceLabel,
+  getSourceIcon,
+  getStatusLabel,
+  getStatusColor
+} from '@/data/secondHand'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -465,6 +485,273 @@ export const useGameStore = defineStore('game', () => {
   } | null>(null)
 
   const festival = ref<FestivalState>(createInitialFestivalState())
+
+  const secondHand = ref<SecondHandGameState>(createInitialSecondHandState())
+
+  const secondHandPendingAppraisals = computed(() =>
+    secondHand.value.appraisals.filter(a => a.status === 'pending_appraisal')
+  )
+
+  const secondHandInStockItems = computed(() =>
+    secondHand.value.inventory.filter(i => i.status === 'in_stock')
+  )
+
+  const secondHandSoldItems = computed(() =>
+    secondHand.value.sales.slice(-20).reverse()
+  )
+
+  const secondHandConsignmentItems = computed(() =>
+    secondHand.value.inventory.filter(i => i.isConsignment && i.status === 'in_stock')
+  )
+
+  const secondHandRecycleItems = computed(() =>
+    secondHand.value.inventory.filter(i => !i.isConsignment && i.status === 'in_stock')
+  )
+
+  const secondHandUnreadNotificationCount = computed(() =>
+    getUnreadNotificationCount(secondHand.value)
+  )
+
+  const refreshSecondHandAppraisals = () => {
+    if (currentDay.value < secondHand.value.nextAppraisalRefresh) return
+    if (!baseLevelConfig.value) return
+
+    const excludeIds = [
+      ...inventory.value.map(i => i.record.id),
+      ...secondHand.value.appraisals.map(a => a.record.id),
+      ...secondHand.value.inventory.map(i => i.record.id),
+      ...collection.value.map(c => c.record.id)
+    ]
+    const unlockedGenres = getUnlockedGenres(currentLevel.value)
+    const memberProfileLevels = members.value.map(m => ({ level: m.level }))
+    const count = 2 + Math.floor(shopReputation.value / 30)
+
+    const newAppraisals = generateDailyAppraisals(
+      currentDay.value,
+      currentLevel.value,
+      unlockedGenres,
+      excludeIds,
+      genreMarketHeat.value,
+      count,
+      memberProfileLevels
+    )
+
+    if (newAppraisals.length > 0) {
+      secondHand.value.appraisals = [
+        ...secondHand.value.appraisals.filter(a => a.status !== 'rejected' || currentDay.value - a.appraisedAt! < 3),
+        ...newAppraisals
+      ]
+      secondHand.value.nextAppraisalRefresh = currentDay.value + 1
+      secondHand.value = addSecondHandNotification(
+        secondHand.value,
+        `有${newAppraisals.length}个新的二手估价申请`,
+        'info'
+      )
+    }
+
+    updateSecondHandStatsState()
+  }
+
+  const performSecondHandAppraisal = (appraisalId: string, conditionScore: number) => {
+    const appraisal = secondHand.value.appraisals.find(a => a.id === appraisalId)
+    if (!appraisal || appraisal.status !== 'pending_appraisal') {
+      return { success: false, message: '估价申请不存在或已处理' }
+    }
+
+    const result = performAppraisalData(appraisal, conditionScore, shopReputation.value)
+
+    appraisal.finalAppraisalValue = result.finalValue
+    appraisal.appraisalQuality = result.quality
+    appraisal.appraisalNote = result.note
+    appraisal.status = 'appraised'
+    appraisal.appraisedAt = Date.now()
+    appraisal.reputationImpact = result.reputationImpact
+
+    return {
+      success: true,
+      message: `估价完成：${getAppraisalQualityLabel(result.quality)}，估价¥${result.finalValue}`,
+      quality: result.quality,
+      finalValue: result.finalValue,
+      note: result.note,
+      suggestedRecyclePrice: result.suggestedRecyclePrice,
+      suggestedConsignmentPrice: result.suggestedConsignmentPrice,
+      reputationImpact: result.reputationImpact
+    }
+  }
+
+  const acceptSecondHandAppraisal = (appraisalId: string, negotiatedPrice: number) => {
+    const appraisal = secondHand.value.appraisals.find(a => a.id === appraisalId)
+    if (!appraisal) return { success: false, message: '估价申请不存在' }
+    if (appraisal.status !== 'appraised') return { success: false, message: '请先完成估价' }
+    if (!appraisal.finalAppraisalValue || !appraisal.appraisalQuality) {
+      return { success: false, message: '估价信息不完整' }
+    }
+
+    if (appraisal.source === 'recycle') {
+      if (budget.value < negotiatedPrice) {
+        return { success: false, message: `预算不足！需要¥${negotiatedPrice}` }
+      }
+      budget.value -= negotiatedPrice
+    }
+
+    const conditionScore = 35 + (appraisal.appraisalQuality === 'perfect' ? 55 :
+      appraisal.appraisalQuality === 'excellent' ? 40 :
+      appraisal.appraisalQuality === 'good' ? 25 :
+      appraisal.appraisalQuality === 'fair' ? 10 : 0) + Math.floor(Math.random() * 10)
+
+    const { inventoryItem, updatedAppraisal, reputationChange } = acceptAppraisalData(
+      appraisal,
+      appraisal.finalAppraisalValue,
+      appraisal.appraisalQuality,
+      appraisal.appraisalNote!,
+      negotiatedPrice,
+      currentDay.value,
+      secondHand.value.defaultConsignmentRate,
+      conditionScore
+    )
+
+    const idx = secondHand.value.appraisals.findIndex(a => a.id === appraisalId)
+    if (idx >= 0) secondHand.value.appraisals[idx] = updatedAppraisal
+
+    secondHand.value.inventory.push(inventoryItem)
+
+    if (reputationChange) {
+      secondHand.value.reputationChanges.unshift(reputationChange)
+      shopReputation.value = Math.max(0, Math.min(100, shopReputation.value + reputationChange.changeAmount))
+      secondHand.value.stats.totalReputationImpact += reputationChange.changeAmount
+      if (reputationChange.changeAmount > 0) {
+        secondHand.value.stats.positiveReputationChanges++
+      } else {
+        secondHand.value.stats.negativeReputationChanges++
+      }
+    }
+
+    const { profile, isNew } = getOrCreateSellerProfile(
+      secondHand.value.sellerProfiles,
+      appraisal.sellerName,
+      appraisal.sellerAvatar,
+      appraisal.isMember,
+      appraisal.memberLevel
+    )
+    const updatedProfile = updateSellerProfileOnAccept(
+      profile, true, appraisal.record.genre, appraisal.hasProvenance, Date.now()
+    )
+    if (isNew) {
+      secondHand.value.sellerProfiles.push(updatedProfile)
+    } else {
+      const pIdx = secondHand.value.sellerProfiles.findIndex(p => p.id === profile.id)
+      if (pIdx >= 0) secondHand.value.sellerProfiles[pIdx] = updatedProfile
+    }
+
+    secondHand.value = addSecondHandNotification(
+      secondHand.value,
+      `成功${appraisal.source === 'recycle' ? '回收' : '接收寄售'}《${appraisal.record.title}》`,
+      'success'
+    )
+
+    updateSecondHandStatsState()
+    return { success: true, message: '已成功接收！', inventoryItem }
+  }
+
+  const rejectSecondHandAppraisal = (appraisalId: string, reason: string) => {
+    const appraisal = secondHand.value.appraisals.find(a => a.id === appraisalId)
+    if (!appraisal) return { success: false, message: '估价申请不存在' }
+    if (appraisal.status === 'rejected' || appraisal.status === 'accepted' ||
+        appraisal.status === 'in_stock' || appraisal.status === 'sold') {
+      return { success: false, message: '该申请已处理' }
+    }
+
+    const { updatedAppraisal, reputationChange } = rejectAppraisalData(
+      appraisal, reason, currentDay.value
+    )
+
+    const idx = secondHand.value.appraisals.findIndex(a => a.id === appraisalId)
+    if (idx >= 0) secondHand.value.appraisals[idx] = updatedAppraisal
+
+    if (reputationChange) {
+      secondHand.value.reputationChanges.unshift(reputationChange)
+      shopReputation.value = Math.max(0, Math.min(100, shopReputation.value + reputationChange.changeAmount))
+      secondHand.value.stats.totalReputationImpact += reputationChange.changeAmount
+      if (reputationChange.changeAmount > 0) {
+        secondHand.value.stats.positiveReputationChanges++
+      } else {
+        secondHand.value.stats.negativeReputationChanges++
+      }
+    }
+
+    const { profile, isNew } = getOrCreateSellerProfile(
+      secondHand.value.sellerProfiles,
+      appraisal.sellerName,
+      appraisal.sellerAvatar,
+      appraisal.isMember,
+      appraisal.memberLevel
+    )
+    const updatedProfile = updateSellerProfileOnAccept(
+      profile, false, appraisal.record.genre, appraisal.hasProvenance, Date.now()
+    )
+    if (isNew) {
+      secondHand.value.sellerProfiles.push(updatedProfile)
+    } else {
+      const pIdx = secondHand.value.sellerProfiles.findIndex(p => p.id === profile.id)
+      if (pIdx >= 0) secondHand.value.sellerProfiles[pIdx] = updatedProfile
+    }
+
+    secondHand.value = addSecondHandNotification(
+      secondHand.value,
+      `已拒绝《${appraisal.record.title}》的${appraisal.sourceName}申请`,
+      'warning'
+    )
+
+    updateSecondHandStatsState()
+    return { success: true, message: '已拒绝申请' }
+  }
+
+  const adjustSecondHandPrice = (inventoryId: string, newPrice: number) => {
+    const item = secondHand.value.inventory.find(i => i.id === inventoryId)
+    if (!item) return { success: false, message: '商品不存在' }
+    if (item.status !== 'in_stock') return { success: false, message: '商品不在销售中' }
+    if (item.consignmentTerms && newPrice < item.consignmentTerms.minPrice) {
+      return { success: false, message: `寄售商品最低价不能低于¥${item.consignmentTerms.minPrice}` }
+    }
+    if (newPrice < item.actualCostPrice && !item.isConsignment) {
+      return { success: false, message: '不能低于回收成本价' }
+    }
+    item.currentPrice = newPrice
+    return { success: true, message: '售价已调整' }
+  }
+
+  const markSecondHandNotificationsRead = () => {
+    secondHand.value = markSecondHandNotificationsReadData(secondHand.value)
+  }
+
+  const setSecondHandFilter = (filter: SecondHandGameState['selectedFilter']) => {
+    secondHand.value.selectedFilter = filter
+  }
+
+  const getSecondHandFiltered = () => {
+    const filter = secondHand.value.selectedFilter
+    switch (filter) {
+      case 'pending': return secondHandPendingAppraisals.value
+      case 'in_stock': return secondHandInStockItems.value
+      case 'sold': return secondHandSoldItems.value
+      case 'consignment': return secondHandConsignmentItems.value
+      case 'recycle': return secondHandRecycleItems.value
+      default: return secondHandInStockItems.value
+    }
+  }
+
+  const updateSecondHandStatsState = () => {
+    secondHand.value.stats = updateSecondHandStats(
+      secondHand.value.stats,
+      secondHand.value.appraisals,
+      secondHand.value.inventory,
+      secondHand.value.sales
+    )
+    secondHand.value.stats.trustedSellers = secondHand.value.sellerProfiles.filter(p => p.isTrustedSeller).length
+    secondHand.value.stats.activeSellers = secondHand.value.sellerProfiles.filter(
+      p => p.totalItemsSold > 0 || p.totalItemsSubmitted > 0
+    ).length
+  }
 
   const repairableInventory = computed(() => {
     const repairingIds = repairWorkshop.value.activeTasks.map(t => t.inventoryId)
@@ -7125,6 +7412,27 @@ export const useGameStore = defineStore('game', () => {
     updateFestivalTaskProgress,
     recordFestivalCustomerEncounter,
     getFestivalBonuses,
-    switchFestivalAtmosphere
+    switchFestivalAtmosphere,
+    secondHand,
+    secondHandPendingAppraisals,
+    secondHandInStockItems,
+    secondHandSoldItems,
+    secondHandConsignmentItems,
+    secondHandRecycleItems,
+    secondHandUnreadNotificationCount,
+    refreshSecondHandAppraisals,
+    performSecondHandAppraisal,
+    acceptSecondHandAppraisal,
+    rejectSecondHandAppraisal,
+    adjustSecondHandPrice,
+    markSecondHandNotificationsRead,
+    setSecondHandFilter,
+    getSecondHandFiltered,
+    getAppraisalQualityLabel,
+    getAppraisalQualityColor,
+    getSourceLabel,
+    getSourceIcon,
+    getStatusLabel,
+    getStatusColor
   }
 })
