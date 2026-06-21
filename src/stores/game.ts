@@ -4070,6 +4070,23 @@ export const useGameStore = defineStore('game', () => {
         updateFestivalTaskProgress('collection', Math.round(totalCollectionValue.value))
       }
 
+      if (musicFestivalCollab.value.isCollabActive) {
+        updateCollabTaskProgress('sales', 1)
+        updateCollabTaskProgress('genre', 1, { genre: record.genre as Genre })
+        updateCollabTaskProgress('special', 1, { rarity: record.rarity })
+        if (customer.isFestivalCustomer && customer.festivalCustomerId) {
+          const isCollabCustomer = musicFestivalCollab.value.activeCollabCustomerIds.includes(customer.id)
+          if (isCollabCustomer) {
+            recordCollabCustomerEncounter(
+              customer.festivalCustomerId,
+              satisfaction,
+              record.id
+            )
+          }
+        }
+        updateCollabTaskProgress('collection', Math.round(totalCollectionValue.value))
+      }
+
       const conditionLabel = getConditionLabel(slotConditionScore)
       const slotLabel = currentTimeSlot.value === 'afternoon' ? '午后' : '夜场'
       const bargainNote = wasBargained ? `（砍价成交，初始报价¥${initialAskPrice}）` : ''
@@ -4108,6 +4125,17 @@ export const useGameStore = defineStore('game', () => {
           finalDissatisfaction,
           null
         )
+      }
+
+      if (musicFestivalCollab.value.isCollabActive && customer.isFestivalCustomer && customer.festivalCustomerId) {
+        const isCollabCustomer = musicFestivalCollab.value.activeCollabCustomerIds.includes(customer.id)
+        if (isCollabCustomer) {
+          recordCollabCustomerEncounter(
+            customer.festivalCustomerId,
+            finalDissatisfaction,
+            null
+          )
+        }
       }
 
       currentLevelSatisfactionSum.value += finalDissatisfaction
@@ -4878,6 +4906,7 @@ export const useGameStore = defineStore('game', () => {
           generateReservationsForNextDay()
           currentDay.value++
           advanceFestivalDay()
+          advanceMusicFestivalCollabDay()
           resetDailyStats()
           refreshCommunityDailyState()
           dailyPurchaseAmountPerSupplier.value.clear()
