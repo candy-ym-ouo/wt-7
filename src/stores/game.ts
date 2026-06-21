@@ -2702,7 +2702,47 @@ export const useGameStore = defineStore('game', () => {
       updateAchievementProgressAction('s_grade_levels', sGradeCount + 1)
     }
 
+    evaluatePlotEndingForCurrentLevel(reward)
+
     return reward
+  }
+
+  const evaluatePlotEndingForCurrentLevel = (_levelReward: any) => {
+    try {
+      import('@/stores/plotEvent').then(({ usePlotEventStore }) => {
+        const plotStore = usePlotEventStore()
+      
+        const avgSatisfaction = dailyStats.value.length > 0
+          ? dailyStats.value.reduce((sum, s) => sum + s.avgSatisfaction, 0) / dailyStats.value.length
+          : 50
+        
+        const endingResult = plotStore.evaluateLevelEndings({
+          levelId: currentLevel.value,
+          profit: currentLevelProfit.value,
+          avgSatisfaction,
+          reputation: shopReputation.value,
+          completedEventIds: plotStore.state.eventProgresses.filter((e: any) => e.status === 'completed').map((e: any) => e.eventId),
+          collectionCount: collection.value.length
+        })
+
+        if (endingResult) {
+          const endingReward = (endingResult as any).rewards
+          if (endingReward?.budgetBonus) {
+            budget.value += endingReward.budgetBonus
+          }
+          if (endingReward?.reputationBonus) {
+            shopReputation.value = Math.min(100, shopReputation.value + endingReward.reputationBonus)
+          }
+          if (endingReward?.growthPoints) {
+            dailyGrowthPointsEarned.value += endingReward.growthPoints
+          }
+        }
+      }).catch(e => {
+        console.warn('剧情结局判定失败:', e)
+      })
+    } catch (e) {
+      console.warn('剧情结局判定失败:', e)
+    }
   }
 
   const initializeDisplaySlots = (count: number) => {
@@ -3420,6 +3460,7 @@ export const useGameStore = defineStore('game', () => {
     }
 
     triggerDailyEvent()
+    tryTriggerPlotEvent()
 
     const baseCount = Math.min(
       baseLevelConfig.value.maxCustomers,
@@ -3455,6 +3496,38 @@ export const useGameStore = defineStore('game', () => {
     phase.value = 'business'
     checkCurrentCustomerValid()
     startPatienceTick()
+  }
+
+  const tryTriggerPlotEvent = () => {
+    try {
+      import('@/stores/plotEvent').then(({ usePlotEventStore }) => {
+        const plotStore = usePlotEventStore()
+
+        if (plotStore.hasActiveEvent) return
+        if (plotStore.state.dailyEventPool.length === 0) {
+          plotStore.rollDailyEventPool({
+            currentLevel: currentLevel.value,
+            currentDay: currentDay.value,
+            reputation: shopReputation.value,
+            budget: budget.value,
+            completedEventIds: plotStore.state.eventProgresses.filter((e: any) => e.status === 'completed').map((e: any) => e.eventId),
+            collectionCount: collection.value.length,
+            memberCount: members.value.length
+          })
+        }
+
+        const pool = plotStore.state.dailyEventPool
+        if (pool.length > 0 && Math.random() < 0.4) {
+          const randomIndex = Math.floor(Math.random() * pool.length)
+          const event = pool[randomIndex]
+          plotStore.triggerEvent(event.id, currentDay.value)
+        }
+      }).catch(e => {
+        console.warn('触发剧情事件失败:', e)
+      })
+    } catch (e) {
+      console.warn('触发剧情事件失败:', e)
+    }
   }
 
   const switchToNightSlot = () => {

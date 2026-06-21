@@ -26,6 +26,7 @@ import {
   getLevelEndings,
   getSpecialOrderById
 } from '@/data/plotEvents'
+import { useGameStore } from '@/stores/game'
 
 export const usePlotEventStore = defineStore('plotEvent', () => {
   const state = ref<PlotEventGameState>({
@@ -302,18 +303,21 @@ export const usePlotEventStore = defineStore('plotEvent', () => {
           if (state.value.activeProgress) {
             state.value.activeProgress.earnedRewards.budget += effect.value
           }
+          applyBudgetReward(effect.value)
           applied.push(effect)
           break
         case 'reputation':
           if (state.value.activeProgress) {
             state.value.activeProgress.earnedRewards.reputation += effect.value
           }
+          applyReputationReward(effect.value)
           applied.push(effect)
           break
         case 'growth_points':
           if (state.value.activeProgress) {
             state.value.activeProgress.earnedRewards.growthPoints += effect.value
           }
+          applyGrowthPointsReward(effect.value)
           applied.push(effect)
           break
         case 'special_flag':
@@ -358,18 +362,54 @@ export const usePlotEventStore = defineStore('plotEvent', () => {
     return applied
   }
 
+  const applyBudgetReward = (amount: number) => {
+    try {
+      const gameStore = useGameStore()
+      if (gameStore.budget !== undefined) {
+        gameStore.budget = Math.max(0, gameStore.budget + amount)
+      }
+    } catch (e) {
+      console.warn('无法应用预算奖励:', e)
+    }
+  }
+
+  const applyReputationReward = (amount: number) => {
+    try {
+      const gameStore = useGameStore()
+      if (gameStore.shopReputation !== undefined) {
+        gameStore.shopReputation = Math.max(0, Math.min(100, gameStore.shopReputation + amount))
+      }
+    } catch (e) {
+      console.warn('无法应用声望奖励:', e)
+    }
+  }
+
+  const applyGrowthPointsReward = (amount: number) => {
+    try {
+      const gameStore = useGameStore()
+      if (gameStore.dailyGrowthPointsEarned !== undefined) {
+        gameStore.dailyGrowthPointsEarned += amount
+      }
+    } catch (e) {
+      console.warn('无法应用成长值奖励:', e)
+    }
+  }
+
   const applyEndingReward = (node: PlotEventNode) => {
     if (!node.unlockReward || !state.value.activeProgress) return
 
     const reward = node.unlockReward
     if (reward.budget) {
       state.value.activeProgress.earnedRewards.budget += reward.budget
+      applyBudgetReward(reward.budget)
     }
     if (reward.reputation) {
       state.value.activeProgress.earnedRewards.reputation += reward.reputation
+      applyReputationReward(reward.reputation)
     }
     if (reward.growthPoints) {
       state.value.activeProgress.earnedRewards.growthPoints += reward.growthPoints
+      applyGrowthPointsReward(reward.growthPoints)
     }
     if (reward.recordId) {
       if (!state.value.activeProgress.earnedRewards.records.includes(reward.recordId)) {
@@ -534,6 +574,8 @@ export const usePlotEventStore = defineStore('plotEvent', () => {
       return { success: false, message: `需要 ¥${deposit} 作为启动资金` }
     }
 
+    applyBudgetReward(-deposit)
+
     const deadlineDays = (orderConfig as any).deadlineDays || 14
     const newProgress: SpecialOrderProgress = {
       orderId,
@@ -641,6 +683,8 @@ export const usePlotEventStore = defineStore('plotEvent', () => {
       return { success: false, message: '提供的唱片不满足全部要求' }
     }
 
+    removeRecordsFromInventory(Array.from(usedRecordIds))
+
     progress.isCompleted = true
     progress.isActive = false
     progress.fulfilledDay = currentDay
@@ -654,6 +698,10 @@ export const usePlotEventStore = defineStore('plotEvent', () => {
     }
     progress.earnedReward = reward
     state.value.totalSpecialOrdersFulfilled++
+
+    applyBudgetReward(reward.basePayment + reward.bonusPayment)
+    applyReputationReward(reward.reputation)
+    applyGrowthPointsReward(reward.growthPoints)
 
     if (orderConfig.reward.relationshipBonus) {
       addRelationshipTrust(orderConfig.customerId, orderConfig.reward.relationshipBonus)
@@ -671,6 +719,22 @@ export const usePlotEventStore = defineStore('plotEvent', () => {
       success: true,
       message: isPerfect ? '完美完成！获得全部奖励！' : '订单完成，获得部分奖励',
       reward
+    }
+  }
+
+  const removeRecordsFromInventory = (recordIds: string[]) => {
+    try {
+      const gameStore = useGameStore()
+      if (gameStore.inventory && Array.isArray(gameStore.inventory)) {
+        for (const id of recordIds) {
+          const idx = gameStore.inventory.findIndex((item: any) => item.record?.id === id || item.id === id)
+          if (idx !== -1) {
+            gameStore.inventory.splice(idx, 1)
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('无法从库存中移除唱片:', e)
     }
   }
 
