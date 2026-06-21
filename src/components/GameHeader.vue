@@ -23,6 +23,7 @@ const emit = defineEmits<{
   'subscription-box': []
   'market-trends': []
   'cross-shop': []
+  'local-performance': []
   'plot-event': []
 }>()
 
@@ -136,6 +137,11 @@ const timeSlotLabel = computed(() => {
         <button class="icon-btn cross-shop-btn" @click="emit('cross-shop')">
           🔄
           <span v-if="gameStore.crossShopUnreadNotifications > 0" class="badge">{{ gameStore.crossShopUnreadNotifications }}</span>
+        </button>
+        <button class="icon-btn local-perf-btn" @click="emit('local-performance')">
+          🎤
+          <span v-if="gameStore.localPerformance.isActive" class="badge active-dot">●</span>
+          <span v-if="gameStore.localPerformance.hasUnclaimedRewards" class="badge">🎁</span>
         </button>
         <button class="icon-btn achievements-btn" @click="emit('achievements')">
           🏆
@@ -395,6 +401,10 @@ const timeSlotLabel = computed(() => {
 }
 
 .subscription-box-btn {
+  position: relative;
+}
+
+.local-perf-btn {
   position: relative;
 }
 </style>

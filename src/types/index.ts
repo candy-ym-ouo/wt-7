@@ -3601,3 +3601,181 @@ export interface SpecialOrderAcceptResult {
   cost?: number
 }
 
+export type LocalPerfArtistRarity = 'common' | 'rare' | 'epic' | 'legendary'
+export type LocalPerfArtistStatus = 'available' | 'invited' | 'performing' | 'completed' | 'declined'
+export type LocalPerfEventType = 'listening_session' | 'live_show' | 'signing_event' | 'album_preview'
+export type LocalPerfTaskStatus = 'locked' | 'active' | 'completed' | 'claimed'
+export type LocalPerfLimitedStatus = 'available' | 'selling' | 'sold_out' | 'ended'
+
+export interface LocalPerfArtist {
+  id: string
+  name: string
+  avatar: string
+  title: string
+  description: string
+  rarity: LocalPerfArtistRarity
+  genre: Genre
+  subGenres: Genre[]
+  performanceType: LocalPerfEventType
+  residencyDays: number
+  costPerDay: number
+  minReputation: number
+  minLevel: number
+  isUnlocked: boolean
+  customerAttractBonus: number
+  atmosphereBonus: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  quotes: string[]
+  specialRewardId: string
+}
+
+export interface LocalPerfResidency {
+  artistId: string
+  status: LocalPerfArtistStatus
+  startDay: number | null
+  daysRemaining: number
+  totalDays: number
+  customersAttracted: number
+  limitedSold: number
+  satisfactionGained: number
+  reputationGained: number
+}
+
+export interface LocalPerfListeningEvent {
+  id: string
+  artistId: string
+  name: string
+  icon: string
+  description: string
+  type: LocalPerfEventType
+  genreFocus: Genre
+  durationDays: number
+  cost: number
+  customerAttractModifier: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  playBoostBonus: number
+  reputationBonus: number
+  minArtistRarity: LocalPerfArtistRarity
+  isUnlocked: boolean
+  timesHeld: number
+}
+
+export interface LocalPerfActiveEvent {
+  eventConfig: LocalPerfListeningEvent
+  artistId: string
+  startDay: number
+  daysRemaining: number
+  customersAttracted: number
+  recordsSold: number
+  bonusRevenue: number
+}
+
+export interface LocalPerfLimitedItem {
+  id: string
+  artistId: string
+  recordId: string
+  recordTitle: string
+  recordArtist: string
+  genre: Genre
+  limitedStock: number
+  remainingStock: number
+  originalPrice: number
+  collabPrice: number
+  isExclusive: boolean
+  rarity: LocalPerfArtistRarity
+  bonusDescription: string
+  status: LocalPerfLimitedStatus
+  soldCount: number
+}
+
+export interface LocalPerfTask {
+  id: string
+  name: string
+  icon: string
+  description: string
+  target: number
+  current: number
+  status: LocalPerfTaskStatus
+  reward: LocalPerfTaskReward
+  requiredTaskIds: string[]
+  requiredDay: number
+}
+
+export interface LocalPerfTaskReward {
+  budget: number
+  reputation: number
+  growthPoints: number
+  bonusItems: string[]
+}
+
+export interface LocalPerfReputationTier {
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum'
+  tierName: string
+  icon: string
+  minScore: number
+  rewards: LocalPerfTaskReward
+  description: string
+}
+
+export interface LocalPerfSettlement {
+  artistId: string
+  artistName: string
+  totalScore: number
+  rewardTier: LocalPerfReputationTier
+  daysPerformed: number
+  customersAttracted: number
+  limitedSold: number
+  tasksCompleted: number
+  totalTasks: number
+  bonusRewards: string[]
+  settledDay: number
+}
+
+export interface LocalPerfBonusSummary {
+  customerAttractBonus: number
+  atmosphereBonus: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  playBoostBonus: number
+  reputationDailyBonus: number
+}
+
+export interface LocalPerformanceState {
+  isActive: boolean
+  currentArtistId: string | null
+  residency: LocalPerfResidency | null
+  artists: LocalPerfArtist[]
+  listeningEvents: LocalPerfListeningEvent[]
+  activeEvent: LocalPerfActiveEvent | null
+  limitedItems: LocalPerfLimitedItem[]
+  tasks: LocalPerfTask[]
+  settlements: LocalPerfSettlement[]
+  totalScore: number
+  totalCustomersAttracted: number
+  totalLimitedSold: number
+  tasksCompleted: number
+  hasUnclaimedRewards: boolean
+  eventHeldCount: number
+  lastEventDay: number
+}
+
+export interface LocalPerfInviteResult {
+  success: boolean
+  message: string
+  cost?: number
+}
+
+export interface LocalPerfEventResult {
+  success: boolean
+  message: string
+  cost?: number
+}
+
+export interface LocalPerfLimitedBuyResult {
+  success: boolean
+  message: string
+  cost?: number
+}
+

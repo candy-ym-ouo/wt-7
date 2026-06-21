@@ -45,7 +45,12 @@ import type {
   CrossShopValuation,
   CrossShopValuationResult,
   CrossShopInventoryItem,
-  CrossShopTradeCompleteResult
+  CrossShopTradeCompleteResult,
+  LocalPerformanceState,
+  LocalPerfInviteResult,
+  LocalPerfEventResult,
+  LocalPerfLimitedBuyResult,
+  LocalPerfBonusSummary
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -384,6 +389,17 @@ import {
   canRefreshCustomers
 } from '@/data/musicFestivalCollab'
 import {
+  createInitialLocalPerformanceState,
+  calculateLocalPerfScore,
+  calculateLocalPerfBonusSummary,
+  getReputationTierByScore as getLocalPerfTierByScore,
+  getRarityLabel as getLocalPerfRarityLabel,
+  getRarityColor as getLocalPerfRarityColor,
+  getTaskStatusLabel as getLocalPerfTaskStatusLabel,
+  getTaskStatusColor as getLocalPerfTaskStatusColor,
+  getEventTypeLabel as getLocalPerfEventTypeLabel
+} from '@/data/localPerformance'
+import {
   createInitialSecondHandState,
   generateDailyAppraisals,
   performAppraisal as performAppraisalData,
@@ -673,6 +689,8 @@ export const useGameStore = defineStore('game', () => {
   const subscriptionBox = ref<SubscriptionBoxGameState>(createInitialSubscriptionBoxState())
 
   const crossShop = ref<CrossShopGameState>(createInitialCrossShopState())
+
+  const localPerformance = ref<LocalPerformanceState>(createInitialLocalPerformanceState())
 
   const currentCrossShopShops = computed<CrossShopShop[]>(() => {
     return getShopsForLevel(currentLevel.value, shopReputation.value)
@@ -5310,6 +5328,7 @@ export const useGameStore = defineStore('game', () => {
           currentDay.value++
           advanceFestivalDay()
           advanceMusicFestivalCollabDay()
+          advanceLocalPerfDay()
           advanceSubscriptionBoxDay()
           processDailyStaffManagement()
           resetDailyStats()
@@ -9031,6 +9050,257 @@ export const useGameStore = defineStore('game', () => {
   const getCollabTaskStatusColor = getTaskStatusColor
   const getCollabThemeConfig = getThemeConfig
 
+  const getLocalPerfRarityLabel = getLocalPerfRarityLabelData
+  const getLocalPerfRarityColor = getLocalPerfRarityColorData
+  const getLocalPerfTaskStatusLabel = getLocalPerfTaskStatusLabelData
+  const getLocalPerfTaskStatusColor = getLocalPerfTaskStatusColorData
+  const getLocalPerfEventTypeLabel = getLocalPerfEventTypeLabelData
+
+  const localPerfScore = computed(() => {
+    const lp = localPerformance.value
+    return calculateLocalPerfScore(
+      lp.totalCustomersAttracted,
+      lp.totalLimitedSold,
+      lp.eventHeldCount,
+      lp.tasksCompleted,
+      lp.tasks.length
+    )
+  })
+
+  const localPerfRewardTier = computed(() => getLocalPerfTierByScore(localPerfScore.value))
+
+  const localPerfBonusSummary = computed((): LocalPerfBonusSummary => {
+    return calculateLocalPerfBonusSummary(
+      localPerformance.value.residency,
+      localPerformance.value.activeEvent,
+      localPerformance.value.artists
+    )
+  })
+
+  const inviteLocalPerfArtist = (artistId: string): LocalPerfInviteResult => {
+    const lp = localPerformance.value
+    if (lp.isActive) {
+      return { success: false, message: '已有艺人驻店中' }
+    }
+    const artist = lp.artists.find(a => a.id === artistId)
+    if (!artist) {
+      return { success: false, message: '未找到该艺人' }
+    }
+    if (!artist.isUnlocked) {
+      return { success: false, message: '该艺人尚未解锁' }
+    }
+    const totalCost = artist.costPerDay * artist.residencyDays
+    if (budget.value < totalCost) {
+      return { success: false, message: '资金不足' }
+    }
+    budget.value -= totalCost
+    lp.currentArtistId = artistId
+    lp.isActive = true
+    lp.residency = {
+      artistId,
+      status: 'performing',
+      startDay: currentDay.value,
+      daysRemaining: artist.residencyDays,
+      totalDays: artist.residencyDays,
+      customersAttracted: 0,
+      limitedSold: 0,
+      satisfactionGained: 0,
+      reputationGained: 0
+    }
+    lp.totalScore = 0
+    lp.totalCustomersAttracted = 0
+    lp.totalLimitedSold = 0
+    lp.tasksCompleted = 0
+    lp.hasUnclaimedRewards = false
+    lp.eventHeldCount = 0
+    for (const t of lp.tasks) {
+      if (t.requiredTaskIds.length === 0) {
+        t.status = 'active'
+      }
+      t.current = 0
+    }
+    for (const item of lp.limitedItems) {
+      if (item.artistId === artistId) {
+        item.status = 'selling'
+      }
+    }
+    for (const evt of lp.listeningEvents) {
+      if (lp.artists.find(a => a.id === evt.artistId)?.isUnlocked) {
+        evt.isUnlocked = true
+      }
+    }
+    return { success: true, message: `${artist.name}已开始驻店演出！`, cost: totalCost }
+  }
+
+  const endLocalPerfResidency = () => {
+    const lp = localPerformance.value
+    if (!lp.isActive || !lp.residency) return
+    lp.residency.status = 'completed'
+    lp.residency.daysRemaining = 0
+    const settlement = {
+      artistId: lp.residency.artistId,
+      artistName: lp.artists.find(a => a.id === lp.residency!.artistId)?.name || '',
+      totalScore: localPerfScore.value,
+      rewardTier: localPerfRewardTier.value,
+      daysPerformed: lp.residency.totalDays,
+      customersAttracted: lp.totalCustomersAttracted,
+      limitedSold: lp.totalLimitedSold,
+      tasksCompleted: lp.tasksCompleted,
+      totalTasks: lp.tasks.length,
+      bonusRewards: [] as string[],
+      settledDay: currentDay.value
+    }
+    lp.settlements.push(settlement)
+    if (localPerfScore.value >= localPerfRewardTier.value.minScore) {
+      lp.hasUnclaimedRewards = true
+    }
+    for (const item of lp.limitedItems) {
+      if (item.status === 'selling') {
+        item.status = 'ended'
+      }
+    }
+    lp.isActive = false
+    lp.currentArtistId = null
+    lp.activeEvent = null
+  }
+
+  const startLocalPerfEvent = (eventId: string): LocalPerfEventResult => {
+    const lp = localPerformance.value
+    if (!lp.isActive) {
+      return { success: false, message: '需要先邀请艺人驻店' }
+    }
+    if (lp.activeEvent) {
+      return { success: false, message: '已有活动进行中' }
+    }
+    const event = lp.listeningEvents.find(e => e.id === eventId)
+    if (!event) {
+      return { success: false, message: '未找到该活动' }
+    }
+    if (!event.isUnlocked) {
+      return { success: false, message: '该活动尚未解锁' }
+    }
+    if (budget.value < event.cost) {
+      return { success: false, message: '资金不足' }
+    }
+    budget.value -= event.cost
+    lp.activeEvent = {
+      eventConfig: { ...event },
+      artistId: lp.currentArtistId!,
+      startDay: currentDay.value,
+      daysRemaining: event.durationDays,
+      customersAttracted: 0,
+      recordsSold: 0,
+      bonusRevenue: 0
+    }
+    lp.eventHeldCount++
+    event.timesHeld++
+    return { success: true, message: `${event.name}已开始！`, cost: event.cost }
+  }
+
+  const buyLocalPerfLimitedItem = (itemId: string): LocalPerfLimitedBuyResult => {
+    const lp = localPerformance.value
+    const item = lp.limitedItems.find(i => i.id === itemId)
+    if (!item) {
+      return { success: false, message: '未找到该商品' }
+    }
+    if (item.remainingStock <= 0 || item.status === 'sold_out' || item.status === 'ended') {
+      return { success: false, message: '该商品已售罄' }
+    }
+    if (budget.value < item.collabPrice) {
+      return { success: false, message: '资金不足' }
+    }
+    budget.value -= item.collabPrice
+    item.remainingStock--
+    item.soldCount++
+    lp.totalLimitedSold++
+    if (lp.residency) {
+      lp.residency.limitedSold++
+    }
+    if (item.remainingStock <= 0) {
+      item.status = 'sold_out'
+    }
+    return { success: true, message: `购入${item.recordTitle}！`, cost: item.collabPrice }
+  }
+
+  const claimLocalPerfTaskReward = (taskId: string): { success: boolean; message: string } => {
+    const lp = localPerformance.value
+    const task = lp.tasks.find(t => t.id === taskId)
+    if (!task || task.status !== 'completed') {
+      return { success: false, message: '任务不可领取' }
+    }
+    task.status = 'claimed'
+    budget.value += task.reward.budget
+    shopReputation.value += task.reward.reputation
+    return { success: true, message: `已领取奖励：¥${task.reward.budget} +${task.reward.reputation}声望` }
+  }
+
+  const claimLocalPerfReward = (): { success: boolean; message: string } => {
+    const lp = localPerformance.value
+    if (!lp.hasUnclaimedRewards) {
+      return { success: false, message: '暂无可领取的奖励' }
+    }
+    const tier = localPerfRewardTier.value
+    budget.value += tier.rewards.budget
+    shopReputation.value += tier.rewards.reputation
+    lp.hasUnclaimedRewards = false
+    return { success: true, message: `已领取${tier.tierName}：¥${tier.rewards.budget} +${tier.rewards.reputation}声望` }
+  }
+
+  const advanceLocalPerfDay = () => {
+    const lp = localPerformance.value
+    if (!lp.isActive || !lp.residency) return
+    if (lp.residency.status !== 'performing') return
+    lp.residency.daysRemaining--
+    const artist = lp.artists.find(a => a.id === lp.residency!.artistId)
+    if (artist) {
+      shopReputation.value += 3
+    }
+    if (lp.activeEvent) {
+      lp.activeEvent.daysRemaining--
+      if (lp.activeEvent.daysRemaining <= 0) {
+        lp.activeEvent = null
+      }
+    }
+    if (lp.residency.daysRemaining <= 0) {
+      endLocalPerfResidency()
+    }
+  }
+
+  const updateLocalPerfTaskProgress = (type: 'customers' | 'limited_sold' | 'events' | 'satisfaction', value: number) => {
+    const lp = localPerformance.value
+    if (!lp.isActive) return
+    for (const task of lp.tasks) {
+      if (task.status !== 'active') continue
+      let matched = false
+      if (type === 'customers' && (task.id.includes('attract'))) {
+        task.current = Math.min(task.target, task.current + value)
+        matched = true
+      }
+      if (type === 'limited_sold' && (task.id.includes('limited'))) {
+        task.current = Math.min(task.target, task.current + value)
+        matched = true
+      }
+      if (type === 'events' && (task.id.includes('event'))) {
+        task.current = Math.min(task.target, task.current + value)
+        matched = true
+      }
+      if (type === 'satisfaction' && (task.id.includes('satisfaction'))) {
+        task.current = Math.min(task.target, value)
+        matched = true
+      }
+      if (matched && task.current >= task.target) {
+        task.status = 'completed'
+        lp.tasksCompleted++
+      }
+    }
+    for (const task of lp.tasks) {
+      if (task.status !== 'locked') continue
+      if (task.requiredTaskIds.length > 0 && task.requiredTaskIds.every(id => lp.tasks.find(t => t.id === id)?.status === 'completed' || lp.tasks.find(t => t.id === id)?.status === 'claimed')) {
+        task.status = 'active'
+      }
+    }
+  }
+
   const getUnclaimedAchievementRewardCount = computed(() => {
     return getUnclaimedRewardCount(achievements.value)
   })
@@ -10095,6 +10365,23 @@ export const useGameStore = defineStore('game', () => {
     markCrossShopNotificationsReadAction,
     getCrossShopTradeStatusLabel,
     getCrossShopTradeStatusColor,
-    getCrossShopReactionEmoji
+    getCrossShopReactionEmoji,
+    localPerformance,
+    localPerfScore,
+    localPerfRewardTier,
+    localPerfBonusSummary,
+    inviteLocalPerfArtist,
+    endLocalPerfResidency,
+    startLocalPerfEvent,
+    buyLocalPerfLimitedItem,
+    claimLocalPerfTaskReward,
+    claimLocalPerfReward,
+    advanceLocalPerfDay,
+    updateLocalPerfTaskProgress,
+    getLocalPerfRarityLabel,
+    getLocalPerfRarityColor,
+    getLocalPerfTaskStatusLabel,
+    getLocalPerfTaskStatusColor,
+    getLocalPerfEventTypeLabel
   }
 })

@@ -25,6 +25,7 @@ import StaffManagementView from './components/StaffManagementView.vue'
 import SubscriptionBoxView from './components/SubscriptionBoxView.vue'
 import MarketTrendsView from './components/MarketTrendsView.vue'
 import CrossShopView from './components/CrossShopView.vue'
+import LocalPerformanceView from './components/LocalPerformanceView.vue'
 import PlotEventPanel from './components/PlotEventPanel.vue'
 import PlotEventDialog from './components/PlotEventDialog.vue'
 
@@ -47,6 +48,7 @@ const showStaffManagement = ref(false)
 const showSubscriptionBox = ref(false)
 const showMarketTrends = ref(false)
 const showCrossShop = ref(false)
+const showLocalPerformance = ref(false)
 const showPlotEvent = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
@@ -140,6 +142,10 @@ const toggleCrossShop = () => {
   }
 }
 
+const toggleLocalPerformance = () => {
+  showLocalPerformance.value = !showLocalPerformance.value
+}
+
 const togglePlotEvent = () => {
   showPlotEvent.value = !showPlotEvent.value
 }
@@ -165,6 +171,7 @@ const togglePlotEvent = () => {
     <SubscriptionBoxView v-if="showSubscriptionBox" @close="toggleSubscriptionBox" />
     <MarketTrendsView v-if="showMarketTrends" @close="toggleMarketTrends" />
     <CrossShopView v-if="showCrossShop" @close="toggleCrossShop" />
+    <LocalPerformanceView v-if="showLocalPerformance" @close="toggleLocalPerformance" />
     <PlotEventPanel v-if="showPlotEvent" @close="togglePlotEvent" />
     <PlotEventDialog @close="null" @choice-made="null" @event-completed="null" />
     
@@ -193,6 +200,7 @@ const togglePlotEvent = () => {
         @subscription-box="toggleSubscriptionBox"
         @market-trends="toggleMarketTrends"
         @cross-shop="toggleCrossShop"
+        @local-performance="toggleLocalPerformance"
         @plot-event="togglePlotEvent"
       />
       
