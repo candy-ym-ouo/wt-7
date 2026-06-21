@@ -25,6 +25,8 @@ import StaffManagementView from './components/StaffManagementView.vue'
 import SubscriptionBoxView from './components/SubscriptionBoxView.vue'
 import MarketTrendsView from './components/MarketTrendsView.vue'
 import CrossShopView from './components/CrossShopView.vue'
+import PlotEventPanel from './components/PlotEventPanel.vue'
+import PlotEventDialog from './components/PlotEventDialog.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -45,6 +47,7 @@ const showStaffManagement = ref(false)
 const showSubscriptionBox = ref(false)
 const showMarketTrends = ref(false)
 const showCrossShop = ref(false)
+const showPlotEvent = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -136,6 +139,10 @@ const toggleCrossShop = () => {
     gameStore.markCrossShopNotificationsReadAction()
   }
 }
+
+const togglePlotEvent = () => {
+  showPlotEvent.value = !showPlotEvent.value
+}
 </script>
 
 <template>
@@ -158,6 +165,8 @@ const toggleCrossShop = () => {
     <SubscriptionBoxView v-if="showSubscriptionBox" @close="toggleSubscriptionBox" />
     <MarketTrendsView v-if="showMarketTrends" @close="toggleMarketTrends" />
     <CrossShopView v-if="showCrossShop" @close="toggleCrossShop" />
+    <PlotEventPanel v-if="showPlotEvent" @close="togglePlotEvent" />
+    <PlotEventDialog @close="null" @choice-made="null" @event-completed="null" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -184,6 +193,7 @@ const toggleCrossShop = () => {
         @subscription-box="toggleSubscriptionBox"
         @market-trends="toggleMarketTrends"
         @cross-shop="toggleCrossShop"
+        @plot-event="togglePlotEvent"
       />
       
       <main class="main-content">

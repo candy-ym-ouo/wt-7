@@ -3341,3 +3341,263 @@ export interface CrossShopTradeCompleteResult {
   seriesProgress?: { seriesId: string; progress: number; target: number; isCompleted: boolean }[]
 }
 
+export type PlotEventType = 'owner_growth' | 'customer_relationship' | 'special_order' | 'multi_ending'
+export type PlotEventCategory = 'main' | 'side' | 'hidden'
+export type PlotEventStatus = 'locked' | 'available' | 'in_progress' | 'completed' | 'failed'
+export type PlotEventChoiceEffectType = 'budget' | 'reputation' | 'satisfaction' | 'customer_count' | 'buy_chance' | 'growth_points' | 'unlock_customer' | 'unlock_record' | 'relationship' | 'special_flag'
+export type PlotEndingType = 'good' | 'normal' | 'bad' | 'secret' | 'perfect'
+export type RelationshipLevel = 'stranger' | 'acquaintance' | 'friend' | 'confidant' | 'soulmate'
+
+export interface PlotEventChoiceEffect {
+  type: PlotEventChoiceEffectType
+  value: number
+  targetId?: string
+  description: string
+  hidden?: boolean
+}
+
+export interface PlotEventChoice {
+  id: string
+  label: string
+  description: string
+  icon: string
+  effects: PlotEventChoiceEffect[]
+  nextNodeId?: string
+  conditionExpression?: string
+  requirementText?: string
+  isLocked?: boolean
+}
+
+export interface PlotEventCondition {
+  minLevel?: number
+  maxLevel?: number
+  minDay?: number
+  minReputation?: number
+  minBudget?: number
+  requiredCompletedEventIds?: string[]
+  requiredFlags?: string[]
+  requiredGenreSales?: { genre: Genre; count: number }[]
+  requiredRelationshipLevel?: { customerId: string; level: RelationshipLevel }
+  requiredMemberCount?: number
+  requiredCollectionCount?: number
+  probabilityWeight?: number
+}
+
+export interface PlotEventNode {
+  id: string
+  title: string
+  content: string
+  speakerAvatar?: string
+  speakerName?: string
+  backgroundEmotion?: 'happy' | 'sad' | 'angry' | 'surprised' | 'neutral' | 'mysterious'
+  choices?: PlotEventChoice[]
+  autoNextDelay?: number
+  nextNodeId?: string
+  isEnding?: boolean
+  endingType?: PlotEndingType
+  unlockReward?: {
+    budget?: number
+    reputation?: number
+    growthPoints?: number
+    recordId?: string
+    customerId?: string
+    achievementId?: string
+  }
+}
+
+export interface PlotEventConfig {
+  id: string
+  type: PlotEventType
+  category: PlotEventCategory
+  title: string
+  subtitle: string
+  icon: string
+  coverColor: string
+  description: string
+  longDescription: string
+  triggerCondition: PlotEventCondition
+  nodes: PlotEventNode[]
+  startNodeId: string
+  minLevel: number
+  priority: number
+  isRepeatable: boolean
+  cooldownDays: number
+  rewardPreview: string
+}
+
+export interface PlotEventProgress {
+  eventId: string
+  status: PlotEventStatus
+  currentNodeId: string | null
+  startedDay: number | null
+  completedDay: number | null
+  chosenChoiceIds: string[]
+  visitedNodeIds: string[]
+  satisfactionScore: number
+  earnedRewards: {
+    budget: number
+    reputation: number
+    growthPoints: number
+    records: string[]
+    customers: string[]
+  }
+  lastTriggeredDay: number | null
+  triggerCount: number
+}
+
+export interface CustomerRelationship {
+  customerId: string
+  customerName: string
+  customerAvatar: string
+  level: RelationshipLevel
+  levelProgress: number
+  nextLevelProgress: number
+  trustPoints: number
+  trust: number
+  sharedMoments: string[]
+  unlockedStoryIds: string[]
+  unlockedEvents: string[]
+  specialPerks: string[]
+  birthday?: string
+  favoriteGenre?: Genre
+  lastVisitDay: number
+  notes: string
+}
+
+export interface SpecialOrderRequirement {
+  type: 'genre' | 'rarity' | 'condition' | 'specific_record' | 'artist' | 'price_range'
+  value: string | number | [number, number]
+  description: string
+  count?: number
+}
+
+export interface SpecialOrderReward {
+  basePayment: number
+  bonusPayment: number
+  reputation: number
+  growthPoints: number
+  relationshipBonus?: number
+  specialGiftId?: string
+}
+
+export interface SpecialOrderConfig {
+  id: string
+  eventId: string
+  customerId: string
+  customerName: string
+  customerAvatar: string
+  title: string
+  description: string
+  requirements: SpecialOrderRequirement[]
+  deadlineDays: number
+  reward: SpecialOrderReward
+  difficulty: 'easy' | 'medium' | 'hard' | 'legendary'
+  story: string
+}
+
+export interface SpecialOrderProgress {
+  orderId: string
+  config: SpecialOrderConfig
+  isActive: boolean
+  acceptedDay: number | null
+  deadlineDay: number | null
+  completedItems: { recordId: string; requirementMet: boolean }[]
+  isCompleted: boolean
+  isFailed: boolean
+  fulfilledDay: number | null
+  earnedReward: SpecialOrderReward | null
+}
+
+export interface LevelEndingConfig {
+  id: string
+  levelId: number
+  type: PlotEndingType
+  typeName: string
+  title: string
+  description: string
+  epilogue: string
+  icon: string
+  conditions: {
+    minProfit?: number
+    minSatisfaction?: number
+    minReputation?: number
+    requiredCompletedEventIds?: string[]
+    requiredRelationshipLevels?: { customerId: string; minLevel: RelationshipLevel }[]
+    requiredCollectionCount?: number
+    specialFlags?: string[]
+  }
+  rewards: {
+    budget: number
+    reputation: number
+    growthPoints: number
+    bonusRecordId?: string
+    unlockNextLevelBonus?: boolean
+  }
+  isUnlocked: boolean
+  unlockedDate: number | null
+}
+
+export interface LevelEndingProgress {
+  levelId: number
+  achievedEndingId: string | null
+  achieved: boolean
+  endingId: string | null
+  endingType: PlotEndingType | null
+  config: LevelEndingConfig | null
+  achievedDay: number | null
+  candidateEndings: { endingId: string; progress: number; requirementsMet: string[]; requirementsMissing: string[] }[]
+  viewedEndings: string[]
+}
+
+export interface PlotFlags {
+  [flagId: string]: boolean | number | string
+}
+
+export interface PlotEventGameState {
+  activeEvent: PlotEventConfig | null
+  activeProgress: PlotEventProgress | null
+  activeNode: PlotEventNode | null
+  eventProgresses: PlotEventProgress[]
+  relationships: CustomerRelationship[]
+  specialOrders: SpecialOrderProgress[]
+  levelEndings: LevelEndingProgress[]
+  flags: PlotFlags
+  totalEventsCompleted: number
+  totalSpecialOrdersFulfilled: number
+  perfectEndingsAchieved: number
+  dailyEventPool: PlotEventConfig[]
+  pendingEvents: PlotEventConfig[]
+  notifications: {
+    id: string
+    eventId: string
+    eventTitle: string
+    eventIcon: string
+    message: string
+    type: 'available' | 'progress' | 'complete' | 'special_order' | 'ending'
+    read: boolean
+    createdAt: number
+  }[]
+}
+
+export interface PlotEventTriggerResult {
+  triggered: boolean
+  event?: PlotEventConfig
+  reason?: string
+}
+
+export interface PlotEventChoiceResult {
+  success: boolean
+  nextNode?: PlotEventNode | null
+  effects?: PlotEventChoiceEffect[]
+  eventCompleted?: boolean
+  endingAchieved?: PlotEndingType
+  message?: string
+}
+
+export interface SpecialOrderAcceptResult {
+  success: boolean
+  message: string
+  orderProgress?: SpecialOrderProgress
+  cost?: number
+}
+

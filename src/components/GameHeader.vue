@@ -23,7 +23,11 @@ const emit = defineEmits<{
   'subscription-box': []
   'market-trends': []
   'cross-shop': []
+  'plot-event': []
 }>()
+
+import { usePlotEventStore } from '@/stores/plotEvent'
+const plotEventStore = usePlotEventStore()
 
 const gameStore = useGameStore()
 
@@ -136,6 +140,12 @@ const timeSlotLabel = computed(() => {
         <button class="icon-btn achievements-btn" @click="emit('achievements')">
           🏆
           <span v-if="gameStore.getUnclaimedAchievementRewardCount > 0" class="badge">{{ gameStore.getUnclaimedAchievementRewardCount }}</span>
+        </button>
+        <button class="icon-btn plot-event-btn" @click="emit('plot-event')">
+          🎬
+          <span v-if="plotEventStore.state.dailyEventPool.length > 0 || plotEventStore.state.specialOrders.filter(o => o.isActive && !o.isCompleted).length > 0" class="badge">
+            {{ plotEventStore.state.dailyEventPool.length + plotEventStore.state.specialOrders.filter(o => o.isActive && !o.isCompleted).length }}
+          </span>
         </button>
       </div>
     </div>
