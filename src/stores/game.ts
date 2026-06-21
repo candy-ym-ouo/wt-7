@@ -30,7 +30,17 @@ import type {
   MusicFestivalCollabRefreshCustomerResult,
   StaffManagementState, StaffWorkShift,
   StaffTrainingType, Employee,
-  StaffBonusSummary
+  StaffBonusSummary,
+  SubscriptionBoxGameState,
+  SubscriptionBoxTheme,
+  SubscriptionPlan,
+  Subscriber,
+  MonthlyBox,
+  Complaint,
+  BoxPreparationResult,
+  SubscriptionSignupResult,
+  ComplaintHandleResult,
+  SubscriptionBoxStats
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -182,6 +192,24 @@ import {
   getRarityLabel,
   getShiftConfig
 } from '@/data/staffManagement'
+import {
+  createInitialSubscriptionBoxState,
+  subscriptionBoxThemes,
+  subscriptionPlans,
+  generateSubscriber,
+  selectRecordsForBox,
+  calculateMatchScore,
+  generateComplaint,
+  calculateSubscriptionStats,
+  getPlanById,
+  getThemeById,
+  getComplaintTypeLabel,
+  getComplaintTypeIcon,
+  getSeverityLabel,
+  getSeverityColor,
+  getStatusLabel,
+  getStatusColor
+} from '@/data/subscriptionBox'
 import {
   createInitialShopRenovationState,
   calculateRenovationBonusSummary,
@@ -596,6 +624,28 @@ export const useGameStore = defineStore('game', () => {
   const achievementNotification = ref<{ show: boolean; type: 'unlock' | 'reward' | 'title'; name: string; icon: string } | null>(null)
 
   const staffManagement = ref<StaffManagementState>(createInitialStaffManagementState())
+
+  const subscriptionBox = ref<SubscriptionBoxGameState>(createInitialSubscriptionBoxState())
+
+  const subscriptionBoxStats = computed<SubscriptionBoxStats>(() => {
+    return calculateSubscriptionStats(
+      subscriptionBox.value.subscribers,
+      subscriptionBox.value.boxes,
+      subscriptionBox.value.complaints
+    )
+  })
+
+  const activeSubscribers = computed(() =>
+    subscriptionBox.value.subscribers.filter(s => s.status === 'active')
+  )
+
+  const pendingComplaints = computed(() =>
+    subscriptionBox.value.complaints.filter(c => c.status === 'pending')
+  )
+
+  const subscriptionBoxUnreadNotifications = computed(() =>
+    subscriptionBox.value.notifications.filter(n => !n.read).length
+  )
 
   const staffBonusSummary = computed<StaffBonusSummary>(() => {
     return calculateEmployeeBonusSummary(staffManagement.value.employees, currentTimeSlot.value)
@@ -6235,6 +6285,250 @@ export const useGameStore = defineStore('game', () => {
     staffManagement.value.notifications.forEach(n => n.read = true)
   }
 
+  const addSubscriptionBoxNotification = (message: string, type: 'success' | 'warning' | 'error' | 'info') => {
+    subscriptionBox.value.notifications.push({
+      id: `notif_${Date.now()}_${Math.random()}`,
+      message,
+      type,
+      read: false,
+      createdAt: Date.now()
+    })
+    if (subscriptionBox.value.notifications.length > 50) {
+      subscriptionBox.value.notifications = subscriptionBox.value.notifications.slice(-50)
+    }
+  }
+
+  const markSubscriptionBoxNotificationsRead = () => {
+    subscriptionBox.value.notifications.forEach(n => n.read = true)
+  }
+
+  const setSubscriptionBoxTab = (tab: SubscriptionBoxGameState['selectedTab']) => {
+    subscriptionBox.value.selectedTab = tab
+  }
+
+  const activateSubscriptionService = (): { success: boolean; message: string } => {
+    if (subscriptionBox.value.isSubscriptionServiceActive) {
+      return { success: false, message: '订阅服务已经开启了' }
+    }
+    const activationCost = 500
+    if (budget.value < activationCost) {
+      return { success: false, message: `启动资金不足，需要 ¥${activationCost}` }
+    }
+    budget.value -= activationCost
+    subscriptionBox.value.isSubscriptionServiceActive = true
+    subscriptionBox.value.nextShipmentDay = currentDay.value + 7
+    addSubscriptionBoxNotification('🎉 订阅盒子服务已启动！首批订阅者即将到来', 'success')
+    return { success: true, message: '订阅服务成功启动' }
+  }
+
+  const addNewSubscriber = (planId: string, themeId?: string): SubscriptionSignupResult => {
+    if (!subscriptionBox.value.isSubscriptionServiceActive) {
+      return { success: false, message: '订阅服务尚未启动' }
+    }
+    const plan = getPlanById(planId)
+    if (!plan) {
+      return { success: false, message: '套餐不存在' }
+    }
+    if (plan.minLevel > currentLevel.value) {
+      return { success: false, message: `需要达到第 ${plan.minLevel} 关才能解锁此套餐` }
+    }
+    const subscriber = generateSubscriber(planId, currentDay.value, themeId)
+    subscriptionBox.value.subscribers.push(subscriber)
+    addSubscriptionBoxNotification(`🎵 新订阅者 ${subscriber.name} 加入了 ${plan.name}！`, 'success')
+    return { success: true, message: `${subscriber.name} 成功订阅`, subscriber }
+  }
+
+  const prepareMonthlyBox = (subscriberId: string, themeId: string): BoxPreparationResult => {
+    const subscriber = subscriptionBox.value.subscribers.find(s => s.id === subscriberId)
+    if (!subscriber) {
+      return { success: false, message: '订阅者不存在' }
+    }
+    if (subscriber.status !== 'active') {
+      return { success: false, message: '订阅者状态不活跃' }
+    }
+    const plan = getPlanById(subscriber.planId)
+    if (!plan) {
+      return { success: false, message: '套餐不存在' }
+    }
+    const theme = getThemeById(themeId)
+    if (!theme) {
+      return { success: false, message: '主题不存在' }
+    }
+    const inventoryForSelection = inventory.value.map(item => ({
+      record: item.record,
+      conditionScore: item.conditionScore
+    }))
+    if (inventoryForSelection.length === 0) {
+      return { success: false, message: '库存不足，无法准备盒子' }
+    }
+    const items = selectRecordsForBox(subscriber, plan, theme, inventoryForSelection)
+    if (items.length === 0) {
+      return { success: false, message: '没有找到合适的唱片' }
+    }
+    const totalValue = items.reduce((sum, item) => sum + item.estimatedValue, 0)
+    const shopCost = items.reduce((sum, item) => sum + item.record.costPrice, 0)
+    const shopProfit = plan.monthlyPrice - shopCost
+    const box: MonthlyBox = {
+      id: `box-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      subscriberId: subscriber.id,
+      subscriberName: subscriber.name,
+      planId: plan.id,
+      planTier: plan.tier,
+      theme,
+      monthNumber: subscriber.boxesReceived + 1,
+      deliveryDay: currentDay.value + 3,
+      status: 'preparing',
+      items,
+      totalValue,
+      subscriberCost: plan.monthlyPrice,
+      shopCost,
+      shopProfit,
+      rating: null,
+      feedback: null,
+      isAutoRenewed: subscriber.autoRenew,
+      shippingDays: 3,
+      trackingNumber: `TRK${Date.now()}${Math.floor(Math.random() * 1000)}`
+    }
+    subscriptionBox.value.boxes.push(box)
+    subscriber.boxesReceived++
+    subscriber.totalSpent += plan.monthlyPrice
+    budget.value += plan.monthlyPrice
+    totalProfit.value += shopProfit
+    subscriptionBox.value.totalSubscriptionProfit += shopProfit
+    addSubscriptionBoxNotification(`📦 为 ${subscriber.name} 准备了 ${theme.name} 主题盒子，利润 ¥${shopProfit}`, 'success')
+    return { success: true, message: '盒子准备成功', box, cost: shopCost }
+  }
+
+  const shipBox = (boxId: string): { success: boolean; message: string } => {
+    const box = subscriptionBox.value.boxes.find(b => b.id === boxId)
+    if (!box) {
+      return { success: false, message: '盒子不存在' }
+    }
+    if (box.status !== 'preparing') {
+      return { success: false, message: '盒子状态不正确' }
+    }
+    box.status = 'shipped'
+    box.deliveryDay = currentDay.value
+    addSubscriptionBoxNotification(`🚚 ${box.subscriberName} 的盒子已发货`, 'info')
+    return { success: true, message: '盒子已发货' }
+  }
+
+  const deliverBox = (boxId: string): { success: boolean; message: string } => {
+    const box = subscriptionBox.value.boxes.find(b => b.id === boxId)
+    if (!box) {
+      return { success: false, message: '盒子不存在' }
+    }
+    if (box.status !== 'shipped') {
+      return { success: false, message: '盒子尚未发货' }
+    }
+    box.status = 'delivered'
+    const subscriber = subscriptionBox.value.subscribers.find(s => s.id === box.subscriberId)
+    if (subscriber) {
+      const avgMatchScore = box.items.length > 0
+        ? box.items.reduce((sum, i) => sum + i.matchScore, 0) / box.items.length
+        : 0
+      const baseSatisfaction = 70 + Math.floor(avgMatchScore * 0.3)
+      const satisfactionChange = Math.min(15, Math.max(-10, baseSatisfaction - 70))
+      subscriber.satisfaction = Math.min(100, Math.max(0, subscriber.satisfaction + satisfactionChange))
+      box.rating = Math.max(1, Math.min(5, Math.floor(baseSatisfaction / 20)))
+      if (Math.random() < 0.15) {
+        const complaint = generateComplaint(subscriber, box, currentDay.value)
+        subscriptionBox.value.complaints.push(complaint)
+        addSubscriptionBoxNotification(`⚠️ ${subscriber.name} 提交了投诉：${complaint.typeName}`, 'warning')
+      }
+    }
+    addSubscriptionBoxNotification(`✅ ${box.subscriberName} 已签收盒子`, 'success')
+    return { success: true, message: '盒子已送达' }
+  }
+
+  const handleComplaint = (
+    complaintId: string,
+    action: 'resolve' | 'reject',
+    resolution: string,
+    refundAmount?: number
+  ): ComplaintHandleResult => {
+    const complaint = subscriptionBox.value.complaints.find(c => c.id === complaintId)
+    if (!complaint) {
+      return { success: false, message: '投诉不存在' }
+    }
+    if (complaint.status !== 'pending') {
+      return { success: false, message: '投诉已处理' }
+    }
+    const subscriber = subscriptionBox.value.subscribers.find(s => s.id === complaint.subscriberId)
+    
+    if (action === 'resolve') {
+      complaint.status = 'resolved'
+      complaint.resolution = resolution
+      complaint.resolvedAt = Date.now()
+      complaint.dayResolved = currentDay.value
+      const refund = refundAmount || Math.floor(complaint.refundAmount)
+      complaint.refundAmount = refund
+      if (refund > 0 && budget.value >= refund) {
+        budget.value -= refund
+      }
+      const reputationGain = Math.floor(complaint.reputationLoss * 0.5)
+      shopReputation.value = Math.min(100, shopReputation.value + reputationGain)
+      if (subscriber) {
+        subscriber.satisfaction = Math.min(100, subscriber.satisfaction + Math.floor(complaint.satisfactionLoss * 0.6))
+      }
+      addSubscriptionBoxNotification(`✅ 投诉已解决：${complaint.typeName}`, 'success')
+      return {
+        success: true,
+        message: '投诉已成功解决',
+        complaint,
+        refundAmount: refund,
+        reputationChange: reputationGain
+      }
+    } else {
+      complaint.status = 'rejected'
+      complaint.resolution = resolution
+      complaint.resolvedAt = Date.now()
+      complaint.dayResolved = currentDay.value
+      if (subscriber) {
+        subscriber.satisfaction = Math.max(0, subscriber.satisfaction - 10)
+        if (subscriber.satisfaction < 30 && subscriber.autoRenew) {
+          subscriber.autoRenew = false
+          addSubscriptionBoxNotification(`😞 ${subscriber.name} 因不满取消了自动续费`, 'warning')
+        }
+      }
+      shopReputation.value = Math.max(0, shopReputation.value - Math.floor(complaint.reputationLoss * 0.5))
+      addSubscriptionBoxNotification(`❌ 投诉已驳回：${complaint.typeName}`, 'warning')
+      return {
+        success: true,
+        message: '投诉已驳回',
+        complaint,
+        reputationChange: -Math.floor(complaint.reputationLoss * 0.5)
+      }
+    }
+  }
+
+  const cancelSubscription = (subscriberId: string, reason: string): { success: boolean; message: string } => {
+    const subscriber = subscriptionBox.value.subscribers.find(s => s.id === subscriberId)
+    if (!subscriber) {
+      return { success: false, message: '订阅者不存在' }
+    }
+    if (subscriber.status !== 'active') {
+      return { success: false, message: '订阅已经是取消状态' }
+    }
+    subscriber.status = 'cancelled'
+    subscriber.subscriptionEndDay = currentDay.value
+    subscriber.autoRenew = false
+    addSubscriptionBoxNotification(`📭 ${subscriber.name} 取消了订阅：${reason}`, 'warning')
+    return { success: true, message: '订阅已取消' }
+  }
+
+  const getSubscriberBoxes = (subscriberId: string): MonthlyBox[] => {
+    return subscriptionBox.value.boxes.filter(b => b.subscriberId === subscriberId)
+  }
+
+  const getAvailableThemesForLevel = (): SubscriptionBoxTheme[] => {
+    return subscriptionBox.value.themes.filter(t => t.minLevel <= currentLevel.value)
+  }
+
+  const getAvailablePlansForLevel = (): SubscriptionPlan[] => {
+    return subscriptionBox.value.plans.filter(p => p.minLevel <= currentLevel.value)
+  }
+
   const updateEmployeePerformance = (employeeId: string, sales: number, satisfaction: number) => {
     const emp = staffManagement.value.employees.find(e => e.id === employeeId)
     if (!emp) return
@@ -8913,6 +9207,29 @@ export const useGameStore = defineStore('game', () => {
     achievementCategories,
     getAchievementRarityLabel,
     getAchievementRarityColor,
-    getAchievementRarityBgColor
+    getAchievementRarityBgColor,
+    subscriptionBox,
+    subscriptionBoxStats,
+    activeSubscribers,
+    pendingComplaints,
+    subscriptionBoxUnreadNotifications,
+    activateSubscriptionService,
+    addNewSubscriber,
+    prepareMonthlyBox,
+    shipBox,
+    deliverBox,
+    handleComplaint,
+    cancelSubscription,
+    getSubscriberBoxes,
+    getAvailableThemesForLevel,
+    getAvailablePlansForLevel,
+    setSubscriptionBoxTab,
+    markSubscriptionBoxNotificationsRead,
+    getComplaintTypeLabel,
+    getComplaintTypeIcon,
+    getSeverityLabel,
+    getSeverityColor,
+    getSubscriptionBoxStatusLabel: getStatusLabel,
+    getSubscriptionBoxStatusColor: getStatusColor
   }
 })

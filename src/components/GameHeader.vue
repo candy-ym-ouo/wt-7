@@ -20,6 +20,7 @@ const emit = defineEmits<{
   'music-festival-collab': []
   achievements: []
   'staff-management': []
+  'subscription-box': []
 }>()
 
 const gameStore = useGameStore()
@@ -118,6 +119,10 @@ const timeSlotLabel = computed(() => {
           🎸
           <span v-if="gameStore.musicFestivalCollab.isCollabActive" class="badge active-dot">●</span>
           <span v-if="gameStore.musicFestivalCollab.hasUnclaimedRewards" class="badge">🎁</span>
+        </button>
+        <button class="icon-btn subscription-box-btn" @click="emit('subscription-box')">
+          📦
+          <span v-if="gameStore.subscriptionBoxUnreadNotifications > 0" class="badge">{{ gameStore.subscriptionBoxUnreadNotifications }}</span>
         </button>
         <button class="icon-btn achievements-btn" @click="emit('achievements')">
           🏆
@@ -366,6 +371,10 @@ const timeSlotLabel = computed(() => {
 .quest-board-btn,
 .community-btn,
 .music-festival-collab-btn {
+  position: relative;
+}
+
+.subscription-box-btn {
   position: relative;
 }
 </style>

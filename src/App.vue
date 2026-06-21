@@ -22,6 +22,7 @@ import CommunityView from './components/CommunityView.vue'
 import MusicFestivalCollabView from './components/MusicFestivalCollabView.vue'
 import AchievementsView from './components/AchievementsView.vue'
 import StaffManagementView from './components/StaffManagementView.vue'
+import SubscriptionBoxView from './components/SubscriptionBoxView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -39,6 +40,7 @@ const showCommunity = ref(false)
 const showMusicFestivalCollab = ref(false)
 const showAchievements = ref(false)
 const showStaffManagement = ref(false)
+const showSubscriptionBox = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -115,6 +117,10 @@ const toggleAchievements = () => {
 const toggleStaffManagement = () => {
   showStaffManagement.value = !showStaffManagement.value
 }
+
+const toggleSubscriptionBox = () => {
+  showSubscriptionBox.value = !showSubscriptionBox.value
+}
 </script>
 
 <template>
@@ -134,6 +140,7 @@ const toggleStaffManagement = () => {
     <MusicFestivalCollabView v-if="showMusicFestivalCollab" @close="toggleMusicFestivalCollab" />
     <AchievementsView v-if="showAchievements" @close="toggleAchievements" />
     <StaffManagementView v-if="showStaffManagement" @close="toggleStaffManagement" />
+    <SubscriptionBoxView v-if="showSubscriptionBox" @close="toggleSubscriptionBox" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -157,6 +164,7 @@ const toggleStaffManagement = () => {
         @community="toggleCommunity"
         @music-festival-collab="toggleMusicFestivalCollab"
         @achievements="toggleAchievements"
+        @subscription-box="toggleSubscriptionBox"
       />
       
       <main class="main-content">

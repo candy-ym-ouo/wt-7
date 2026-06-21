@@ -2901,3 +2901,187 @@ export interface StaffManagementState {
   totalTrainingCost: number
   notifications: { id: string; message: string; type: 'success' | 'warning' | 'error' | 'info'; read: boolean; createdAt: number }[]
 }
+
+export type SubscriptionBoxTier = 'basic' | 'standard' | 'premium' | 'elite'
+export type SubscriptionBoxThemeType = 'genre_focus' | 'era_nostalgia' | 'artist_spotlight' | 'mood_vibe' | 'rare_treasure' | 'surprise_mystery'
+export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired'
+export type ComplaintStatus = 'pending' | 'processing' | 'resolved' | 'rejected'
+export type ComplaintType = 'wrong_item' | 'damaged' | 'poor_quality' | 'bad_match' | 'late_delivery' | 'other'
+export type BoxDeliveryStatus = 'preparing' | 'shipped' | 'delivered' | 'returned'
+
+export interface SubscriptionBoxTheme {
+  id: string
+  type: SubscriptionBoxThemeType
+  name: string
+  icon: string
+  description: string
+  coreGenres: Genre[]
+  bonusGenres: Genre[]
+  rarityRange: [number, number]
+  priceRange: [number, number]
+  moodTagline: string
+  color: string
+  minLevel: number
+  popularity: number
+}
+
+export interface SubscriptionPlan {
+  id: string
+  tier: SubscriptionBoxTier
+  name: string
+  icon: string
+  description: string
+  monthlyPrice: number
+  recordCount: number
+  minRarity: number
+  maxRarity: number
+  priceDiscount: number
+  satisfactionBonus: number
+  reputationGain: number
+  perks: string[]
+  minLevel: number
+  isPopular?: boolean
+}
+
+export interface SubscriberPreference {
+  favoriteGenres: Genre[]
+  preferredRarity: number[]
+  priceRange: [number, number]
+  preferredThemes: string[]
+  dislikeGenres: Genre[]
+  note: string
+}
+
+export interface Subscriber {
+  id: string
+  name: string
+  avatar: string
+  planId: string
+  status: SubscriptionStatus
+  preference: SubscriberPreference
+  subscriptionStartDay: number
+  subscriptionEndDay: number | null
+  currentPeriodStart: number
+  currentPeriodEnd: number
+  boxesReceived: number
+  totalSpent: number
+  satisfaction: number
+  memberLevel: MemberLevel | null
+  isMember: boolean
+  lastBoxRating: number | null
+  consecutiveMonths: number
+  autoRenew: boolean
+  tier: SubscriptionBoxTier
+}
+
+export interface BoxRecordItem {
+  record: Record
+  conditionScore: number
+  matchScore: number
+  matchReason: string
+  isSurprise: boolean
+  estimatedValue: number
+}
+
+export interface MonthlyBox {
+  id: string
+  subscriberId: string
+  subscriberName: string
+  planId: string
+  planTier: SubscriptionBoxTier
+  theme: SubscriptionBoxTheme
+  monthNumber: number
+  deliveryDay: number
+  status: BoxDeliveryStatus
+  items: BoxRecordItem[]
+  totalValue: number
+  subscriberCost: number
+  shopCost: number
+  shopProfit: number
+  rating: number | null
+  feedback: string | null
+  isAutoRenewed: boolean
+  shippingDays: number
+  trackingNumber: string
+}
+
+export interface Complaint {
+  id: string
+  subscriberId: string
+  subscriberName: string
+  subscriberAvatar: string
+  boxId: string
+  type: ComplaintType
+  typeName: string
+  typeIcon: string
+  description: string
+  status: ComplaintStatus
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  createdAt: number
+  dayCreated: number
+  resolvedAt: number | null
+  dayResolved: number | null
+  resolution: string | null
+  refundAmount: number
+  reputationLoss: number
+  satisfactionLoss: number
+  handledBy: string | null
+  responseDeadline: number
+}
+
+export interface SubscriptionBoxStats {
+  totalSubscribers: number
+  activeSubscribers: number
+  byTier: { [key in SubscriptionBoxTier]: number }
+  totalRevenue: number
+  totalProfit: number
+  monthlyRevenue: number
+  avgSatisfaction: number
+  churnRate: number
+  totalBoxesShipped: number
+  avgMatchScore: number
+  pendingComplaints: number
+  resolvedComplaints: number
+  complaintResolutionRate: number
+  avgRating: number
+  renewRate: number
+  topTheme: string | null
+}
+
+export interface SubscriptionBoxGameState {
+  themes: SubscriptionBoxTheme[]
+  plans: SubscriptionPlan[]
+  subscribers: Subscriber[]
+  boxes: MonthlyBox[]
+  complaints: Complaint[]
+  stats: SubscriptionBoxStats
+  isSubscriptionServiceActive: boolean
+  nextShipmentDay: number
+  selectedSubscriberId: string | null
+  selectedTab: 'subscribers' | 'boxes' | 'themes' | 'complaints' | 'plans'
+  notifications: { id: string; message: string; type: 'success' | 'warning' | 'error' | 'info'; read: boolean; createdAt: number }[]
+  lastProcessDay: number
+  totalSubscriptionProfit: number
+}
+
+export interface BoxPreparationResult {
+  success: boolean
+  message: string
+  box?: MonthlyBox
+  cost?: number
+}
+
+export interface SubscriptionSignupResult {
+  success: boolean
+  message: string
+  subscriber?: Subscriber
+  cost?: number
+}
+
+export interface ComplaintHandleResult {
+  success: boolean
+  message: string
+  complaint?: Complaint
+  refundAmount?: number
+  reputationChange?: number
+}
