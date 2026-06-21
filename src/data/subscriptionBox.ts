@@ -12,7 +12,6 @@ import type {
   Record as VinylRecord,
   MemberLevel
 } from '@/types'
-import { allRecords } from './records'
 
 export const subscriptionBoxThemes: SubscriptionBoxTheme[] = [
   {
@@ -714,4 +713,106 @@ export function getStatusColor(status: string): string {
     returned: '#fc8181'
   }
   return colors[status] || '#a0aec0'
+}
+
+export const SUBSCRIPTION_DAYS_PER_MONTH = 30
+export const BOX_PREP_DAYS_BEFORE_PERIOD_END = 5
+export const BOX_SHIP_DAYS_AFTER_PREP = 1
+export const BOX_DELIVER_DAYS_AFTER_SHIP = 2
+export const COMPLAINT_AUTO_RESOLVE_DAYS = 5
+export const DAILY_NEW_SUBSCRIBER_BASE_CHANCE = 0.15
+export const SATISFACTION_AUTORENEW_THRESHOLD = 40
+export const SATISFACTION_DECAY_PER_MONTH = 5
+
+export interface DailySubscriptionUpdate {
+  newSubscribers: Subscriber[]
+  renewedSubscribers: string[]
+  cancelledSubscribers: string[]
+  autoPreparedBoxes: string[]
+  autoShippedBoxes: string[]
+  autoDeliveredBoxes: string[]
+  autoResolvedComplaints: string[]
+  revenue: number
+  profit: number
+  refunds: number
+}
+
+export function createEmptyDailyUpdate(): DailySubscriptionUpdate {
+  return {
+    newSubscribers: [],
+    renewedSubscribers: [],
+    cancelledSubscribers: [],
+    autoPreparedBoxes: [],
+    autoShippedBoxes: [],
+    autoDeliveredBoxes: [],
+    autoResolvedComplaints: [],
+    revenue: 0,
+    profit: 0,
+    refunds: 0
+  }
+}
+
+export function shouldGenerateNewSubscriber(
+  activeCount: number,
+  reputation: number,
+  isServiceActive: boolean
+): boolean {
+  if (!isServiceActive) return false
+  const capacityFactor = Math.min(1, 50 / Math.max(1, activeCount + 5))
+  const reputationFactor = 0.5 + reputation / 100
+  const chance = DAILY_NEW_SUBSCRIBER_BASE_CHANCE * capacityFactor * reputationFactor
+  return Math.random() < chance
+}
+
+export function getRandomPlanForLevel(level: number): SubscriptionPlan | undefined {
+  const available = subscriptionPlans.filter(p => p.minLevel <= level)
+  if (available.length === 0) return undefined
+  const weights = available.map(p => {
+    if (p.isPopular) return 3
+    if (p.tier === 'basic') return 4
+    if (p.tier === 'standard') return 3
+    if (p.tier === 'premium') return 2
+    return 1
+  })
+  const totalWeight = weights.reduce((a, b) => a + b, 0)
+  let random = Math.random() * totalWeight
+  for (let i = 0; i < available.length; i++) {
+    random -= weights[i]
+    if (random <= 0) return available[i]
+  }
+  return available[0]
+}
+
+export function shouldRenewSubscriber(subscriber: Subscriber, currentDay: number): boolean {
+  if (subscriber.status !== 'active') return false
+  if (currentDay < subscriber.currentPeriodEnd) return false
+  if (!subscriber.autoRenew) return false
+  if (subscriber.satisfaction < SATISFACTION_AUTORENEW_THRESHOLD) return false
+  return true
+}
+
+export function shouldCancelExpiredSubscriber(subscriber: Subscriber, currentDay: number): boolean {
+  if (subscriber.status !== 'active') return false
+  if (currentDay < subscriber.currentPeriodEnd) return false
+  if (subscriber.autoRenew && subscriber.satisfaction >= SATISFACTION_AUTORENEW_THRESHOLD) return false
+  return true
+}
+
+export function renewSubscriberPeriod(subscriber: Subscriber, _currentDay: number): Subscriber {
+  return {
+    ...subscriber,
+    currentPeriodStart: subscriber.currentPeriodEnd,
+    currentPeriodEnd: subscriber.currentPeriodEnd + SUBSCRIPTION_DAYS_PER_MONTH,
+    consecutiveMonths: subscriber.consecutiveMonths + 1,
+    satisfaction: Math.max(0, subscriber.satisfaction - SATISFACTION_DECAY_PER_MONTH + (subscriber.lastBoxRating || 3) * 2)
+  }
+}
+
+export function cancelExpiredSubscriber(subscriber: Subscriber, currentDay: number): Subscriber {
+  return {
+    ...subscriber,
+    status: 'expired',
+    subscriptionEndDay: currentDay,
+    autoRenew: false
+  }
 }

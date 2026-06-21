@@ -34,9 +34,7 @@ import type {
   SubscriptionBoxGameState,
   SubscriptionBoxTheme,
   SubscriptionPlan,
-  Subscriber,
   MonthlyBox,
-  Complaint,
   BoxPreparationResult,
   SubscriptionSignupResult,
   ComplaintHandleResult,
@@ -194,11 +192,8 @@ import {
 } from '@/data/staffManagement'
 import {
   createInitialSubscriptionBoxState,
-  subscriptionBoxThemes,
-  subscriptionPlans,
   generateSubscriber,
   selectRecordsForBox,
-  calculateMatchScore,
   generateComplaint,
   calculateSubscriptionStats,
   getPlanById,
@@ -207,8 +202,18 @@ import {
   getComplaintTypeIcon,
   getSeverityLabel,
   getSeverityColor,
-  getStatusLabel,
-  getStatusColor
+  getStatusLabel as getSubscriptionBoxStatusLabelData,
+  getStatusColor as getSubscriptionBoxStatusColorData,
+  shouldGenerateNewSubscriber,
+  getRandomPlanForLevel,
+  shouldRenewSubscriber,
+  shouldCancelExpiredSubscriber,
+  renewSubscriberPeriod,
+  cancelExpiredSubscriber,
+  BOX_PREP_DAYS_BEFORE_PERIOD_END,
+  BOX_SHIP_DAYS_AFTER_PREP,
+  BOX_DELIVER_DAYS_AFTER_SHIP,
+  COMPLAINT_AUTO_RESOLVE_DAYS
 } from '@/data/subscriptionBox'
 import {
   createInitialShopRenovationState,
@@ -5064,6 +5069,7 @@ export const useGameStore = defineStore('game', () => {
           currentDay.value++
           advanceFestivalDay()
           advanceMusicFestivalCollabDay()
+          advanceSubscriptionBoxDay()
           processDailyStaffManagement()
           resetDailyStats()
           refreshCommunityDailyState()
@@ -6527,6 +6533,149 @@ export const useGameStore = defineStore('game', () => {
 
   const getAvailablePlansForLevel = (): SubscriptionPlan[] => {
     return subscriptionBox.value.plans.filter(p => p.minLevel <= currentLevel.value)
+  }
+
+  const advanceSubscriptionBoxDay = (): { revenue: number; profit: number; refunds: number; message: string } => {
+    if (!subscriptionBox.value.isSubscriptionServiceActive) {
+      return { revenue: 0, profit: 0, refunds: 0, message: '' }
+    }
+
+    let totalRevenue = 0
+    let dayProfit = 0
+    let totalRefunds = 0
+    const messages: string[] = []
+    const today = currentDay.value
+
+    const activeSubs = subscriptionBox.value.subscribers.filter(s => s.status === 'active')
+
+    if (shouldGenerateNewSubscriber(activeSubs.length, shopReputation.value, true)) {
+      const plan = getRandomPlanForLevel(currentLevel.value)
+      if (plan) {
+        const theme = subscriptionBox.value.themes.filter(t => t.minLevel <= currentLevel.value)
+        const selectedTheme = theme.length > 0 ? theme[Math.floor(Math.random() * theme.length)] : undefined
+        const newSub = generateSubscriber(plan.id, today, selectedTheme?.id)
+        subscriptionBox.value.subscribers.push(newSub)
+        messages.push(`🎵 ${newSub.name} 加入了 ${plan.name}`)
+        addSubscriptionBoxNotification(`🎵 新订阅者 ${newSub.name} 加入了 ${plan.name}！`, 'success')
+      }
+    }
+
+    for (let i = 0; i < subscriptionBox.value.subscribers.length; i++) {
+      const subscriber = subscriptionBox.value.subscribers[i]
+      if (subscriber.status !== 'active') continue
+
+      if (shouldRenewSubscriber(subscriber, today)) {
+        const plan = getPlanById(subscriber.planId)
+        if (plan) {
+          const renewed = renewSubscriberPeriod(subscriber, today)
+          subscriptionBox.value.subscribers[i] = renewed
+          totalRevenue += plan.monthlyPrice
+          const estimatedProfit = Math.floor(plan.monthlyPrice * 0.3)
+          dayProfit += estimatedProfit
+          renewed.totalSpent += plan.monthlyPrice
+          budget.value += plan.monthlyPrice
+          totalProfit.value += estimatedProfit
+          subscriptionBox.value.totalSubscriptionProfit += estimatedProfit
+          messages.push(`💰 ${subscriber.name} 续费 ¥${plan.monthlyPrice}`)
+          addSubscriptionBoxNotification(`💰 ${subscriber.name} 已自动续费 ${plan.name}，收入 ¥${plan.monthlyPrice}`, 'success')
+        }
+        continue
+      }
+
+      if (shouldCancelExpiredSubscriber(subscriber, today)) {
+        const cancelled = cancelExpiredSubscriber(subscriber, today)
+        subscriptionBox.value.subscribers[i] = cancelled
+        messages.push(`📭 ${subscriber.name} 订阅已过期`)
+        addSubscriptionBoxNotification(`📭 ${subscriber.name} 的订阅已过期取消`, 'warning')
+        continue
+      }
+
+      const daysUntilPeriodEnd = subscriber.currentPeriodEnd - today
+      const hasBoxThisPeriod = subscriptionBox.value.boxes.some(
+        b => b.subscriberId === subscriber.id && b.monthNumber === subscriber.consecutiveMonths + 1
+      )
+
+      if (
+        daysUntilPeriodEnd <= BOX_PREP_DAYS_BEFORE_PERIOD_END &&
+        daysUntilPeriodEnd > 0 &&
+        !hasBoxThisPeriod &&
+        inventory.value.length > 0
+      ) {
+        const plan = getPlanById(subscriber.planId)
+        const preferredThemeId = subscriber.preference.preferredThemes[0]
+        const availableThemes = getAvailableThemesForLevel()
+        const theme = preferredThemeId
+          ? availableThemes.find(t => t.id === preferredThemeId) || availableThemes[0]
+          : availableThemes[0]
+
+        if (plan && theme) {
+          const result = prepareMonthlyBox(subscriber.id, theme.id)
+          if (result.success && result.box) {
+            messages.push(`📦 为 ${subscriber.name} 准备 ${theme.name} 盒子`)
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < subscriptionBox.value.boxes.length; i++) {
+      const box = subscriptionBox.value.boxes[i]
+
+      if (box.status === 'preparing') {
+        const daysSincePrep = today - (box.deliveryDay - BOX_SHIP_DAYS_AFTER_PREP - BOX_DELIVER_DAYS_AFTER_SHIP)
+        if (daysSincePrep >= BOX_SHIP_DAYS_AFTER_PREP) {
+          box.status = 'shipped'
+          box.deliveryDay = today
+          messages.push(`🚚 ${box.subscriberName} 盒子发货`)
+          addSubscriptionBoxNotification(`🚚 ${box.subscriberName} 的 ${box.theme.name} 盒子已发货`, 'info')
+        }
+      }
+
+      if (box.status === 'shipped') {
+        const daysSinceShipped = today - box.deliveryDay
+        if (daysSinceShipped >= BOX_DELIVER_DAYS_AFTER_SHIP) {
+          deliverBox(box.id)
+          messages.push(`✅ ${box.subscriberName} 盒子送达`)
+        }
+      }
+    }
+
+    for (let i = 0; i < subscriptionBox.value.complaints.length; i++) {
+      const complaint = subscriptionBox.value.complaints[i]
+      if (complaint.status !== 'pending') continue
+
+      const daysOverdue = today - complaint.responseDeadline
+      if (daysOverdue >= COMPLAINT_AUTO_RESOLVE_DAYS) {
+        const subscriber = subscriptionBox.value.subscribers.find(s => s.id === complaint.subscriberId)
+        const refundAmount = Math.floor(complaint.refundAmount * 1.5)
+        complaint.status = 'resolved'
+        complaint.resolution = `超时自动处理：退款 ¥${refundAmount}`
+        complaint.resolvedAt = Date.now()
+        complaint.dayResolved = today
+        complaint.refundAmount = refundAmount
+
+        if (budget.value >= refundAmount) {
+          budget.value -= refundAmount
+          totalRefunds += refundAmount
+        }
+        if (subscriber) {
+          subscriber.satisfaction = Math.max(0, subscriber.satisfaction - 15)
+          if (subscriber.satisfaction < 20 && subscriber.autoRenew) {
+            subscriber.autoRenew = false
+          }
+        }
+        shopReputation.value = Math.max(0, shopReputation.value - complaint.reputationLoss)
+        messages.push(`⚠️ 投诉超时自动处理：退款 ¥${refundAmount}`)
+        addSubscriptionBoxNotification(`⚠️ 投诉超时自动处理，已退款 ¥${refundAmount}`, 'warning')
+      }
+    }
+
+    subscriptionBox.value.lastProcessDay = today
+
+    const summary = messages.length > 0
+      ? `订阅盒子：${messages.slice(0, 3).join('，')}${messages.length > 3 ? `等${messages.length}项` : ''}`
+      : '订阅盒子今日无变化'
+
+    return { revenue: totalRevenue, profit: dayProfit, refunds: totalRefunds, message: summary }
   }
 
   const updateEmployeePerformance = (employeeId: string, sales: number, satisfaction: number) => {
@@ -9223,13 +9372,14 @@ export const useGameStore = defineStore('game', () => {
     getSubscriberBoxes,
     getAvailableThemesForLevel,
     getAvailablePlansForLevel,
+    advanceSubscriptionBoxDay,
     setSubscriptionBoxTab,
     markSubscriptionBoxNotificationsRead,
     getComplaintTypeLabel,
     getComplaintTypeIcon,
     getSeverityLabel,
     getSeverityColor,
-    getSubscriptionBoxStatusLabel: getStatusLabel,
-    getSubscriptionBoxStatusColor: getStatusColor
+    getSubscriptionBoxStatusLabel: getSubscriptionBoxStatusLabelData,
+    getSubscriptionBoxStatusColor: getSubscriptionBoxStatusColorData
   }
 })
