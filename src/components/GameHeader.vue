@@ -22,6 +22,7 @@ const emit = defineEmits<{
   'staff-management': []
   'subscription-box': []
   'market-trends': []
+  'cross-shop': []
 }>()
 
 const gameStore = useGameStore()
@@ -127,6 +128,10 @@ const timeSlotLabel = computed(() => {
         </button>
         <button class="icon-btn market-trends-btn" @click="emit('market-trends')">
           📊
+        </button>
+        <button class="icon-btn cross-shop-btn" @click="emit('cross-shop')">
+          🔄
+          <span v-if="gameStore.crossShopUnreadNotifications > 0" class="badge">{{ gameStore.crossShopUnreadNotifications }}</span>
         </button>
         <button class="icon-btn achievements-btn" @click="emit('achievements')">
           🏆

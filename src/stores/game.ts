@@ -38,7 +38,14 @@ import type {
   BoxPreparationResult,
   SubscriptionSignupResult,
   ComplaintHandleResult,
-  SubscriptionBoxStats
+  SubscriptionBoxStats,
+  CrossShopGameState,
+  CrossShopShop,
+  CrossShopTradeItem,
+  CrossShopValuation,
+  CrossShopValuationResult,
+  CrossShopInventoryItem,
+  CrossShopTradeCompleteResult
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -409,6 +416,25 @@ import {
   getQuestRarityLabel as questGetQuestRarityLabel,
   getQuestTypeLabel as questGetQuestTypeLabel
 } from '@/data/quests'
+import {
+  createInitialCrossShopState,
+  getShopsForLevel,
+  calculateRecordValuation,
+  calculateBatchValuation,
+  generateShopInventory,
+  getPlayerTradeableInventory,
+  createTrade,
+  processShopCounterOffer,
+  calculateTradeCompletion,
+  cancelTrade as doCancelCrossShopTrade,
+  updateCrossShopStats,
+  addCrossShopNotification,
+  getCrossShopUnreadCount,
+  markCrossShopNotificationsRead,
+  getTradeStatusLabel,
+  getTradeStatusColor,
+  getReactionEmoji
+} from '@/data/crossShop'
 import type {
   DailyQuestBoard, Quest, QuestProgressUpdate, QuestAcceptResult, QuestClaimResult, QuestRarity, QuestType
 } from '@/types'
@@ -645,6 +671,26 @@ export const useGameStore = defineStore('game', () => {
   const staffManagement = ref<StaffManagementState>(createInitialStaffManagementState())
 
   const subscriptionBox = ref<SubscriptionBoxGameState>(createInitialSubscriptionBoxState())
+
+  const crossShop = ref<CrossShopGameState>(createInitialCrossShopState())
+
+  const currentCrossShopShops = computed<CrossShopShop[]>(() => {
+    return getShopsForLevel(currentLevel.value, shopReputation.value)
+  })
+
+  const crossShopUnreadNotifications = computed(() => {
+    return getCrossShopUnreadCount(crossShop.value)
+  })
+
+  const crossShopActiveTrades = computed(() => {
+    return crossShop.value.activeTrades.filter(t =>
+      t.status === 'proposed' || t.status === 'negotiating' || t.status === 'accepted'
+    )
+  })
+
+  const crossShopCompletedTrades = computed(() => {
+    return [...crossShop.value.completedTrades].sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)).slice(0, 30)
+  })
 
   const subscriptionBoxStats = computed<SubscriptionBoxStats>(() => {
     return calculateSubscriptionStats(
@@ -9008,6 +9054,328 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  const refreshCrossShopShops = () => {
+    crossShop.value.shops = currentCrossShopShops.value
+  }
+
+  const getCrossShopInventory = (shopId: string): CrossShopInventoryItem[] => {
+    const shop = currentCrossShopShops.value.find(s => s.id === shopId)
+    if (!shop || !shop.isUnlocked) return []
+
+    const excludeIds = [
+      ...inventory.value.map(i => i.record.id),
+      ...collection.value.map(c => c.record.id)
+    ]
+
+    return generateShopInventory(shop, excludeIds, currentLevel.value)
+  }
+
+  const getPlayerTradeableItems = () => {
+    return getPlayerTradeableInventory(inventory.value, collection.value)
+  }
+
+  const evaluateCrossShopRecord = (record: Record, conditionScore: number, shopId: string): CrossShopValuation | null => {
+    const shop = currentCrossShopShops.value.find(s => s.id === shopId)
+    if (!shop) return null
+
+    const heatMap = new Map<Genre, { heatValue: number; priceModifier: number }>()
+    for (const [genre, heat] of genreMarketHeat.value.entries()) {
+      heatMap.set(genre, { heatValue: heat.heatValue, priceModifier: heat.priceModifier })
+    }
+
+    return calculateRecordValuation(record, conditionScore, shop, heatMap)
+  }
+
+  const evaluateCrossShopBatch = (
+    items: { record: Record; conditionScore: number }[],
+    shopId: string
+  ): CrossShopValuationResult | null => {
+    const shop = currentCrossShopShops.value.find(s => s.id === shopId)
+    if (!shop) return null
+
+    const heatMap = new Map<Genre, { heatValue: number; priceModifier: number }>()
+    for (const [genre, heat] of genreMarketHeat.value.entries()) {
+      heatMap.set(genre, { heatValue: heat.heatValue, priceModifier: heat.priceModifier })
+    }
+
+    return calculateBatchValuation(items, shop, heatMap)
+  }
+
+  const createCrossShopTrade = (
+    shopId: string,
+    playerItems: CrossShopTradeItem[],
+    shopItems: CrossShopTradeItem[],
+    cashFromPlayer: number,
+    cashFromShop: number
+  ) => {
+    const shop = currentCrossShopShops.value.find(s => s.id === shopId)
+    if (!shop || !shop.isUnlocked) {
+      return { success: false, message: '该店铺尚未解锁' }
+    }
+
+    const result = createTrade(shop, playerItems, shopItems, cashFromPlayer, cashFromShop, currentDay.value)
+
+    if (result.success && result.trade) {
+      crossShop.value.activeTrades.push(result.trade)
+      crossShop.value.stats = updateCrossShopStats(crossShop.value.stats, result.trade, false)
+      crossShop.value = addCrossShopNotification(
+        crossShop.value,
+        `已向 ${shop.name} 发起交易`,
+        'info'
+      )
+
+      const evalResult = processShopCounterOffer(
+        result.trade,
+        playerItems,
+        shopItems,
+        cashFromPlayer,
+        cashFromShop,
+        currentDay.value
+      )
+
+      if (evalResult.success && evalResult.trade) {
+        const idx = crossShop.value.activeTrades.findIndex(t => t.id === result.trade!.id)
+        if (idx >= 0) {
+          crossShop.value.activeTrades[idx] = evalResult.trade
+        }
+
+        if (evalResult.isAccepted) {
+          crossShop.value = addCrossShopNotification(
+            crossShop.value,
+            `${shop.name} 接受了你的报价！`,
+            'success'
+          )
+        } else if (evalResult.shopCounterOffer) {
+          crossShop.value = addCrossShopNotification(
+            crossShop.value,
+            `${shop.name} 提出了还价`,
+            'warning'
+          )
+        }
+      }
+
+      return { ...result, evaluated: evalResult }
+    }
+
+    return result
+  }
+
+  const continueCrossShopNegotiation = (
+    tradeId: string,
+    newPlayerItems: CrossShopTradeItem[],
+    newShopItems: CrossShopTradeItem[],
+    newCashFromPlayer: number,
+    newCashFromShop: number
+  ) => {
+    const trade = crossShop.value.activeTrades.find(t => t.id === tradeId)
+    if (!trade) {
+      return { success: false, message: '交易不存在' }
+    }
+    if (trade.status === 'completed' || trade.status === 'cancelled' || trade.status === 'expired') {
+      return { success: false, message: '该交易已结束' }
+    }
+
+    const result = processShopCounterOffer(
+      trade,
+      newPlayerItems,
+      newShopItems,
+      newCashFromPlayer,
+      newCashFromShop,
+      currentDay.value
+    )
+
+    if (result.success && result.trade) {
+      const idx = crossShop.value.activeTrades.findIndex(t => t.id === tradeId)
+      if (idx >= 0) {
+        crossShop.value.activeTrades[idx] = result.trade
+      }
+
+      if (result.isAccepted) {
+        crossShop.value.stats = updateCrossShopStats(crossShop.value.stats, result.trade, false)
+        crossShop.value = addCrossShopNotification(
+          crossShop.value,
+          `交易报价已被接受！`,
+          'success'
+        )
+      } else if (result.isRejected) {
+        crossShop.value.activeTrades = crossShop.value.activeTrades.filter(t => t.id !== tradeId)
+        crossShop.value.stats.totalTradesRejected += 1
+        crossShop.value = addCrossShopNotification(
+          crossShop.value,
+          `交易失败：${result.message}`,
+          'error'
+        )
+      }
+    }
+
+    return result
+  }
+
+  const completeCrossShopTrade = (tradeId: string): CrossShopTradeCompleteResult => {
+    const trade = crossShop.value.activeTrades.find(t => t.id === tradeId)
+    if (!trade) {
+      return { success: false, message: '交易不存在' }
+    }
+
+    const result = calculateTradeCompletion(trade, currentDay.value, budget.value, encyclopedia.value)
+
+    if (!result.success || !result.trade) {
+      return result
+    }
+
+    budget.value = budget.value + trade.cashFromShop - trade.cashFromPlayer
+
+    for (const item of result.itemsGiven || []) {
+      const invItem = inventory.value.find(i => i.record.id === item.recordId)
+      if (invItem && invItem.quantity >= item.quantity) {
+        invItem.quantity -= item.quantity
+      } else {
+        const colIdx = collection.value.findIndex(c => c.record.id === item.recordId)
+        if (colIdx >= 0) {
+          collection.value.splice(colIdx, 1)
+        }
+      }
+    }
+
+    for (const item of result.itemsReceived || []) {
+      const invItem = inventory.value.find(i => i.record.id === item.recordId)
+      if (invItem) {
+        invItem.quantity += item.quantity
+        invItem.conditionScore = Math.max(invItem.conditionScore, item.conditionScore)
+      } else {
+        inventory.value.push({
+          record: item.record,
+          quantity: item.quantity,
+          purchaseDate: Date.now(),
+          conditionScore: item.conditionScore,
+          actualCostPrice: Math.round(item.agreedValue * 0.8)
+        })
+      }
+
+      const existingCol = collection.value.find(c => c.record.id === item.recordId)
+      if (!existingCol) {
+        const colValuation = evaluateCrossShopRecord(item.record, item.conditionScore, trade.shopId)
+        collection.value.push({
+          record: item.record,
+          acquiredDate: Date.now(),
+          purchasePrice: item.agreedValue,
+          isFavorite: false,
+          notes: `通过与 ${trade.shop.name} 交换获得`,
+          conditionScore: item.conditionScore,
+          collectionValue: colValuation?.finalEstimatedValue || item.agreedValue,
+          extended: {
+            story: null,
+            achievements: [],
+            source: {
+              type: 'level_clear',
+              sourceId: trade.id,
+              sourceName: '跨店交换',
+              sourceIcon: '🔄',
+              description: `与 ${trade.shop.name} 交换获得`,
+              timestamp: Date.now()
+            },
+            displayCopy: null,
+            saleHistory: [],
+            clearHistory: [],
+            daysOwned: 0,
+            timesRenovated: 0,
+            totalSaleRevenue: 0,
+            totalSalesCount: 0,
+            isStoryUnlocked: false,
+            unlockedAchievementCount: 0
+          }
+        })
+      }
+    }
+
+    if (result.encyclopediaUpdates && result.encyclopediaUpdates.length > 0) {
+      for (const update of result.encyclopediaUpdates) {
+        const entry = encyclopedia.value.entries.find(e => e.record.id === update.recordId)
+        if (entry) {
+          entry.isCollected = true
+          entry.collectedCount += 1
+          entry.bestConditionScore = Math.max(entry.bestConditionScore, update.bestCondition)
+          if (!entry.firstCollectedDate) {
+            entry.firstCollectedDate = Date.now()
+          }
+        }
+      }
+    }
+
+    if (result.reputationChange && result.reputationChange > 0) {
+      shopReputation.value = Math.min(100, shopReputation.value + result.reputationChange)
+    }
+
+    crossShop.value.activeTrades = crossShop.value.activeTrades.filter(t => t.id !== tradeId)
+    crossShop.value.completedTrades.push(result.trade)
+    crossShop.value.stats = updateCrossShopStats(crossShop.value.stats, result.trade, true)
+
+    crossShop.value = addCrossShopNotification(
+      crossShop.value,
+      `🎉 交易成功！获得 ${result.itemsReceived?.length || 0} 张唱片${result.reputationChange ? `，声望 +${result.reputationChange}` : ''}`,
+      'success'
+    )
+
+    return result
+  }
+
+  const cancelCrossShopTrade = (tradeId: string) => {
+    const trade = crossShop.value.activeTrades.find(t => t.id === tradeId)
+    if (!trade) {
+      return { success: false, message: '交易不存在' }
+    }
+
+    const cancelled = doCancelCrossShopTrade(trade)
+    crossShop.value.activeTrades = crossShop.value.activeTrades.filter(t => t.id !== tradeId)
+    crossShop.value.completedTrades.push(cancelled)
+
+    crossShop.value = addCrossShopNotification(
+      crossShop.value,
+      `已取消与 ${trade.shop.name} 的交易`,
+      'warning'
+    )
+
+    return { success: true, message: '交易已取消' }
+  }
+
+  const setCrossShopFilter = (filter: CrossShopGameState['tradeFilter']) => {
+    crossShop.value.tradeFilter = filter
+  }
+
+  const selectCrossShopShop = (shopId: string | null) => {
+    crossShop.value.selectedShopId = shopId
+  }
+
+  const selectCrossShopTrade = (tradeId: string | null) => {
+    crossShop.value.selectedTradeId = tradeId
+  }
+
+  const getCrossShopFilteredTrades = () => {
+    const filter = crossShop.value.tradeFilter
+    const allTrades = [...crossShop.value.activeTrades, ...crossShop.value.completedTrades]
+
+    switch (filter) {
+      case 'active':
+        return crossShop.value.activeTrades
+      case 'completed':
+        return crossShop.value.completedTrades
+      case 'proposed':
+        return allTrades.filter(t => t.status === 'proposed' || t.status === 'negotiating')
+      case 'received':
+        return allTrades.filter(t => t.status === 'accepted')
+      default:
+        return allTrades
+    }
+  }
+
+  const markCrossShopNotificationsReadAction = () => {
+    crossShop.value = markCrossShopNotificationsRead(crossShop.value)
+  }
+
+  const getCrossShopTradeStatusLabel = getTradeStatusLabel
+  const getCrossShopTradeStatusColor = getTradeStatusColor
+  const getCrossShopReactionEmoji = getReactionEmoji
+
   return {
     currentLevel,
     currentDay,
@@ -9542,6 +9910,28 @@ export const useGameStore = defineStore('game', () => {
     getSeverityLabel,
     getSeverityColor,
     getSubscriptionBoxStatusLabel: getSubscriptionBoxStatusLabelData,
-    getSubscriptionBoxStatusColor: getSubscriptionBoxStatusColorData
+    getSubscriptionBoxStatusColor: getSubscriptionBoxStatusColorData,
+    crossShop,
+    currentCrossShopShops,
+    crossShopUnreadNotifications,
+    crossShopActiveTrades,
+    crossShopCompletedTrades,
+    refreshCrossShopShops,
+    getCrossShopInventory,
+    getPlayerTradeableItems,
+    evaluateCrossShopRecord,
+    evaluateCrossShopBatch,
+    createCrossShopTrade,
+    continueCrossShopNegotiation,
+    completeCrossShopTrade,
+    cancelCrossShopTrade,
+    setCrossShopFilter,
+    selectCrossShopShop,
+    selectCrossShopTrade,
+    getCrossShopFilteredTrades,
+    markCrossShopNotificationsReadAction,
+    getCrossShopTradeStatusLabel,
+    getCrossShopTradeStatusColor,
+    getCrossShopReactionEmoji
   }
 })

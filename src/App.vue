@@ -24,6 +24,7 @@ import AchievementsView from './components/AchievementsView.vue'
 import StaffManagementView from './components/StaffManagementView.vue'
 import SubscriptionBoxView from './components/SubscriptionBoxView.vue'
 import MarketTrendsView from './components/MarketTrendsView.vue'
+import CrossShopView from './components/CrossShopView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -43,6 +44,7 @@ const showAchievements = ref(false)
 const showStaffManagement = ref(false)
 const showSubscriptionBox = ref(false)
 const showMarketTrends = ref(false)
+const showCrossShop = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -127,6 +129,13 @@ const toggleSubscriptionBox = () => {
 const toggleMarketTrends = () => {
   showMarketTrends.value = !showMarketTrends.value
 }
+
+const toggleCrossShop = () => {
+  showCrossShop.value = !showCrossShop.value
+  if (!showCrossShop.value) {
+    gameStore.markCrossShopNotificationsReadAction()
+  }
+}
 </script>
 
 <template>
@@ -148,6 +157,7 @@ const toggleMarketTrends = () => {
     <StaffManagementView v-if="showStaffManagement" @close="toggleStaffManagement" />
     <SubscriptionBoxView v-if="showSubscriptionBox" @close="toggleSubscriptionBox" />
     <MarketTrendsView v-if="showMarketTrends" @close="toggleMarketTrends" />
+    <CrossShopView v-if="showCrossShop" @close="toggleCrossShop" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -173,6 +183,7 @@ const toggleMarketTrends = () => {
         @achievements="toggleAchievements"
         @subscription-box="toggleSubscriptionBox"
         @market-trends="toggleMarketTrends"
+        @cross-shop="toggleCrossShop"
       />
       
       <main class="main-content">

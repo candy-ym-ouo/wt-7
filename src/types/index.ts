@@ -3176,3 +3176,168 @@ export interface PriceIndexHistoryPoint {
   genreIndices: Map<Genre, number>
 }
 
+export type CrossShopTradeStatus = 'proposed' | 'negotiating' | 'accepted' | 'rejected' | 'completed' | 'cancelled' | 'expired'
+export type CrossShopTradeType = 'record_for_record' | 'record_for_cash' | 'mixed'
+export type CrossShopShopType = 'antique' | 'modern' | 'specialist' | 'chain' | 'boutique'
+
+export interface CrossShopShop {
+  id: string
+  name: string
+  type: CrossShopShopType
+  typeName: string
+  icon: string
+  avatar: string
+  description: string
+  reputation: number
+  preferredGenres: Genre[]
+  preferredRarities: number[]
+  tradeStyle: 'generous' | 'fair' | 'tough' | 'shrewd'
+  trustLevel: number
+  minLevel: number
+  isUnlocked: boolean
+  lastTradeDay: number | null
+  totalTradesCompleted: number
+  address: string
+  ownerName: string
+  ownerQuote: string
+}
+
+export interface CrossShopTradeItem {
+  recordId: string
+  record: Record
+  quantity: number
+  conditionScore: number
+  agreedValue: number
+  source: 'player' | 'shop'
+}
+
+export interface CrossShopValuation {
+  recordId: string
+  record: Record
+  conditionScore: number
+  baseMarketValue: number
+  rarityMultiplier: number
+  conditionMultiplier: number
+  genreHeatMultiplier: number
+  shopPreferenceMultiplier: number
+  finalEstimatedValue: number
+  valuationBreakdown: {
+    label: string
+    value: number
+    percent: number
+  }[]
+  confidence: 'low' | 'medium' | 'high'
+  shopCounterRange: [number, number]
+}
+
+export interface CrossShopNegotiationRound {
+  round: number
+  side: 'player' | 'shop'
+  proposedItems: CrossShopTradeItem[]
+  proposedCash: number
+  message: string
+  reaction?: 'excited' | 'happy' | 'neutral' | 'hesitant' | 'unhappy'
+  timestamp: number
+}
+
+export interface CrossShopTrade {
+  id: string
+  shopId: string
+  shop: CrossShopShop
+  type: CrossShopTradeType
+  status: CrossShopTradeStatus
+  playerItems: CrossShopTradeItem[]
+  shopItems: CrossShopTradeItem[]
+  cashFromPlayer: number
+  cashFromShop: number
+  currentRound: number
+  maxRounds: number
+  rounds: CrossShopNegotiationRound[]
+  createdAt: number
+  createdDay: number
+  expiresInDays: number
+  expiryDay: number
+  completedAt: number | null
+  completedDay: number | null
+  playerSatisfaction: number | null
+  reputationChange: number
+  encyclopediaProgressGained: string[]
+  notes: string
+}
+
+export interface CrossShopInventoryItem {
+  record: Record
+  quantity: number
+  conditionScore: number
+  minimumAcceptValue: number
+  isWillingToTrade: boolean
+  tradePriority: number
+  shopPreferenceNote: string
+}
+
+export interface CrossShopStats {
+  totalTradesProposed: number
+  totalTradesAccepted: number
+  totalTradesRejected: number
+  totalTradesCompleted: number
+  totalRecordsReceived: number
+  totalRecordsGiven: number
+  totalCashEarned: number
+  totalCashSpent: number
+  totalReputationGained: number
+  totalReputationLost: number
+  successfulTradeRate: number
+  avgNegotiationRounds: number
+  favoriteTradingPartner: string | null
+  mostTradedGenre: Genre | null
+  newEncyclopediaEntriesFromTrading: number
+  seriesUnlockedViaTrading: number
+}
+
+export interface CrossShopGameState {
+  shops: CrossShopShop[]
+  activeTrades: CrossShopTrade[]
+  completedTrades: CrossShopTrade[]
+  stats: CrossShopStats
+  nextShopRefresh: number
+  selectedShopId: string | null
+  selectedTradeId: string | null
+  tradeFilter: 'all' | 'active' | 'completed' | 'received' | 'proposed'
+  notifications: { id: string; message: string; type: 'success' | 'warning' | 'error' | 'info'; read: boolean; createdAt: number }[]
+}
+
+export interface CrossShopValuationResult {
+  valuations: CrossShopValuation[]
+  totalEstimatedValue: number
+  totalBaseValue: number
+  averageConfidence: 'low' | 'medium' | 'high'
+}
+
+export interface CrossShopTradeCreateResult {
+  success: boolean
+  message: string
+  trade?: CrossShopTrade
+}
+
+export interface CrossShopNegotiationResult {
+  success: boolean
+  message: string
+  trade?: CrossShopTrade
+  shopCounterOffer?: CrossShopNegotiationRound
+  isAccepted?: boolean
+  isRejected?: boolean
+}
+
+export interface CrossShopTradeCompleteResult {
+  success: boolean
+  message: string
+  trade?: CrossShopTrade
+  itemsReceived?: CrossShopTradeItem[]
+  cashReceived?: number
+  itemsGiven?: CrossShopTradeItem[]
+  cashGiven?: number
+  reputationChange?: number
+  encyclopediaUpdates?: { recordId: string; wasNew: boolean; bestCondition: number }[]
+  seriesProgress?: { seriesId: string; progress: number; target: number; isCompleted: boolean }[]
+}
+
