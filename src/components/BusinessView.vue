@@ -96,6 +96,21 @@ const skipWarning = computed(() => {
   return gameStore.consecutiveSkips >= 2
 })
 
+const staffBonus = computed(() => gameStore.staffBonusSummary)
+const onDutyCount = computed(() => {
+  return gameStore.staffManagement.employees.filter(e => {
+    if (e.status !== 'working') return false
+    if (e.schedules.length === 0) return true
+    return e.schedules.some(s => s.isActive)
+  }).length
+})
+const staffBonusActive = computed(() => {
+  const b = staffBonus.value
+  return b.totalRevenueModifier > 1 || b.totalProfitModifier > 1 ||
+    b.totalSatisfactionBonus > 0 || b.totalBuyChanceBonus > 0 ||
+    b.totalCustomerCountModifier > 1
+})
+
 const reputationHint = computed(() => {
   const config = getWordOfMouthTier(gameStore.shopReputation)
   if (config.customerCountModifier <= 0) return null
@@ -339,6 +354,31 @@ onUnmounted(() => {
       <div class="tbc-summary">
         <span>匹配分总计 +{{ gameStore.themeMatchScoreBonus.toFixed(1) }}</span>
         <span>购买率 +{{ Math.round(gameStore.themeBuyChanceBonus * 100) }}%</span>
+      </div>
+    </div>
+
+    <div v-if="staffBonusActive" class="staff-bonus-card card">
+      <div class="sbc-header">
+        <span class="sbc-icon">👥</span>
+        <span class="sbc-title">员工加成</span>
+        <span class="sbc-count">{{ onDutyCount }}人在岗</span>
+      </div>
+      <div class="sbc-bonuses">
+        <span v-if="staffBonus.totalRevenueModifier > 1" class="sbc-bonus">
+          💰 营收 ×{{ staffBonus.totalRevenueModifier.toFixed(2) }}
+        </span>
+        <span v-if="staffBonus.totalProfitModifier > 1" class="sbc-bonus">
+          📈 利润 ×{{ staffBonus.totalProfitModifier.toFixed(2) }}
+        </span>
+        <span v-if="staffBonus.totalSatisfactionBonus > 0" class="sbc-bonus">
+          😊 满意度 +{{ staffBonus.totalSatisfactionBonus.toFixed(1) }}
+        </span>
+        <span v-if="staffBonus.totalBuyChanceBonus > 0" class="sbc-bonus">
+          🎯 购买率 +{{ (staffBonus.totalBuyChanceBonus * 100).toFixed(1) }}%
+        </span>
+        <span v-if="staffBonus.totalCustomerCountModifier > 1" class="sbc-bonus">
+          👥 客流 ×{{ staffBonus.totalCustomerCountModifier.toFixed(2) }}
+        </span>
       </div>
     </div>
 
@@ -1011,6 +1051,54 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 600;
   color: var(--success);
+}
+
+.staff-bonus-card {
+  background: linear-gradient(135deg, rgba(246, 173, 85, 0.1) 0%, rgba(139, 105, 20, 0.1) 100%);
+  border: 1px solid rgba(246, 173, 85, 0.3);
+}
+
+.sbc-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sbc-icon {
+  font-size: 16px;
+}
+
+.sbc-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f6ad55;
+}
+
+.sbc-count {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: rgba(246, 173, 85, 0.2);
+  color: #f6ad55;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.sbc-bonuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sbc-bonus {
+  padding: 4px 10px;
+  background: rgba(72, 187, 120, 0.12);
+  color: #68d391;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(72, 187, 120, 0.2);
 }
 
 .time-slot-banner {

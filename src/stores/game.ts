@@ -3206,6 +3206,7 @@ export const useGameStore = defineStore('game', () => {
     totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
     totalCustomerCount = Math.floor(totalCustomerCount * (1 + staff.value.dailyCapacityBonus))
     totalCustomerCount = Math.floor(totalCustomerCount * (1 + shopRenovationBonus.value.customerCountModifier))
+    totalCustomerCount = Math.floor(totalCustomerCount * staffBonusSummary.value.totalCustomerCountModifier)
     const slotCount = getCustomerCountForSlot(totalCustomerCount, currentTimeSlot.value)
 
     customers.value = generateCustomersWithSpecial(
@@ -3262,6 +3263,7 @@ export const useGameStore = defineStore('game', () => {
     totalCustomerCount = Math.max(1, Math.floor(totalCustomerCount * (1 + eventCustomerCountModifier.value)))
     totalCustomerCount = Math.floor(totalCustomerCount * (1 + staff.value.dailyCapacityBonus))
     totalCustomerCount = Math.floor(totalCustomerCount * (1 + shopRenovationBonus.value.customerCountModifier))
+    totalCustomerCount = Math.floor(totalCustomerCount * staffBonusSummary.value.totalCustomerCountModifier)
     const nightCount = getCustomerCountForSlot(totalCustomerCount, 'night')
 
     customers.value = generateCustomersWithSpecial(
@@ -3866,6 +3868,10 @@ export const useGameStore = defineStore('game', () => {
       baseSalePrice = Math.floor(baseSalePrice * (1 + shopRenovationBonus.value.salePriceBonus))
     }
 
+    if (staffBonusSummary.value.totalRevenueModifier > 1) {
+      baseSalePrice = Math.floor(baseSalePrice * staffBonusSummary.value.totalRevenueModifier)
+    }
+
     const promotionResult = getRecordPromotionPrice(baseSalePrice, record)
     let salePrice = promotionResult.finalPrice
     const wasPromotionApplied = promotionResult.appliedPromotionId !== null
@@ -3903,6 +3909,7 @@ export const useGameStore = defineStore('game', () => {
     buyChance += getAtmosphereBuyChanceBoost(record.genre)
     buyChance += getPromotionBuyChanceForRecord(record)
     buyChance += shopRenovationBonus.value.buyChanceBonus
+    buyChance += staffBonusSummary.value.totalBuyChanceBonus
 
     const priceSensitivity = adjustPriceSensitivity(currentTimeSlot.value)
     if (!isGiftItem && salePrice > customer.budget) {
@@ -3943,7 +3950,7 @@ export const useGameStore = defineStore('game', () => {
 
     if (success) {
       const baseProfit = salePrice - invItem.actualCostPrice
-      const profit = Math.floor(baseProfit * (1 + shopRenovationBonus.value.profitMarginBonus))
+      const profit = Math.floor(baseProfit * (1 + shopRenovationBonus.value.profitMarginBonus) * staffBonusSummary.value.totalProfitModifier)
       const reservationSatisfactionBonus = isReservationTarget ? 15 : 0
       const baseSatisfaction = 50 + finalScore * 0.5 - (!isGiftItem && salePrice > record.marketPrice ? 20 : 0) + reservationSatisfactionBonus
       const memberBonus = customer.isReturningCustomer ? 5 : 0
@@ -3979,6 +3986,7 @@ export const useGameStore = defineStore('game', () => {
         slotConditionScore
       )
 
+      const staffSatBonus = staffBonusSummary.value.totalSatisfactionBonus
       const satisfaction = Math.max(
         20,
         Math.min(
@@ -3986,7 +3994,8 @@ export const useGameStore = defineStore('game', () => {
           baseSatisfaction + memberBonus + conditionImpact.satisfactionModifier +
           bargainSatisfactionBonus + eventSatisfactionModifier.value +
           patienceSatisfactionMod + fastServiceBonus + identitySatisfactionMod +
-          promotionSatisfactionBonus + shopRenovationBonus.value.satisfactionBonus
+          promotionSatisfactionBonus + shopRenovationBonus.value.satisfactionBonus +
+          staffSatBonus
         )
       )
 
@@ -4007,6 +4016,20 @@ export const useGameStore = defineStore('game', () => {
       updateQuestProgressAction({ type: 'sell_genre', value: 1, genre: record.genre })
       updateQuestProgressAction({ type: 'reach_profit', value: profit, genre: record.genre })
       updateQuestProgressAction({ type: 'customer_satisfaction', value: satisfaction, customerId: customer.id })
+
+      const onDutyEmployees = staffManagement.value.employees.filter(e => {
+        if (e.status !== 'working') return false
+        if (e.schedules.length === 0) return true
+        return e.schedules.some(s => {
+          if (!s.isActive) return false
+          const shiftCfg = getShiftConfig(s.shiftId)
+          return shiftCfg?.timeSlots.includes(currentTimeSlot.value as any)
+        })
+      })
+      if (onDutyEmployees.length > 0) {
+        const contributor = onDutyEmployees[Math.floor(Math.random() * onDutyEmployees.length)]
+        updateEmployeePerformance(contributor.id, salePrice, satisfaction)
+      }
 
       if (wasPromotionApplied && promotionResult.appliedPromotionId) {
         recordPromotionSale(promotionResult.appliedPromotionId, salePrice, isGiftItem)
@@ -6185,6 +6208,11 @@ export const useGameStore = defineStore('game', () => {
           }
         })
       }
+    }
+
+    if (staffBonusSummary.value.totalReputationBonus > 0) {
+      const repGain = Math.min(2, Math.ceil(staffBonusSummary.value.totalReputationBonus))
+      shopReputation.value = Math.min(100, shopReputation.value + repGain)
     }
 
     staffManagement.value.bonusSummary = staffBonusSummary.value

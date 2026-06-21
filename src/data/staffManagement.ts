@@ -702,9 +702,9 @@ export const calculateEmployeeSalary = (
 
   let overtimePay = 0
   employee.schedules.forEach(s => {
-    if (s.isActive && s.shiftId === 'full') {
+    if (s.isActive) {
       const shiftCfg = getShiftConfig(s.shiftId)
-      if (shiftCfg) {
+      if (shiftCfg && shiftCfg.salaryMultiplier > 1) {
         overtimePay += Math.floor(employee.baseSalary * (shiftCfg.salaryMultiplier - 1) / daysInPeriod * 2)
       }
     }
@@ -714,18 +714,23 @@ export const calculateEmployeeSalary = (
       type: 'overtime',
       label: '加班补贴',
       amount: overtimePay,
-      description: '全日班和晚班额外补贴'
+      description: '高倍率班次额外补贴'
     })
   }
 
-  const perfScore = (employee.performance.avgSatisfaction + employee.level * 2) / 2
+  const served = employee.performance.customersServed
+  const avgSat = employee.performance.avgSatisfaction
+  const salesContrib = Math.min(30, employee.performance.totalSales / 5000)
+  const serviceBonus = served > 0 ? (avgSat - 50) * 0.3 : 0
+  const levelBonus = employee.level * 2
+  const perfScore = Math.max(0, 30 + salesContrib + serviceBonus + levelBonus)
   const performancePay = Math.floor(employee.baseSalary * 0.2 * (perfScore / 80))
   if (performancePay > 0) {
     components.push({
       type: 'performance',
       label: '绩效奖金',
       amount: performancePay,
-      description: `绩效评分：${perfScore.toFixed(1)}`
+      description: `绩效评分：${perfScore.toFixed(1)}（服务${served}人·满意度${avgSat.toFixed(0)}）`
     })
   }
 
