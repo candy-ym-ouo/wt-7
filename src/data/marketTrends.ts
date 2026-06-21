@@ -2,6 +2,7 @@ import type {
   Genre,
   GenreMarketHeat,
   Record,
+  Supplier,
   SupplierInventoryItem,
   RecordPerformance,
   GenrePriceIndex,
@@ -237,12 +238,15 @@ export const generatePurchaseRecommendations = (
   currentInventory: InventoryItem[],
   budget: number,
   performances: RecordPerformance[],
+  suppliers: Supplier[],
   limit: number = 8
 ): PurchaseRecommendation[] => {
   const inventoryRecordIds = new Set(currentInventory.map(i => i.record.id))
+  const supplierMap = new Map(suppliers.map(s => [s.id, s.name]))
 
   const recommendations = supplierInventory.map(item => {
     const marketHeat = marketHeats.get(item.record.genre)
+    const supplierName = supplierMap.get(item.supplierId) || item.supplierId
     const heatValue = marketHeat?.heatValue || 0.5
     const heatBonus = (heatValue - 0.5) * 20
 
@@ -286,7 +290,7 @@ export const generatePurchaseRecommendations = (
       id: `rec-${item.record.id}-${item.supplierId}`,
       record: item.record,
       supplierId: item.supplierId,
-      supplierName: item.supplierId,
+      supplierName,
       adjustedCostPrice: item.adjustedCostPrice,
       marketPrice: Math.round(itemMarketPrice),
       expectedProfit: Math.round(expectedProfit),
@@ -460,7 +464,8 @@ export const calculateMarketCenterSummary = (
   rareFluctuations: RareRecordFluctuation[],
   recommendations: PurchaseRecommendation[],
   insights: MarketInsight[],
-  performances: RecordPerformance[]
+  performances: RecordPerformance[],
+  allRecords: Record[]
 ): MarketCenterSummary => {
   const heatArray = Array.from(marketHeats.values())
   const hottest = heatArray.sort((a, b) => b.heatValue - a.heatValue)[0]
@@ -482,9 +487,10 @@ export const calculateMarketCenterSummary = (
     ? Math.round(rareRecords.reduce((s, r) => s + r.changePercent, 0) / rareRecords.length * 10) / 10
     : 0
 
+  const recordRarityMap = new Map(allRecords.map(r => [r.id, r.rarity]))
   const salesByRarity: { [key: number]: number } = {}
   performances.forEach(p => {
-    const rarity = 1
+    const rarity = recordRarityMap.get(p.recordId) ?? 1
     salesByRarity[rarity] = (salesByRarity[rarity] || 0) + p.totalSold
   })
   const sortedSales = Object.entries(salesByRarity).sort((a, b) => b[1] - a[1])

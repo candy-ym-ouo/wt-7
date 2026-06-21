@@ -479,6 +479,7 @@ const getPriorityColor = (priority: string) => {
                 <div class="rec-info">
                   <h5 class="rec-title">{{ rec.record.title }}</h5>
                   <p class="rec-artist">{{ rec.record.artist }}</p>
+                  <p class="rec-supplier">🏪 {{ rec.supplierName }}</p>
                   <div class="rec-tags">
                     <span class="rec-genre">{{ rec.record.genre }}</span>
                     <span class="rec-rarity" :style="{ color: getRarityColor(rec.record.rarity) }">
@@ -1315,7 +1316,14 @@ const getPriorityColor = (priority: string) => {
 .rec-artist {
   font-size: 11px;
   color: var(--text-secondary);
+  margin: 0 0 2px 0;
+}
+
+.rec-supplier {
+  font-size: 10px;
+  color: var(--accent-gold);
   margin: 0 0 6px 0;
+  font-weight: 500;
 }
 
 .rec-tags {

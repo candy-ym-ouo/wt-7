@@ -1289,6 +1289,7 @@ export const useGameStore = defineStore('game', () => {
       inventory.value,
       budget.value,
       recordPerformances.value,
+      availableSuppliers.value,
       8
     )
   })
@@ -1310,7 +1311,8 @@ export const useGameStore = defineStore('game', () => {
       rareRecordFluctuations.value,
       purchaseRecommendationsForMarket.value,
       marketInsights.value,
-      recordPerformances.value
+      recordPerformances.value,
+      allRecords
     )
   })
 
