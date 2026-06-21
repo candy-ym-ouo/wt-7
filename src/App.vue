@@ -21,6 +21,7 @@ import QuestBoard from './components/QuestBoard.vue'
 import CommunityView from './components/CommunityView.vue'
 import MusicFestivalCollabView from './components/MusicFestivalCollabView.vue'
 import AchievementsView from './components/AchievementsView.vue'
+import StaffManagementView from './components/StaffManagementView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -37,6 +38,7 @@ const showQuestBoard = ref(false)
 const showCommunity = ref(false)
 const showMusicFestivalCollab = ref(false)
 const showAchievements = ref(false)
+const showStaffManagement = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -109,6 +111,10 @@ const toggleAchievements = () => {
     gameStore.clearAchievementNotifications()
   }
 }
+
+const toggleStaffManagement = () => {
+  showStaffManagement.value = !showStaffManagement.value
+}
 </script>
 
 <template>
@@ -127,6 +133,7 @@ const toggleAchievements = () => {
     <CommunityView v-if="showCommunity" @close="toggleCommunity" />
     <MusicFestivalCollabView v-if="showMusicFestivalCollab" @close="toggleMusicFestivalCollab" />
     <AchievementsView v-if="showAchievements" @close="toggleAchievements" />
+    <StaffManagementView v-if="showStaffManagement" @close="toggleStaffManagement" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -137,6 +144,7 @@ const toggleAchievements = () => {
         @back="backToMenu" 
         @collection="toggleCollection"
         @staff="toggleStaff"
+        @staff-management="toggleStaffManagement"
         @auction="toggleAuction"
         @presale="togglePresale"
         @renovation="toggleRenovation"

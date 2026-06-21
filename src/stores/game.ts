@@ -27,7 +27,10 @@ import type {
   MusicFestivalCollabState, MusicFestivalCollabSettlement, MusicFestivalCollabTaskType,
   MusicFestivalCollabCustomer,
   MusicFestivalCollabStartResult, MusicFestivalCollabPurchaseResult,
-  MusicFestivalCollabRefreshCustomerResult
+  MusicFestivalCollabRefreshCustomerResult,
+  StaffManagementState, StaffWorkShift,
+  StaffTrainingType, Employee,
+  StaffBonusSummary
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -162,6 +165,23 @@ import {
   upgradeStaffSkill as upgradeStaffSkillData,
   addStaffPoints as addStaffPointsData
 } from '@/data/staff'
+import {
+  createInitialStaffManagementState,
+  generateRecruitPool,
+  createEmployeeFromCandidate,
+  calculateEmployeeBonusSummary,
+  addExperienceToEmployee,
+  startEmployeeTraining,
+  progressTrainingDay,
+  setEmployeeSchedule,
+  calculatePayrollSummary,
+  getPositionConfig,
+  getTrainingCourse,
+  getAvailableCourses,
+  getRarityColor as getStaffRarityColor,
+  getRarityLabel,
+  getShiftConfig
+} from '@/data/staffManagement'
 import {
   createInitialShopRenovationState,
   calculateRenovationBonusSummary,
@@ -574,6 +594,22 @@ export const useGameStore = defineStore('game', () => {
 
   const achievements = ref<BusinessAchievementState>(createInitialAchievementState())
   const achievementNotification = ref<{ show: boolean; type: 'unlock' | 'reward' | 'title'; name: string; icon: string } | null>(null)
+
+  const staffManagement = ref<StaffManagementState>(createInitialStaffManagementState())
+
+  const staffBonusSummary = computed<StaffBonusSummary>(() => {
+    return calculateEmployeeBonusSummary(staffManagement.value.employees, currentTimeSlot.value)
+  })
+
+  const workingEmployeesCount = computed(() => {
+    return staffManagement.value.employees.filter(e => e.status === 'working').length
+  })
+
+  const totalMonthlySalary = computed(() => {
+    return staffManagement.value.employees
+      .filter(e => e.status !== 'fired')
+      .reduce((sum, e) => sum + e.baseSalary, 0)
+  })
 
   const secondHandPendingAppraisals = computed(() =>
     secondHand.value.appraisals.filter(a => a.status === 'pending_appraisal')
@@ -4955,6 +4991,7 @@ export const useGameStore = defineStore('game', () => {
           currentDay.value++
           advanceFestivalDay()
           advanceMusicFestivalCollabDay()
+          processDailyStaffManagement()
           resetDailyStats()
           refreshCommunityDailyState()
           dailyPurchaseAmountPerSupplier.value.clear()
@@ -5958,6 +5995,225 @@ export const useGameStore = defineStore('game', () => {
 
   const addStaffPoints = (points: number) => {
     staff.value = addStaffPointsData(staff.value, points)
+  }
+
+  const refreshRecruitPool = (): { success: boolean; message: string } => {
+    const cooldownLeft = (staffManagement.value.lastRecruitRefreshDay + staffManagement.value.recruitRefreshCooldown) - currentDay.value
+    if (cooldownLeft > 0) {
+      return { success: false, message: `刷新冷却中，还需 ${cooldownLeft} 天` }
+    }
+    const refreshCost = 200
+    if (budget.value < refreshCost) {
+      return { success: false, message: `刷新费用不足，需要 ¥${refreshCost}` }
+    }
+    budget.value -= refreshCost
+    staffManagement.value.recruitPool = generateRecruitPool(currentLevel.value, 6)
+    staffManagement.value.lastRecruitRefreshDay = currentDay.value
+    return { success: true, message: '候选人池已刷新' }
+  }
+
+  const hireEmployee = (candidateId: string): { success: boolean; message: string; employee?: Employee } => {
+    const candidate = staffManagement.value.recruitPool.find(c => c.id === candidateId)
+    if (!candidate) {
+      return { success: false, message: '候选人不存在' }
+    }
+    if (candidate.isLocked) {
+      return { success: false, message: candidate.unlockReason || '该岗位未解锁' }
+    }
+    const currentCount = staffManagement.value.employees.filter(e => e.status !== 'fired').length
+    if (currentCount >= staffManagement.value.maxEmployees) {
+      return { success: false, message: `员工数量已达上限（${staffManagement.value.maxEmployees}人）` }
+    }
+    const samePositionCount = staffManagement.value.employees.filter(e => e.status !== 'fired' && e.position === candidate.position).length
+    const posConfig = getPositionConfig(candidate.position)
+    if (posConfig && samePositionCount >= posConfig.maxCount) {
+      return { success: false, message: `${posConfig.name}岗位已达上限（${posConfig.maxCount}人）` }
+    }
+    const totalCost = candidate.signingBonus + candidate.expectedSalary
+    if (budget.value < totalCost) {
+      return { success: false, message: `资金不足，入职费用 ¥${totalCost}（签约奖金+首月工资）` }
+    }
+    budget.value -= totalCost
+    const employee = createEmployeeFromCandidate(candidate, currentDay.value)
+    staffManagement.value.employees.push(employee)
+    staffManagement.value.recruitPool = staffManagement.value.recruitPool.filter(c => c.id !== candidateId)
+    staffManagement.value.totalHiringCost += candidate.signingBonus
+    return { success: true, message: `成功聘用 ${candidate.name}！`, employee }
+  }
+
+  const fireEmployee = (employeeId: string): { success: boolean; message: string } => {
+    const idx = staffManagement.value.employees.findIndex(e => e.id === employeeId)
+    if (idx === -1) {
+      return { success: false, message: '员工不存在' }
+    }
+    const emp = staffManagement.value.employees[idx]
+    if (emp.status === 'fired') {
+      return { success: false, message: '该员工已离职' }
+    }
+    const severancePay = Math.floor(emp.baseSalary * 0.5)
+    if (budget.value < severancePay) {
+      return { success: false, message: `需要支付离职补偿金 ¥${severancePay}，资金不足` }
+    }
+    budget.value -= severancePay
+    staffManagement.value.employees[idx] = { ...emp, status: 'fired' }
+    return { success: true, message: `已解除与 ${emp.name} 的劳动合同，支付补偿金 ¥${severancePay}` }
+  }
+
+  const raiseEmployeeSalary = (employeeId: string, amount: number): { success: boolean; message: string } => {
+    const emp = staffManagement.value.employees.find(e => e.id === employeeId)
+    if (!emp || emp.status === 'fired') {
+      return { success: false, message: '员工不存在或已离职' }
+    }
+    if (amount <= 0) {
+      return { success: false, message: '加薪金额必须大于0' }
+    }
+    emp.baseSalary += amount
+    emp.morale = Math.min(100, emp.morale + 15)
+    emp.satisfaction = Math.min(100, emp.satisfaction + 10)
+    emp.lastRaiseDay = currentDay.value
+    return { success: true, message: `${emp.name} 薪资已上调 ¥${amount}，士气提升！` }
+  }
+
+  const startTraining = (employeeId: string, courseId: StaffTrainingType): { success: boolean; message: string } => {
+    const empIdx = staffManagement.value.employees.findIndex(e => e.id === employeeId)
+    if (empIdx === -1) {
+      return { success: false, message: '员工不存在' }
+    }
+    const emp = staffManagement.value.employees[empIdx]
+    const course = getTrainingCourse(courseId)
+    if (!course) {
+      return { success: false, message: '培训课程不存在' }
+    }
+    if (course.unlockLevel > currentLevel.value) {
+      return { success: false, message: `需要等级 ${course.unlockLevel} 才能解锁该课程` }
+    }
+    if (budget.value < course.cost) {
+      return { success: false, message: `培训费用 ¥${course.cost}，资金不足` }
+    }
+    const result = startEmployeeTraining(emp, course, currentDay.value)
+    if (!result.success) {
+      return { success: false, message: result.message }
+    }
+    budget.value -= course.cost
+    staffManagement.value.employees[empIdx] = result.employee
+    staffManagement.value.totalTrainingCost += course.cost
+    return { success: true, message: result.message }
+  }
+
+  const setEmployeeShiftSchedule = (
+    employeeId: string,
+    dayOfWeek: number,
+    shiftId: StaffWorkShift | null
+  ): { success: boolean; message: string } => {
+    const empIdx = staffManagement.value.employees.findIndex(e => e.id === employeeId)
+    if (empIdx === -1) {
+      return { success: false, message: '员工不存在' }
+    }
+    const emp = staffManagement.value.employees[empIdx]
+    staffManagement.value.employees[empIdx] = setEmployeeSchedule(emp, dayOfWeek, shiftId)
+    return { success: true, message: '排班已更新' }
+  }
+
+  const getTrainingCoursesForEmployee = (employeeId: string) => {
+    const emp = staffManagement.value.employees.find(e => e.id === employeeId)
+    if (!emp) return []
+    return getAvailableCourses(currentLevel.value, emp.completedTrainings)
+  }
+
+  const processDailyStaffManagement = () => {
+    staffManagement.value.employees = staffManagement.value.employees.map(emp => {
+      if (emp.status === 'training' && emp.currentTraining) {
+        const result = progressTrainingDay(emp)
+        if (result.completed && result.course) {
+          addStaffManagementNotification(
+            `${emp.name} 完成了 ${result.course.name}！能力获得提升。`,
+            'success'
+          )
+        }
+        return result.employee
+      }
+      if (emp.status === 'working') {
+        const avgAttr = emp.attributes.reduce((s, a) => s + a.value, 0) / emp.attributes.length
+        let expGain = Math.floor(5 + avgAttr / 20)
+        if (emp.schedules.length > 0) {
+          expGain = Math.floor(expGain * 1.2)
+        }
+        const expResult = addExperienceToEmployee(emp, expGain)
+        if (expResult.leveledUp) {
+          addStaffManagementNotification(
+            `🎉 ${emp.name} 升级到 Lv.${expResult.newLevel}！属性全面提升。`,
+            'success'
+          )
+        }
+        const updatedEmp = { ...expResult.employee }
+        if (updatedEmp.morale > 70) {
+          updatedEmp.performance.daysWorked++
+        }
+        if (Math.random() < 0.1) {
+          updatedEmp.morale = Math.max(0, updatedEmp.morale - 1)
+        }
+        return updatedEmp
+      }
+      return emp
+    })
+
+    if (currentDay.value % staffManagement.value.payrollDay === 0 && staffManagement.value.employees.length > 0) {
+      const periodStart = currentDay.value - staffManagement.value.payrollDay + 1
+      const summary = calculatePayrollSummary(
+        staffManagement.value.employees,
+        periodStart,
+        currentDay.value,
+        currentDay.value
+      )
+      if (budget.value >= summary.totalPayout) {
+        budget.value -= summary.totalPayout
+        staffManagement.value.currentSalarySummary = summary
+        staffManagement.value.salaryHistory.push(...summary.records)
+        addStaffManagementNotification(
+          `💰 月度薪资结算完成，共支出 ¥${summary.totalPayout}`,
+          'info'
+        )
+      } else {
+        addStaffManagementNotification(
+          `⚠️ 薪资日到了，但资金不足以支付 ¥${summary.totalPayout}，员工士气下降！`,
+          'warning'
+        )
+        staffManagement.value.employees.forEach(emp => {
+          if (emp.status !== 'fired') {
+            emp.morale = Math.max(0, emp.morale - 20)
+            emp.satisfaction = Math.max(0, emp.satisfaction - 15)
+          }
+        })
+      }
+    }
+
+    staffManagement.value.bonusSummary = staffBonusSummary.value
+  }
+
+  const addStaffManagementNotification = (message: string, type: 'success' | 'warning' | 'error' | 'info') => {
+    staffManagement.value.notifications.push({
+      id: `notif_${Date.now()}_${Math.random()}`,
+      message,
+      type,
+      read: false,
+      createdAt: Date.now()
+    })
+    if (staffManagement.value.notifications.length > 50) {
+      staffManagement.value.notifications = staffManagement.value.notifications.slice(-50)
+    }
+  }
+
+  const markStaffNotificationsRead = () => {
+    staffManagement.value.notifications.forEach(n => n.read = true)
+  }
+
+  const updateEmployeePerformance = (employeeId: string, sales: number, satisfaction: number) => {
+    const emp = staffManagement.value.employees.find(e => e.id === employeeId)
+    if (!emp) return
+    emp.performance.totalSales += sales
+    emp.performance.customersServed++
+    const count = emp.performance.customersServed
+    emp.performance.avgSatisfaction = ((emp.performance.avgSatisfaction * (count - 1)) + satisfaction) / count
   }
 
   const shopRenovationBonus = computed<ShopRenovationBonusSummary>(() => {
@@ -8333,6 +8589,25 @@ export const useGameStore = defineStore('game', () => {
     staff,
     upgradeStaffSkill,
     addStaffPoints,
+    staffManagement,
+    staffBonusSummary,
+    workingEmployeesCount,
+    totalMonthlySalary,
+    refreshRecruitPool,
+    hireEmployee,
+    fireEmployee,
+    raiseEmployeeSalary,
+    startTraining,
+    setEmployeeShiftSchedule,
+    getTrainingCoursesForEmployee,
+    processDailyStaffManagement,
+    markStaffNotificationsRead,
+    updateEmployeePerformance,
+    getPositionConfig,
+    getTrainingCourse,
+    getStaffRarityColor,
+    getRarityLabel,
+    getShiftConfig,
     shopRenovation,
     shopRenovationBonus,
     currentShopStyleConfig,

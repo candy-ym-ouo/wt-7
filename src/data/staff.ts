@@ -1,22 +1,24 @@
 import type { StaffSkill, StaffSkillType, StaffState } from '@/types'
 
-const createStaffSkill = (
+export function createStaffSkill(
   type: StaffSkillType,
   name: string,
   icon: string,
   maxLevel: number,
   description: string,
   effectPerLevel: number
-): StaffSkill => ({
-  type,
-  name,
-  icon,
-  level: 0,
-  maxLevel,
-  description,
-  effectPerLevel,
-  currentEffect: 0
-})
+): StaffSkill {
+  return {
+    type,
+    name,
+    icon,
+    level: 0,
+    maxLevel,
+    description,
+    effectPerLevel,
+    currentEffect: 0
+  }
+}
 
 export const defaultStaffSkills: StaffSkill[] = [
   createStaffSkill(

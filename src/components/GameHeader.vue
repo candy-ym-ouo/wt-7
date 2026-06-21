@@ -19,6 +19,7 @@ const emit = defineEmits<{
   community: []
   'music-festival-collab': []
   achievements: []
+  'staff-management': []
 }>()
 
 const gameStore = useGameStore()
@@ -85,6 +86,9 @@ const timeSlotLabel = computed(() => {
         <button class="icon-btn staff-btn" @click="emit('staff')">
           👥
           <span v-if="gameStore.staff.availablePoints > 0" class="badge">{{ gameStore.staff.availablePoints }}</span>
+        </button>
+        <button class="icon-btn staff-mgmt-btn" @click="emit('staff-management')">
+          🏪
         </button>
         <button class="icon-btn" @click="emit('collection')">
           📚
@@ -356,6 +360,7 @@ const timeSlotLabel = computed(() => {
 .presale-btn,
 .auction-btn,
 .staff-btn,
+.staff-mgmt-btn,
 .encyclopedia-btn,
 .festival-btn,
 .quest-board-btn,

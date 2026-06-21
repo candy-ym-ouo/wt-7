@@ -2699,3 +2699,205 @@ export type AchievementProgressUpdateType =
   | 'consecutive_days'
   | 'single_sale_price'
   | 'bargain_success'
+
+export type StaffPosition = 'sales' | 'reception' | 'restoration' | 'purchasing' | 'management'
+
+export interface StaffPositionConfig {
+  id: StaffPosition
+  name: string
+  icon: string
+  description: string
+  baseSalary: number
+  requiredSkills: StaffSkillType[]
+  attributeBonus: {
+    service?: number
+    recommendation?: number
+    skipRecovery?: number
+    capacity?: number
+  }
+  unlockLevel: number
+  maxCount: number
+}
+
+export type StaffAttributeType = 
+  | 'professionalism' 
+  | 'communication' 
+  | 'patience' 
+  | 'attention' 
+  | 'creativity'
+
+export interface StaffAttribute {
+  type: StaffAttributeType
+  name: string
+  icon: string
+  value: number
+  maxValue: number
+  description: string
+}
+
+export type StaffWorkShift = 'morning' | 'afternoon' | 'night' | 'full' | 'weekend'
+
+export interface StaffShiftConfig {
+  id: StaffWorkShift
+  name: string
+  icon: string
+  timeSlots: TimeSlot[]
+  salaryMultiplier: number
+  description: string
+  startHour: number
+  endHour: number
+}
+
+export interface StaffSchedule {
+  staffId: string
+  dayOfWeek: number
+  shiftId: StaffWorkShift
+  isActive: boolean
+}
+
+export type StaffTrainingType = 
+  | 'onboarding' 
+  | 'service_etiquette' 
+  | 'music_knowledge' 
+  | 'sales_technique' 
+  | 'repair_skill' 
+  | 'management'
+
+export interface StaffTrainingCourse {
+  id: StaffTrainingType
+  name: string
+  icon: string
+  description: string
+  durationDays: number
+  cost: number
+  targetSkillType: StaffSkillType | null
+  skillBonus: number
+  attributeBoosts: { [K in StaffAttributeType]?: number }
+  unlockLevel: number
+  prerequisites: StaffTrainingType[]
+}
+
+export interface StaffTrainingProgress {
+  courseId: StaffTrainingType
+  progressDays: number
+  totalDays: number
+  isActive: boolean
+  startDay: number | null
+}
+
+export type StaffRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+
+export interface StaffRecruitCandidate {
+  id: string
+  name: string
+  avatar: string
+  position: StaffPosition
+  rarity: StaffRarity
+  baseAttributes: StaffAttribute[]
+  potential: number
+  interviewNote: string
+  expectedSalary: number
+  signingBonus: number
+  skillBonuses: { [K in StaffSkillType]?: number }
+  isLocked: boolean
+  unlockReason?: string
+}
+
+export interface Employee {
+  id: string
+  name: string
+  avatar: string
+  position: StaffPosition
+  rarity: StaffRarity
+  hiredDay: number
+  status: 'working' | 'training' | 'resting' | 'fired'
+  attributes: StaffAttribute[]
+  level: number
+  experience: number
+  nextLevelExp: number
+  skills: StaffSkill[]
+  currentTraining: StaffTrainingProgress | null
+  completedTrainings: StaffTrainingType[]
+  schedules: StaffSchedule[]
+  performance: {
+    totalSales: number
+    customersServed: number
+    avgSatisfaction: number
+    daysWorked: number
+  }
+  satisfaction: number
+  morale: number
+  baseSalary: number
+  lastRaiseDay: number | null
+  notes: string
+}
+
+export interface StaffRevenueBonus {
+  source: string
+  description: string
+  bonusType: 'revenue' | 'profit' | 'satisfaction' | 'reputation' | 'customer_count' | 'buy_chance'
+  value: number
+  percentage: number
+  sourceId: string
+}
+
+export interface StaffBonusSummary {
+  totalRevenueModifier: number
+  totalProfitModifier: number
+  totalSatisfactionBonus: number
+  totalReputationBonus: number
+  totalCustomerCountModifier: number
+  totalBuyChanceBonus: number
+  activeBonuses: StaffRevenueBonus[]
+}
+
+export interface SalaryComponent {
+  type: 'base' | 'overtime' | 'performance' | 'bonus' | 'deduction'
+  label: string
+  amount: number
+  description: string
+}
+
+export interface StaffSalaryRecord {
+  id: string
+  employeeId: string
+  employeeName: string
+  periodStartDay: number
+  periodEndDay: number
+  settlementDay: number
+  components: SalaryComponent[]
+  totalAmount: number
+  daysWorked: number
+  performanceScore: number
+  notes: string
+}
+
+export interface StaffSalarySummary {
+  periodStartDay: number
+  periodEndDay: number
+  totalBaseSalary: number
+  totalOvertimePay: number
+  totalPerformancePay: number
+  totalBonus: number
+  totalDeduction: number
+  totalPayout: number
+  records: StaffSalaryRecord[]
+}
+
+export interface StaffManagementState {
+  employees: Employee[]
+  recruitPool: StaffRecruitCandidate[]
+  lastRecruitRefreshDay: number
+  recruitRefreshCooldown: number
+  availableCourses: StaffTrainingCourse[]
+  activeShifts: StaffShiftConfig[]
+  positionConfigs: StaffPositionConfig[]
+  bonusSummary: StaffBonusSummary
+  salaryHistory: StaffSalaryRecord[]
+  currentSalarySummary: StaffSalarySummary | null
+  payrollDay: number
+  maxEmployees: number
+  totalHiringCost: number
+  totalTrainingCost: number
+  notifications: { id: string; message: string; type: 'success' | 'warning' | 'error' | 'info'; read: boolean; createdAt: number }[]
+}
