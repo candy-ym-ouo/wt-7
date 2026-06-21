@@ -682,7 +682,9 @@ export const createInitialCrossShopState = (): CrossShopGameState => ({
 export const updateCrossShopStats = (
   stats: CrossShopStats,
   trade: CrossShopTrade,
-  completed: boolean
+  completed: boolean,
+  newEncyclopediaEntries: number = 0,
+  newSeriesUnlocked: number = 0
 ): CrossShopStats => {
   const newStats = { ...stats }
 
@@ -697,6 +699,8 @@ export const updateCrossShopStats = (
     } else {
       newStats.totalReputationLost += Math.abs(trade.reputationChange)
     }
+    newStats.newEncyclopediaEntriesFromTrading += newEncyclopediaEntries
+    newStats.seriesUnlockedViaTrading += newSeriesUnlocked
   } else {
     newStats.totalTradesProposed += 1
   }

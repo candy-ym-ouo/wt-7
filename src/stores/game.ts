@@ -9288,18 +9288,88 @@ export const useGameStore = defineStore('game', () => {
       }
     }
 
-    if (result.encyclopediaUpdates && result.encyclopediaUpdates.length > 0) {
-      for (const update of result.encyclopediaUpdates) {
-        const entry = encyclopedia.value.entries.find(e => e.record.id === update.recordId)
-        if (entry) {
-          entry.isCollected = true
-          entry.collectedCount += 1
-          entry.bestConditionScore = Math.max(entry.bestConditionScore, update.bestCondition)
-          if (!entry.firstCollectedDate) {
-            entry.firstCollectedDate = Date.now()
+    let newEncyclopediaCount = 0
+    let totalNewSeries: string[] = []
+    let totalNewAchievements: string[] = []
+
+    if (result.itemsReceived && result.itemsReceived.length > 0) {
+      for (const item of result.itemsReceived) {
+        const colValuation = evaluateCrossShopRecord(item.record, item.conditionScore, trade.shopId)
+        const collectionItem: {
+          record: typeof item.record
+          acquiredDate: number
+          purchasePrice: number
+          isFavorite: boolean
+          notes: string
+          conditionScore: number
+          collectionValue: number
+          extended: any
+        } = {
+          record: item.record,
+          acquiredDate: Date.now(),
+          purchasePrice: item.agreedValue,
+          isFavorite: false,
+          notes: `通过与 ${trade.shop.name} 交换获得`,
+          conditionScore: item.conditionScore,
+          collectionValue: colValuation?.finalEstimatedValue || item.agreedValue,
+          extended: {
+            story: null,
+            achievements: [],
+            source: {
+              type: 'level_clear',
+              sourceId: trade.id,
+              sourceName: '跨店交换',
+              sourceIcon: '🔄',
+              description: `与 ${trade.shop.name} 交换获得`,
+              timestamp: Date.now()
+            },
+            displayCopy: null,
+            saleHistory: [],
+            clearHistory: [],
+            daysOwned: 0,
+            timesRenovated: 0,
+            totalSaleRevenue: 0,
+            totalSalesCount: 0,
+            isStoryUnlocked: false,
+            unlockedAchievementCount: 0
+          }
+        }
+
+        const entryBefore = encyclopedia.value.entries.find(e => e.record.id === item.recordId)
+        const wasNewEntry = !entryBefore?.isCollected
+
+        const { updatedState, newUnlocks } = updateEncyclopediaOnCollectionAdd(
+          encyclopedia.value,
+          collectionItem as any,
+          currentLevel.value
+        )
+        encyclopedia.value = updatedState
+
+        if (wasNewEntry) {
+          newEncyclopediaCount++
+        }
+
+        totalNewSeries = [...new Set([...totalNewSeries, ...newUnlocks.series])]
+        totalNewAchievements = [...new Set([...totalNewAchievements, ...newUnlocks.achievements])]
+
+        for (const seriesId of newUnlocks.series) {
+          const series = encyclopedia.value.categories
+            .flatMap(c => c.series)
+            .find(s => s.id === seriesId)
+          if (series) {
+            showEncyclopediaNotification('series', series.name, '套系完成！可领取奖励')
+          }
+        }
+
+        for (const achId of newUnlocks.achievements) {
+          const ach = encyclopedia.value.achievements.find(a => a.id === achId)
+          if (ach) {
+            showEncyclopediaNotification('achievement', ach.name, '成就解锁！可领取奖励')
           }
         }
       }
+
+      rebuildEncyclopediaBonuses()
     }
 
     if (result.reputationChange && result.reputationChange > 0) {
@@ -9308,11 +9378,31 @@ export const useGameStore = defineStore('game', () => {
 
     crossShop.value.activeTrades = crossShop.value.activeTrades.filter(t => t.id !== tradeId)
     crossShop.value.completedTrades.push(result.trade)
-    crossShop.value.stats = updateCrossShopStats(crossShop.value.stats, result.trade, true)
+    crossShop.value.stats = updateCrossShopStats(
+      crossShop.value.stats,
+      result.trade,
+      true,
+      newEncyclopediaCount,
+      totalNewSeries.length
+    )
+
+    const notifParts = [`🎉 交易成功！获得 ${result.itemsReceived?.length || 0} 张唱片`]
+    if (result.reputationChange && result.reputationChange > 0) {
+      notifParts.push(`声望 +${result.reputationChange}`)
+    }
+    if (newEncyclopediaCount > 0) {
+      notifParts.push(`图鉴新增 ${newEncyclopediaCount} 张`)
+    }
+    if (totalNewSeries.length > 0) {
+      notifParts.push(`解锁 ${totalNewSeries.length} 个套系`)
+    }
+    if (totalNewAchievements.length > 0) {
+      notifParts.push(`解锁 ${totalNewAchievements.length} 个成就`)
+    }
 
     crossShop.value = addCrossShopNotification(
       crossShop.value,
-      `🎉 交易成功！获得 ${result.itemsReceived?.length || 0} 张唱片${result.reputationChange ? `，声望 +${result.reputationChange}` : ''}`,
+      notifParts.join('，'),
       'success'
     )
 
