@@ -2444,3 +2444,166 @@ export interface RewardClaimResult {
   reputationGained?: number
   growthPointsGained?: number
 }
+
+export type MusicFestivalCollabRarity = 'common' | 'rare' | 'epic' | 'legendary'
+
+export interface MusicFestivalCollabTheme {
+  id: string
+  name: string
+  icon: string
+  description: string
+  bgGradient: string
+  accentColor: string
+  genreAffinity: Genre[]
+  startDay: number
+  endDay: number
+  isActive: boolean
+  isUnlocked: boolean
+  requiredReputation: number
+  requiredLevel: number
+}
+
+export interface MusicFestivalLimitedRecord {
+  id: string
+  record: Record
+  collabThemeId: string
+  limitedStock: number
+  remainingStock: number
+  collabPrice: number
+  originalPrice: number
+  isExclusive: boolean
+  rarity: MusicFestivalCollabRarity
+  releaseDate: number
+  unlockCondition: string
+  isUnlocked: boolean
+  soldCount: number
+  bonusDescription: string
+}
+
+export interface MusicFestivalCollabCustomer {
+  id: string
+  name: string
+  avatar: string
+  title: string
+  description: string
+  rarity: MusicFestivalCollabRarity
+  favoriteGenres: Genre[]
+  budgetMultiplier: number
+  satisfactionBonus: number
+  buyChanceBonus: number
+  appearanceChance: number
+  requiredReputation: number
+  collabThemeId: string
+  isUnlocked: boolean
+  quotes: string[]
+  specialRewardId: string
+  encounterCount: number
+}
+
+export type MusicFestivalCollabTaskType = 'sales' | 'genre' | 'customer' | 'collection' | 'special' | 'atmosphere'
+export type MusicFestivalCollabTaskStatus = 'locked' | 'active' | 'completed' | 'claimed'
+
+export interface MusicFestivalCollabTask {
+  id: string
+  type: MusicFestivalCollabTaskType
+  name: string
+  icon: string
+  description: string
+  target: number
+  current: number
+  status: MusicFestivalCollabTaskStatus
+  collabThemeId: string
+  reward: MusicFestivalCollabReward
+  requiredTaskIds: string[]
+  requiredDay: number
+  genre?: Genre
+  minRarity?: number
+}
+
+export interface MusicFestivalCollabReward {
+  budget: number
+  reputation: number
+  growthPoints: number
+  limitedRecordId?: string
+  bonusItems: string[]
+  collectionBadgeId?: string
+}
+
+export interface MusicFestivalCollabCollectionBadge {
+  id: string
+  name: string
+  icon: string
+  description: string
+  rarity: MusicFestivalCollabRarity
+  collabThemeId: string
+  isUnlocked: boolean
+  unlockedDate: number | null
+  unlockCondition: string
+  bonusEffect: string
+  bonusValue: number
+}
+
+export interface MusicFestivalCollabSettlement {
+  collabThemeId: string
+  totalScore: number
+  rewardTier: MusicFestivalCollabRewardTier
+  tasksCompleted: number
+  totalTasks: number
+  customersServed: number
+  limitedRecordsSold: number
+  bonusRewards: string[]
+  settledDay: number
+  badgesCollected: string[]
+}
+
+export interface MusicFestivalCollabRewardTier {
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'legendary'
+  tierName: string
+  icon: string
+  minScore: number
+  rewards: MusicFestivalCollabReward
+  description: string
+}
+
+export interface MusicFestivalCollabRefreshCustomerResult {
+  success: boolean
+  message: string
+  newCustomers: Customer[]
+  collabCustomers: MusicFestivalCollabCustomer[]
+  cost: number
+}
+
+export interface MusicFestivalCollabState {
+  activeTheme: MusicFestivalCollabTheme | null
+  collabDay: number
+  maxCollabDays: number
+  themes: MusicFestivalCollabTheme[]
+  limitedRecords: MusicFestivalLimitedRecord[]
+  collabCustomers: MusicFestivalCollabCustomer[]
+  tasks: MusicFestivalCollabTask[]
+  settlements: MusicFestivalCollabSettlement[]
+  badges: MusicFestivalCollabCollectionBadge[]
+  totalCollabScore: number
+  limitedRecordsSold: number
+  collabCustomersServed: number
+  tasksCompleted: number
+  isCollabActive: boolean
+  hasUnclaimedRewards: boolean
+  customerRefreshCooldown: number
+  lastRefreshDay: number
+  activeCollabCustomerIds: string[]
+}
+
+export interface MusicFestivalCollabStartResult {
+  success: boolean
+  message: string
+  theme?: MusicFestivalCollabTheme
+  cost?: number
+}
+
+export interface MusicFestivalCollabPurchaseResult {
+  success: boolean
+  message: string
+  record?: MusicFestivalLimitedRecord
+  cost?: number
+}

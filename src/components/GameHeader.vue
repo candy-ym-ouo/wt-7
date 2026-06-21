@@ -17,6 +17,7 @@ const emit = defineEmits<{
   'second-hand': []
   'quest-board': []
   community: []
+  'music-festival-collab': []
 }>()
 
 const gameStore = useGameStore()
@@ -107,6 +108,11 @@ const timeSlotLabel = computed(() => {
         <button class="icon-btn community-btn" @click="emit('community')">
           🎵
           <span v-if="gameStore.communityUnreadNotifications > 0" class="badge">{{ gameStore.communityUnreadNotifications }}</span>
+        </button>
+        <button class="icon-btn music-festival-collab-btn" @click="emit('music-festival-collab')">
+          🎸
+          <span v-if="gameStore.musicFestivalCollab.isCollabActive" class="badge active-dot">●</span>
+          <span v-if="gameStore.musicFestivalCollab.hasUnclaimedRewards" class="badge">🎁</span>
         </button>
       </div>
     </div>
@@ -348,7 +354,8 @@ const timeSlotLabel = computed(() => {
 .encyclopedia-btn,
 .festival-btn,
 .quest-board-btn,
-.community-btn {
+.community-btn,
+.music-festival-collab-btn {
   position: relative;
 }
 </style>

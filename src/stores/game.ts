@@ -23,7 +23,11 @@ import type {
   EncyclopediaEntry,
   AlbumBonus,
   FestivalState, FestivalTheme, FestivalSettlement, FestivalTaskConfig, FestivalCustomerConfig,
-  SecondHandGameState
+  SecondHandGameState,
+  MusicFestivalCollabState, MusicFestivalCollabSettlement, MusicFestivalCollabTaskType,
+  MusicFestivalCollabCustomer,
+  MusicFestivalCollabStartResult, MusicFestivalCollabPurchaseResult,
+  MusicFestivalCollabRefreshCustomerResult
 } from '@/types'
 import { getLevelById, getNextLevel, getUnlockedGenres, getScaledLevelConfig } from '@/data/levels'
 import { allRecords, getRandomRecords, getRecordById } from '@/data/records'
@@ -295,6 +299,20 @@ import {
   shouldFestivalAppear
 } from '@/data/festival'
 import {
+  createInitialMusicFestivalCollabState,
+  generateCollabTasks,
+  getThemeConfig,
+  getRarityLabel as getCollabRarityLabelData,
+  getRarityColor as getCollabRarityColorData,
+  getTaskTypeLabel,
+  getTaskStatusLabel,
+  getTaskStatusColor,
+  getRewardTierByScore,
+  calculateCollabScore,
+  getCustomerRefreshCost,
+  canRefreshCustomers
+} from '@/data/musicFestivalCollab'
+import {
   createInitialSecondHandState,
   generateDailyAppraisals,
   performAppraisal as performAppraisalData,
@@ -526,6 +544,8 @@ export const useGameStore = defineStore('game', () => {
   } | null>(null)
 
   const festival = ref<FestivalState>(createInitialFestivalState())
+
+  const musicFestivalCollab = ref<MusicFestivalCollabState>(createInitialMusicFestivalCollabState())
 
   const secondHand = ref<SecondHandGameState>(createInitialSecondHandState())
 
@@ -7463,6 +7483,467 @@ export const useGameStore = defineStore('game', () => {
     festival.value.atmosphereOverride = getFestivalAtmosphereOverride(theme)
   }
 
+  const activeCollabTheme = computed(() => musicFestivalCollab.value.activeTheme)
+
+  const collabScore = computed(() => calculateCollabScore(
+    musicFestivalCollab.value.limitedRecordsSold,
+    musicFestivalCollab.value.collabCustomersServed,
+    musicFestivalCollab.value.tasksCompleted,
+    musicFestivalCollab.value.tasks.length
+  ))
+
+  const collabRewardTier = computed(() => getRewardTierByScore(collabScore.value))
+
+  const collabActiveTasks = computed(() => musicFestivalCollab.value.tasks.filter(t => t.status === 'active'))
+
+  const collabCompletedTasks = computed(() => musicFestivalCollab.value.tasks.filter(t => t.status === 'completed'))
+
+  const collabClaimableTasks = computed(() => musicFestivalCollab.value.tasks.filter(t => t.status === 'completed'))
+
+  const collabUnlockedCustomers = computed(() => {
+    if (!musicFestivalCollab.value.activeTheme) return []
+    return musicFestivalCollab.value.collabCustomers.filter(c => 
+      c.isUnlocked && c.collabThemeId === musicFestivalCollab.value.activeTheme!.id
+    )
+  })
+
+  const collabLimitedRecords = computed(() => {
+    if (!musicFestivalCollab.value.activeTheme) return []
+    return musicFestivalCollab.value.limitedRecords.filter(r => 
+      r.collabThemeId === musicFestivalCollab.value.activeTheme!.id
+    )
+  })
+
+  const collabUnlockedBadges = computed(() => musicFestivalCollab.value.badges.filter(b => b.isUnlocked))
+
+  const collabAvailableThemes = computed(() => musicFestivalCollab.value.themes.filter(t => {
+    const levelOk = currentLevel.value >= t.requiredLevel
+    const repOk = shopReputation.value >= t.requiredReputation
+    return levelOk && repOk
+  }))
+
+  const canRefreshCollabCustomers = computed(() => canRefreshCustomers(
+    musicFestivalCollab.value.lastRefreshDay,
+    currentDay.value,
+    musicFestivalCollab.value.customerRefreshCooldown
+  ))
+
+  const collabCustomerRefreshCost = computed(() => getCustomerRefreshCost(musicFestivalCollab.value.collabDay))
+
+  const startMusicFestivalCollab = (themeId: string): MusicFestivalCollabStartResult => {
+    if (musicFestivalCollab.value.isCollabActive) {
+      return { success: false, message: '已有音乐节联名活动进行中' }
+    }
+
+    const theme = musicFestivalCollab.value.themes.find(t => t.id === themeId)
+    if (!theme) {
+      return { success: false, message: '主题不存在' }
+    }
+
+    if (currentLevel.value < theme.requiredLevel) {
+      return { success: false, message: `需要达到第${theme.requiredLevel}关才能开启` }
+    }
+
+    if (shopReputation.value < theme.requiredReputation) {
+      return { success: false, message: `需要声望达到${theme.requiredReputation}才能开启` }
+    }
+
+    const startCost = 500
+    if (budget.value < startCost) {
+      return { success: false, message: `资金不足！需要¥${startCost}作为活动启动资金` }
+    }
+
+    budget.value -= startCost
+
+    const tasks = generateCollabTasks(themeId)
+    
+    musicFestivalCollab.value.activeTheme = theme
+    musicFestivalCollab.value.collabDay = 1
+    musicFestivalCollab.value.isCollabActive = true
+    musicFestivalCollab.value.tasks = tasks
+    musicFestivalCollab.value.totalCollabScore = 0
+    musicFestivalCollab.value.limitedRecordsSold = 0
+    musicFestivalCollab.value.collabCustomersServed = 0
+    musicFestivalCollab.value.tasksCompleted = 0
+    musicFestivalCollab.value.hasUnclaimedRewards = false
+    musicFestivalCollab.value.lastRefreshDay = -2
+    musicFestivalCollab.value.activeCollabCustomerIds = []
+
+    for (const t of musicFestivalCollab.value.themes) {
+      t.isActive = t.id === themeId
+    }
+
+    for (const c of musicFestivalCollab.value.collabCustomers) {
+      if (c.collabThemeId === themeId) {
+        c.encounterCount = 0
+        c.isUnlocked = shopReputation.value >= c.requiredReputation
+      }
+    }
+
+    for (const r of musicFestivalCollab.value.limitedRecords) {
+      if (r.collabThemeId === themeId) {
+        r.remainingStock = r.limitedStock
+        r.soldCount = 0
+      }
+    }
+
+    return { 
+      success: true, 
+      message: `${theme.icon}${theme.name}联名活动开始！`, 
+      theme,
+      cost: startCost
+    }
+  }
+
+  const advanceMusicFestivalCollabDay = () => {
+    if (!musicFestivalCollab.value.isCollabActive) return
+
+    musicFestivalCollab.value.collabDay++
+
+    for (const task of musicFestivalCollab.value.tasks) {
+      if (task.status === 'locked') {
+        const dayMet = musicFestivalCollab.value.collabDay >= task.requiredDay
+        const depsMet = task.requiredTaskIds.every(id => {
+          const dep = musicFestivalCollab.value.tasks.find(t => t.id === id)
+          return dep && (dep.status === 'completed' || dep.status === 'claimed')
+        })
+        if (dayMet && depsMet) {
+          task.status = 'active'
+        }
+      }
+    }
+
+    for (const customer of musicFestivalCollab.value.collabCustomers) {
+      if (!customer.isUnlocked && shopReputation.value >= customer.requiredReputation) {
+        customer.isUnlocked = true
+      }
+    }
+
+    if (musicFestivalCollab.value.collabDay > musicFestivalCollab.value.maxCollabDays) {
+      endMusicFestivalCollab()
+    }
+  }
+
+  const endMusicFestivalCollab = () => {
+    if (!musicFestivalCollab.value.isCollabActive) return
+
+    const theme = musicFestivalCollab.value.activeTheme
+    if (!theme) return
+
+    const score = collabScore.value
+    const tier = collabRewardTier.value
+
+    const badgesCollected: string[] = []
+    for (const badge of musicFestivalCollab.value.badges) {
+      if (badge.collabThemeId === theme.id && badge.isUnlocked) {
+        badgesCollected.push(badge.id)
+      }
+    }
+
+    const settlement: MusicFestivalCollabSettlement = {
+      collabThemeId: theme.id,
+      totalScore: score,
+      rewardTier: tier,
+      tasksCompleted: musicFestivalCollab.value.tasksCompleted,
+      totalTasks: musicFestivalCollab.value.tasks.length,
+      customersServed: musicFestivalCollab.value.collabCustomersServed,
+      limitedRecordsSold: musicFestivalCollab.value.limitedRecordsSold,
+      bonusRewards: tier.rewards.bonusItems,
+      settledDay: currentDay.value,
+      badgesCollected
+    }
+
+    musicFestivalCollab.value.settlements.push(settlement)
+    musicFestivalCollab.value.isCollabActive = false
+    musicFestivalCollab.value.hasUnclaimedRewards = true
+    musicFestivalCollab.value.totalCollabScore = score
+
+    for (const t of musicFestivalCollab.value.themes) {
+      t.isActive = false
+    }
+  }
+
+  const claimMusicFestivalCollabReward = (): { success: boolean; message: string; settlement: MusicFestivalCollabSettlement | null } => {
+    if (musicFestivalCollab.value.settlements.length === 0) {
+      return { success: false, message: '没有可领取的奖励', settlement: null }
+    }
+
+    const lastSettlement = musicFestivalCollab.value.settlements[musicFestivalCollab.value.settlements.length - 1]
+    if (!lastSettlement) {
+      return { success: false, message: '没有可领取的奖励', settlement: null }
+    }
+
+    budget.value += lastSettlement.rewardTier.rewards.budget
+    shopReputation.value = Math.min(100, shopReputation.value + lastSettlement.rewardTier.rewards.reputation)
+    dailyGrowthPointsEarned.value += lastSettlement.rewardTier.rewards.growthPoints
+
+    if (lastSettlement.rewardTier.rewards.collectionBadgeId) {
+      const badge = musicFestivalCollab.value.badges.find(b => b.id === lastSettlement.rewardTier.rewards.collectionBadgeId)
+      if (badge && !badge.isUnlocked) {
+        badge.isUnlocked = true
+        badge.unlockedDate = Date.now()
+      }
+    }
+
+    musicFestivalCollab.value.hasUnclaimedRewards = false
+
+    return {
+      success: true,
+      message: `领取${lastSettlement.rewardTier.tierName}奖励！资金 +¥${lastSettlement.rewardTier.rewards.budget}，声望 +${lastSettlement.rewardTier.rewards.reputation}`,
+      settlement: lastSettlement
+    }
+  }
+
+  const claimCollabTaskReward = (taskId: string): { success: boolean; message: string } => {
+    const task = musicFestivalCollab.value.tasks.find(t => t.id === taskId)
+    if (!task) return { success: false, message: '任务不存在' }
+    if (task.status !== 'completed') return { success: false, message: '任务未完成' }
+
+    budget.value += task.reward.budget
+    shopReputation.value = Math.min(100, shopReputation.value + task.reward.reputation)
+    dailyGrowthPointsEarned.value += task.reward.growthPoints
+    task.status = 'claimed'
+
+    if (task.reward.collectionBadgeId) {
+      const badge = musicFestivalCollab.value.badges.find(b => b.id === task.reward.collectionBadgeId)
+      if (badge && !badge.isUnlocked) {
+        badge.isUnlocked = true
+        badge.unlockedDate = Date.now()
+      }
+    }
+
+    return { success: true, message: `领取任务奖励！资金 +¥${task.reward.budget}，声望 +${task.reward.reputation}` }
+  }
+
+  const purchaseLimitedRecord = (recordId: string): MusicFestivalCollabPurchaseResult => {
+    const record = musicFestivalCollab.value.limitedRecords.find(r => r.id === recordId)
+    if (!record) return { success: false, message: '唱片不存在' }
+    if (!record.isUnlocked) return { success: false, message: '该唱片尚未解锁' }
+    if (record.remainingStock <= 0) return { success: false, message: '已售罄' }
+    if (budget.value < record.collabPrice) return { success: false, message: `资金不足！需要¥${record.collabPrice}` }
+
+    budget.value -= record.collabPrice
+    record.remainingStock--
+    record.soldCount++
+    musicFestivalCollab.value.limitedRecordsSold++
+
+    const invItem: InventoryItem = {
+      record: record.record,
+      quantity: 1,
+      purchaseDate: currentDay.value,
+      conditionScore: 85 + Math.floor(Math.random() * 15),
+      actualCostPrice: record.collabPrice
+    }
+    inventory.value.push(invItem)
+
+    updateCollabTaskProgress('sales', 1)
+    if (record.rarity === 'rare' || record.rarity === 'epic' || record.rarity === 'legendary') {
+      updateCollabTaskProgress('special', 1)
+    }
+
+    return { 
+      success: true, 
+      message: `成功购入《${record.record.title}》！`, 
+      record,
+      cost: record.collabPrice
+    }
+  }
+
+  const generateCollabCustomer = (
+    fc: MusicFestivalCollabCustomer,
+    timeSlot: TimeSlot
+  ): Customer => {
+    const prefGenres = fc.favoriteGenres.length >= 3
+      ? [...fc.favoriteGenres]
+      : [...fc.favoriteGenres, 'Jazz', 'Rock', 'Soul'].slice(0, 3)
+
+    const preference = {
+      favoriteGenres: prefGenres as Genre[],
+      priceRange: [
+        Math.round(400 * fc.budgetMultiplier),
+        Math.round(1500 * fc.budgetMultiplier)
+      ] as [number, number],
+      preferredRarity: fc.rarity === 'legendary' ? [4, 5] : fc.rarity === 'epic' ? [3, 4, 5] : [2, 3, 4],
+      preferenceStrength: 0.75 + Math.random() * 0.2
+    }
+
+    const slotConfig = getTimeSlotConfig(timeSlot)
+    const baseBudget = preference.priceRange[1] * (2.0 + Math.random() * 1.5)
+    const budget = Math.floor(getBudgetWithReputation(baseBudget, shopReputation.value) * slotConfig.budgetModifier * fc.budgetMultiplier)
+    const basePatience = 85 + Math.floor(Math.random() * 35)
+
+    const identityTag = fc.rarity === 'legendary' ? 'collector' : fc.rarity === 'epic' ? 'connoisseur' : 'enthusiast'
+
+    return {
+      id: `cust-collab-${fc.id}-${Date.now()}`,
+      name: fc.name,
+      avatar: fc.avatar,
+      preference,
+      budget,
+      patience: basePatience,
+      maxPatience: basePatience,
+      patienceDecayRate: defaultPatienceConfig.decayBaseRate * 0.75,
+      arrivalOrder: 998,
+      priorityScore: 95,
+      satisfaction: 70 + fc.satisfactionBonus,
+      memberProfile: null,
+      isReturningCustomer: false,
+      memberDiscount: 0,
+      bargainAggressiveness: 0.05 + Math.random() * 0.15,
+      bargainToughness: 0.1 + Math.random() * 0.2,
+      willBargain: fc.rarity === 'legendary' ? Math.random() < 0.08 : Math.random() < 0.15,
+      isImpatient: false,
+      hasLeftAngrily: false,
+      identityTag: identityTag as any,
+      reservationId: null,
+      reservedRecordIds: [],
+      isFestivalCustomer: true,
+      festivalCustomerId: fc.id,
+      festivalCustomerRarity: fc.rarity as any
+    }
+  }
+
+  const refreshCollabCustomers = (): MusicFestivalCollabRefreshCustomerResult => {
+    if (!musicFestivalCollab.value.isCollabActive || !musicFestivalCollab.value.activeTheme) {
+      return { success: false, message: '没有进行中的联名活动', newCustomers: [], collabCustomers: [], cost: 0 }
+    }
+
+    if (!canRefreshCollabCustomers.value) {
+      return { success: false, message: `冷却中，请等待${musicFestivalCollab.value.customerRefreshCooldown - (currentDay.value - musicFestivalCollab.value.lastRefreshDay)}天`, newCustomers: [], collabCustomers: [], cost: 0 }
+    }
+
+    const cost = collabCustomerRefreshCost.value
+    if (budget.value < cost) {
+      return { success: false, message: `资金不足！需要¥${cost}`, newCustomers: [], collabCustomers: [], cost: 0 }
+    }
+
+    budget.value -= cost
+    musicFestivalCollab.value.lastRefreshDay = currentDay.value
+
+    const themeId = musicFestivalCollab.value.activeTheme.id
+    const availableCustomers = musicFestivalCollab.value.collabCustomers.filter(c => 
+      c.isUnlocked && c.collabThemeId === themeId
+    )
+
+    const newCustomers: Customer[] = []
+    const selectedCollabCustomers: MusicFestivalCollabCustomer[] = []
+
+    for (const fc of availableCustomers) {
+      if (Math.random() < fc.appearanceChance * 1.5) {
+        const customer = generateCollabCustomer(fc, currentTimeSlot.value)
+        newCustomers.push(customer)
+        selectedCollabCustomers.push(fc)
+        fc.encounterCount++
+      }
+    }
+
+    if (newCustomers.length > 0) {
+      const existingIds = new Set(customers.value.map(c => c.id))
+      for (const nc of newCustomers) {
+        if (!existingIds.has(nc.id)) {
+          customers.value.push(nc)
+        }
+      }
+      customers.value = sortCustomerQueue(customers.value, {
+        prioritizeImpatient: true,
+        prioritizeMembers: true,
+        prioritizeHighBudget: false,
+        prioritizeSpecial: true
+      })
+      musicFestivalCollab.value.activeCollabCustomerIds = newCustomers.map(c => c.id)
+    }
+
+    return {
+      success: true,
+      message: newCustomers.length > 0 
+        ? `成功刷新！出现了${newCustomers.length}位联名顾客` 
+        : '刷新完成，但没有联名顾客出现，请再试一次',
+      newCustomers,
+      collabCustomers: selectedCollabCustomers,
+      cost
+    }
+  }
+
+  const updateCollabTaskProgress = (
+    type: MusicFestivalCollabTaskType,
+    amount: number,
+    context?: {
+      genre?: Genre
+      rarity?: number
+    }
+  ) => {
+    if (!musicFestivalCollab.value.isCollabActive) return
+
+    const theme = musicFestivalCollab.value.activeTheme
+    if (!theme) return
+
+    for (const task of musicFestivalCollab.value.tasks) {
+      if (task.status !== 'active') continue
+      if (task.type !== type) continue
+
+      if (type === 'genre' && task.genre && context?.genre) {
+        if (task.genre !== context.genre) continue
+      }
+
+      if (type === 'special' && task.minRarity !== undefined && context?.rarity !== undefined) {
+        if (context.rarity < task.minRarity) continue
+      }
+
+      if (type === 'collection') {
+        task.current = Math.min(task.target, Math.max(task.current, amount))
+      } else {
+        task.current = Math.min(task.target, task.current + amount)
+      }
+
+      if (task.current >= task.target) {
+        task.status = 'completed'
+        musicFestivalCollab.value.tasksCompleted++
+        musicFestivalCollab.value.hasUnclaimedRewards = true
+      }
+    }
+
+    for (const task of musicFestivalCollab.value.tasks) {
+      if (task.status !== 'locked') continue
+      const dayMet = musicFestivalCollab.value.collabDay >= task.requiredDay
+      const depsMet = task.requiredTaskIds.every(id => {
+        const dep = musicFestivalCollab.value.tasks.find(t => t.id === id)
+        return dep && (dep.status === 'completed' || dep.status === 'claimed')
+      })
+      if (dayMet && depsMet) {
+        task.status = 'active'
+      }
+    }
+  }
+
+  const recordCollabCustomerEncounter = (customerId: string, _satisfaction: number, purchasedRecordId: string | null) => {
+    const config = musicFestivalCollab.value.collabCustomers.find(c => c.id === customerId)
+    if (!config) return
+
+    const existing = musicFestivalCollab.value.collabCustomers.find(c => c.id === customerId)
+    if (existing) {
+      existing.encounterCount++
+    }
+
+    updateCollabTaskProgress('customer', 1)
+
+    if (config.specialRewardId && purchasedRecordId) {
+      const badge = musicFestivalCollab.value.badges.find(b => b.id === config.specialRewardId)
+      if (badge && !badge.isUnlocked) {
+        badge.isUnlocked = true
+        badge.unlockedDate = Date.now()
+      }
+    }
+
+    musicFestivalCollab.value.collabCustomersServed++
+  }
+
+  const getCollabRarityLabel = getCollabRarityLabelData
+  const getCollabRarityColor = getCollabRarityColorData
+  const getCollabTaskTypeLabel = getTaskTypeLabel
+  const getCollabTaskStatusLabel = getTaskStatusLabel
+  const getCollabTaskStatusColor = getTaskStatusColor
+  const getCollabThemeConfig = getThemeConfig
+
   return {
     currentLevel,
     currentDay,
@@ -7905,6 +8386,34 @@ export const useGameStore = defineStore('game', () => {
     getCommunityHeatLevelLabel,
     formatCommunityTimeAgo,
     refreshCommunityChannels,
-    refreshCommunityDailyState
+    refreshCommunityDailyState,
+    musicFestivalCollab,
+    activeCollabTheme,
+    collabScore,
+    collabRewardTier,
+    collabActiveTasks,
+    collabCompletedTasks,
+    collabClaimableTasks,
+    collabUnlockedCustomers,
+    collabLimitedRecords,
+    collabUnlockedBadges,
+    collabAvailableThemes,
+    canRefreshCollabCustomers,
+    collabCustomerRefreshCost,
+    startMusicFestivalCollab,
+    advanceMusicFestivalCollabDay,
+    endMusicFestivalCollab,
+    claimMusicFestivalCollabReward,
+    claimCollabTaskReward,
+    purchaseLimitedRecord,
+    refreshCollabCustomers,
+    updateCollabTaskProgress,
+    recordCollabCustomerEncounter,
+    getCollabRarityLabel,
+    getCollabRarityColor,
+    getCollabTaskTypeLabel,
+    getCollabTaskStatusLabel,
+    getCollabTaskStatusColor,
+    getCollabThemeConfig
   }
 })

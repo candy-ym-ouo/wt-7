@@ -19,6 +19,7 @@ import FestivalView from './components/FestivalView.vue'
 import SecondHandView from './components/SecondHandView.vue'
 import QuestBoard from './components/QuestBoard.vue'
 import CommunityView from './components/CommunityView.vue'
+import MusicFestivalCollabView from './components/MusicFestivalCollabView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -33,6 +34,7 @@ const showFestival = ref(false)
 const showSecondHand = ref(false)
 const showQuestBoard = ref(false)
 const showCommunity = ref(false)
+const showMusicFestivalCollab = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -94,6 +96,10 @@ const toggleQuestBoard = () => {
 const toggleCommunity = () => {
   showCommunity.value = !showCommunity.value
 }
+
+const toggleMusicFestivalCollab = () => {
+  showMusicFestivalCollab.value = !showMusicFestivalCollab.value
+}
 </script>
 
 <template>
@@ -110,6 +116,7 @@ const toggleCommunity = () => {
     <SecondHandView v-if="showSecondHand" @close="toggleSecondHand" />
     <QuestBoard v-if="showQuestBoard" @close="toggleQuestBoard" />
     <CommunityView v-if="showCommunity" @close="toggleCommunity" />
+    <MusicFestivalCollabView v-if="showMusicFestivalCollab" @close="toggleMusicFestivalCollab" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -130,6 +137,7 @@ const toggleCommunity = () => {
         @second-hand="toggleSecondHand"
         @quest-board="toggleQuestBoard"
         @community="toggleCommunity"
+        @music-festival-collab="toggleMusicFestivalCollab"
       />
       
       <main class="main-content">
