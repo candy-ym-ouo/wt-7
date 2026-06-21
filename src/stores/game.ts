@@ -314,6 +314,23 @@ import {
   getStatusLabel,
   getStatusColor
 } from '@/data/secondHand'
+import {
+  createInitialQuestBoard,
+  generateDailyQuests,
+  acceptQuest,
+  claimQuestReward,
+  checkQuestExpiry,
+  updateQuestProgress,
+  getOverallProgress as questGetOverallProgress,
+  getDaysRemaining as questGetDaysRemaining,
+  formatDeadlineText as questFormatDeadlineText,
+  getQuestRarityColor as questGetQuestRarityColor,
+  getQuestRarityLabel as questGetQuestRarityLabel,
+  getQuestTypeLabel as questGetQuestTypeLabel
+} from '@/data/quests'
+import type {
+  DailyQuestBoard, Quest, QuestProgressUpdate, QuestAcceptResult, QuestClaimResult, QuestRarity, QuestType
+} from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -487,6 +504,10 @@ export const useGameStore = defineStore('game', () => {
   const festival = ref<FestivalState>(createInitialFestivalState())
 
   const secondHand = ref<SecondHandGameState>(createInitialSecondHandState())
+
+  const questBoard = ref<DailyQuestBoard>(createInitialQuestBoard())
+  const maxActiveQuests = 3
+  const questNotification = ref<{ show: boolean; type: 'success' | 'info' | 'warning' | 'error'; message: string } | null>(null)
 
   const secondHandPendingAppraisals = computed(() =>
     secondHand.value.appraisals.filter(a => a.status === 'pending_appraisal')
@@ -2478,6 +2499,9 @@ export const useGameStore = defineStore('game', () => {
     refreshActivePromotions()
     refreshDailyAuctions()
     refreshPresaleItems()
+    
+    questBoard.value = createInitialQuestBoard()
+    refreshDailyQuests()
   }
 
   const resetDailyStats = () => {
@@ -3867,6 +3891,12 @@ export const useGameStore = defineStore('game', () => {
       currentLevelSales.value += 1
       totalProfit.value += profit
 
+      updateQuestProgressAction({ type: 'sell_quantity', value: 1 })
+      updateQuestProgressAction({ type: 'sell_record', value: 1, genre: record.genre, recordId: record.id, rarity: record.rarity, condition: slotConditionScore })
+      updateQuestProgressAction({ type: 'sell_genre', value: 1, genre: record.genre })
+      updateQuestProgressAction({ type: 'reach_profit', value: profit, genre: record.genre })
+      updateQuestProgressAction({ type: 'customer_satisfaction', value: satisfaction, customerId: customer.id })
+
       if (wasPromotionApplied && promotionResult.appliedPromotionId) {
         recordPromotionSale(promotionResult.appliedPromotionId, salePrice, isGiftItem)
       }
@@ -4807,6 +4837,9 @@ export const useGameStore = defineStore('game', () => {
           stopPlaying()
           incrementCollectionDaysOwned()
           
+          checkAllQuestsExpiry()
+          refreshDailyQuests()
+          
           genreMarketHeat.value = generateDailyMarketHeat(
             currentDay.value,
             genreMarketHeat.value,
@@ -4828,6 +4861,185 @@ export const useGameStore = defineStore('game', () => {
         }
         break
     }
+  }
+
+  const showQuestNotification = (type: 'success' | 'info' | 'warning' | 'error', message: string) => {
+    questNotification.value = { show: true, type, message }
+    setTimeout(() => {
+      questNotification.value = null
+    }, 3000)
+  }
+
+  const refreshDailyQuests = () => {
+    const lastRefresh = questBoard.value.lastRefreshDay
+    if (lastRefresh >= currentDay.value) return
+
+    const newQuests = generateDailyQuests(currentLevel.value, 4)
+    questBoard.value.availableQuests = [
+      ...questBoard.value.availableQuests.filter(q => {
+        if (q.config.isRepeatable) return true
+        return true
+      }),
+      ...newQuests
+    ].slice(0, 8)
+
+    questBoard.value.lastRefreshDay = currentDay.value
+    questBoard.value.day = currentDay.value
+  }
+
+  const checkAllQuestsExpiry = () => {
+    const expiredQuests: Quest[] = []
+    questBoard.value.activeQuests = questBoard.value.activeQuests.filter(quest => {
+      const { quest: updatedQuest, expired } = checkQuestExpiry(quest, currentDay.value)
+      if (expired) {
+        expiredQuests.push(updatedQuest)
+        return false
+      }
+      Object.assign(quest, updatedQuest)
+      return true
+    })
+    questBoard.value.failedQuests.push(...expiredQuests)
+    
+    const completedButNotClaimed = questBoard.value.activeQuests.filter(q => q.status === 'completed')
+    questBoard.value.completedQuests.push(...completedButNotClaimed)
+    questBoard.value.activeQuests = questBoard.value.activeQuests.filter(q => q.status !== 'completed')
+  }
+
+  const acceptQuestAction = (questId: string): QuestAcceptResult => {
+    const availableIndex = questBoard.value.availableQuests.findIndex(q => q.config.id === questId)
+    if (availableIndex < 0) {
+      return { success: false, message: '任务不存在' }
+    }
+    const quest = questBoard.value.availableQuests[availableIndex]
+    const result = acceptQuest(quest, currentDay.value, questBoard.value.activeQuests.length, maxActiveQuests)
+    
+    if (result.success && result.quest) {
+      questBoard.value.availableQuests.splice(availableIndex, 1)
+      questBoard.value.activeQuests.push(result.quest)
+      showQuestNotification('info', result.message)
+    } else if (!result.success) {
+      showQuestNotification('warning', result.message)
+    }
+    return result
+  }
+
+  const claimQuestRewardAction = (questId: string): QuestClaimResult => {
+    const activeIndex = questBoard.value.activeQuests.findIndex(q => q.config.id === questId)
+    const completedIndex = questBoard.value.completedQuests.findIndex(q => q.config.id === questId)
+    let quest: Quest | undefined
+    let sourceArray: Quest[] | null = null
+    let sourceIndex = -1
+
+    if (activeIndex >= 0) {
+      quest = questBoard.value.activeQuests[activeIndex]
+      sourceArray = questBoard.value.activeQuests
+      sourceIndex = activeIndex
+    } else if (completedIndex >= 0) {
+      quest = questBoard.value.completedQuests[completedIndex]
+      sourceArray = questBoard.value.completedQuests
+      sourceIndex = completedIndex
+    }
+
+    if (!quest || !sourceArray) {
+      return { success: false, message: '任务不存在' }
+    }
+
+    const result = claimQuestReward(quest, currentDay.value)
+    if (result.success && result.reward) {
+      sourceArray.splice(sourceIndex, 1)
+      questBoard.value.claimedQuests.push({
+        ...quest,
+        status: 'claimed',
+        claimedDay: currentDay.value
+      })
+
+      budget.value += result.reward.budget
+      shopReputation.value = Math.min(100, shopReputation.value + result.reward.reputation)
+      if (result.reward.growthPoints) {
+        dailyGrowthPointsEarned.value += result.reward.growthPoints
+      }
+      if (result.reward.bonusRecordId) {
+        const bonusRecord = getRecordById(result.reward.bonusRecordId)
+        if (bonusRecord) {
+          const invItem: InventoryItem = {
+            record: bonusRecord,
+            quantity: 1,
+            purchaseDate: currentDay.value,
+            conditionScore: 85,
+            actualCostPrice: 0
+          }
+          inventory.value.push(invItem)
+        }
+      }
+
+      questBoard.value.totalQuestsCompleted++
+      questBoard.value.totalRewardsEarned.budget += result.reward.budget
+      questBoard.value.totalRewardsEarned.reputation += result.reward.reputation
+      if (result.reward.growthPoints) {
+        questBoard.value.totalRewardsEarned.growthPoints += result.reward.growthPoints
+      }
+
+      showQuestNotification('success', result.message)
+    } else if (!result.success) {
+      showQuestNotification('warning', result.message)
+    }
+    return result
+  }
+
+  const updateQuestProgressAction = (update: QuestProgressUpdate) => {
+    let newlyCompletedCount = 0
+    questBoard.value.activeQuests = questBoard.value.activeQuests.map(quest => {
+      const { quest: updatedQuest, justCompleted } = updateQuestProgress(quest, update)
+      if (justCompleted) {
+        newlyCompletedCount++
+        showQuestNotification('success', `🎉 任务「${quest.config.title}」已完成！点击领取奖励`)
+      }
+      return updatedQuest
+    })
+    return newlyCompletedCount
+  }
+
+  const getCompletedActiveQuests = computed(() => {
+    return questBoard.value.activeQuests.filter(q => q.status === 'completed')
+  })
+
+  const getClaimableQuestCount = computed(() => {
+    return questBoard.value.activeQuests.filter(q => q.status === 'completed').length +
+           questBoard.value.completedQuests.length
+  })
+
+  const getQuestById = (questId: string): Quest | undefined => {
+    return [
+      ...questBoard.value.availableQuests,
+      ...questBoard.value.activeQuests,
+      ...questBoard.value.completedQuests,
+      ...questBoard.value.claimedQuests,
+      ...questBoard.value.failedQuests
+    ].find(q => q.config.id === questId)
+  }
+
+  const getOverallProgress = (quest: Quest): number => {
+    return questGetOverallProgress(quest)
+  }
+
+  const getDaysRemaining = (quest: Quest, currentDayVal: number): number => {
+    return questGetDaysRemaining(quest, currentDayVal)
+  }
+
+  const formatDeadlineText = (quest: Quest, currentDayVal: number): string => {
+    return questFormatDeadlineText(quest, currentDayVal)
+  }
+
+  const getQuestRarityColor = (rarity: QuestRarity): string => {
+    return questGetQuestRarityColor(rarity)
+  }
+
+  const getQuestRarityLabel = (rarity: QuestRarity): string => {
+    return questGetQuestRarityLabel(rarity)
+  }
+
+  const getQuestTypeLabel = (type: QuestType): string => {
+    return questGetQuestTypeLabel(type)
   }
 
   const createEmptyExtended = (record: Record): CollectionItem['extended'] => {
@@ -4965,6 +5177,15 @@ export const useGameStore = defineStore('game', () => {
     collectionItem.extended.source = source
     
     collection.value.push(collectionItem)
+
+    updateQuestProgressAction({
+      type: 'collect_record',
+      value: 1,
+      genre: record.genre,
+      recordId: record.id,
+      rarity: record.rarity,
+      condition: conditionScore
+    })
 
     const newlyActivated = checkAndActivateAlbums()
     updateCollectionBonuses()
@@ -7433,6 +7654,23 @@ export const useGameStore = defineStore('game', () => {
     getSourceLabel,
     getSourceIcon,
     getStatusLabel,
-    getStatusColor
+    getStatusColor,
+    questBoard,
+    questNotification,
+    maxActiveQuests,
+    getCompletedActiveQuests,
+    getClaimableQuestCount,
+    refreshDailyQuests,
+    checkAllQuestsExpiry,
+    acceptQuestAction,
+    claimQuestRewardAction,
+    updateQuestProgressAction,
+    getQuestById,
+    getOverallProgress,
+    getDaysRemaining,
+    formatDeadlineText,
+    getQuestRarityColor,
+    getQuestRarityLabel,
+    getQuestTypeLabel
   }
 })

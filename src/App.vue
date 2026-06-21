@@ -17,6 +17,7 @@ import RepairWorkshopView from './components/RepairWorkshopView.vue'
 import EncyclopediaView from './components/EncyclopediaView.vue'
 import FestivalView from './components/FestivalView.vue'
 import SecondHandView from './components/SecondHandView.vue'
+import QuestBoard from './components/QuestBoard.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -29,6 +30,7 @@ const showRepairWorkshop = ref(false)
 const showEncyclopedia = ref(false)
 const showFestival = ref(false)
 const showSecondHand = ref(false)
+const showQuestBoard = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -82,6 +84,10 @@ const toggleFestival = () => {
 const toggleSecondHand = () => {
   showSecondHand.value = !showSecondHand.value
 }
+
+const toggleQuestBoard = () => {
+  showQuestBoard.value = !showQuestBoard.value
+}
 </script>
 
 <template>
@@ -96,6 +102,7 @@ const toggleSecondHand = () => {
     <EncyclopediaView v-if="showEncyclopedia" @close="toggleEncyclopedia" />
     <FestivalView v-if="showFestival" @close="toggleFestival" />
     <SecondHandView v-if="showSecondHand" @close="toggleSecondHand" />
+    <QuestBoard v-if="showQuestBoard" @close="toggleQuestBoard" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -114,6 +121,7 @@ const toggleSecondHand = () => {
         @encyclopedia="toggleEncyclopedia"
         @festival="toggleFestival"
         @second-hand="toggleSecondHand"
+        @quest-board="toggleQuestBoard"
       />
       
       <main class="main-content">

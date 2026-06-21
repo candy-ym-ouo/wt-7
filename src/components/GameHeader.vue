@@ -15,6 +15,7 @@ const emit = defineEmits<{
   'encyclopedia': []
   'festival': []
   'second-hand': []
+  'quest-board': []
 }>()
 
 const gameStore = useGameStore()
@@ -97,6 +98,10 @@ const timeSlotLabel = computed(() => {
         <button class="icon-btn second-hand-btn" @click="emit('second-hand')">
           ♻️
           <span v-if="gameStore.secondHandUnreadNotificationCount > 0" class="badge">{{ gameStore.secondHandUnreadNotificationCount }}</span>
+        </button>
+        <button class="icon-btn quest-board-btn" @click="emit('quest-board')">
+          📮
+          <span v-if="gameStore.getClaimableQuestCount > 0" class="badge">{{ gameStore.getClaimableQuestCount }}</span>
         </button>
       </div>
     </div>
@@ -336,7 +341,8 @@ const timeSlotLabel = computed(() => {
 .auction-btn,
 .staff-btn,
 .encyclopedia-btn,
-.festival-btn {
+.festival-btn,
+.quest-board-btn {
   position: relative;
 }
 </style>

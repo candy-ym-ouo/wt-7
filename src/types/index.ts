@@ -2172,3 +2172,98 @@ export interface SecondHandGameState {
   selectedFilter: 'all' | 'pending' | 'in_stock' | 'sold' | 'consignment' | 'recycle'
   notifications: { id: string; message: string; type: 'success' | 'warning' | 'error' | 'info'; read: boolean; createdAt: number }[]
 }
+
+export type QuestType = 'daily_order' | 'collect_record' | 'time_limited' | 'genre_sales' | 'profit_target'
+export type QuestStatus = 'available' | 'active' | 'completed' | 'failed' | 'claimed' | 'expired'
+export type QuestRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+export type QuestRequirementType = 'sell_record' | 'collect_record' | 'reach_profit' | 'sell_genre' | 'sell_quantity' | 'customer_satisfaction'
+
+export interface QuestRequirement {
+  type: QuestRequirementType
+  target: number
+  current: number
+  genre?: Genre
+  recordIds?: string[]
+  minRarity?: number
+  minCondition?: number
+  description: string
+}
+
+export interface QuestReward {
+  budget: number
+  reputation: number
+  growthPoints?: number
+  bonusRecordId?: string
+  unlockedAlbumId?: string
+  description: string
+}
+
+export interface QuestConfig {
+  id: string
+  type: QuestType
+  title: string
+  icon: string
+  description: string
+  clientName: string
+  clientAvatar: string
+  rarity: QuestRarity
+  requirements: QuestRequirement[]
+  reward: QuestReward
+  minLevel: number
+  durationDays: number
+  startTimeSlot?: TimeSlot
+  isRepeatable: boolean
+  cooldownDays: number
+}
+
+export interface Quest {
+  config: QuestConfig
+  status: QuestStatus
+  acceptedDay: number | null
+  deadlineDay: number | null
+  completedDay: number | null
+  claimedDay: number | null
+  failedDay: number | null
+  progress: QuestRequirement[]
+  notifications: { day: number; message: string; type: 'info' | 'warning' | 'success' }[]
+}
+
+export interface DailyQuestBoard {
+  day: number
+  availableQuests: Quest[]
+  activeQuests: Quest[]
+  completedQuests: Quest[]
+  claimedQuests: Quest[]
+  failedQuests: Quest[]
+  lastRefreshDay: number
+  totalQuestsCompleted: number
+  totalRewardsEarned: {
+    budget: number
+    reputation: number
+    growthPoints: number
+  }
+  consecutiveDailyCompletion: number
+}
+
+export interface QuestProgressUpdate {
+  type: QuestRequirementType
+  value: number
+  genre?: Genre
+  recordId?: string
+  rarity?: number
+  condition?: number
+  customerId?: string
+  satisfaction?: number
+}
+
+export interface QuestAcceptResult {
+  success: boolean
+  message: string
+  quest?: Quest
+}
+
+export interface QuestClaimResult {
+  success: boolean
+  message: string
+  reward?: QuestReward
+}
