@@ -3085,3 +3085,94 @@ export interface ComplaintHandleResult {
   refundAmount?: number
   reputationChange?: number
 }
+
+export type PriceIndexTrend = 'rising' | 'stable' | 'falling'
+
+export interface GenrePriceIndex {
+  genre: Genre
+  currentIndex: number
+  previousIndex: number
+  changePercent: number
+  trend: PriceIndexTrend
+  trendStrength: number
+  avgMarketPrice: number
+  avgCostPrice: number
+  profitMargin: number
+  volatility: number
+  weeklyHistory: number[]
+}
+
+export interface RareRecordFluctuation {
+  recordId: string
+  record: Record
+  currentPrice: number
+  previousPrice: number
+  priceChange: number
+  changePercent: number
+  trend: PriceIndexTrend
+  trendStrength: number
+  rarity: number
+  demandLevel: 'low' | 'medium' | 'high' | 'critical'
+  volatility: number
+  lastSaleDate: number | null
+  totalSalesCount: number
+  priceHistory: { day: number; price: number }[]
+  collectorInterest: number
+  predictedNextPrice: number
+}
+
+export interface PurchaseRecommendation {
+  id: string
+  record: Record
+  supplierId: string
+  supplierName: string
+  adjustedCostPrice: number
+  marketPrice: number
+  expectedProfit: number
+  profitMargin: number
+  riskLevel: 'low' | 'medium' | 'high'
+  priorityScore: number
+  demandModifier: number
+  marketHeatValue: number
+  marketTrend: MarketHeatTrend
+  reason: string
+  matchWithInventory: boolean
+  rarityBonus: number
+  genreHeatBonus: number
+  isHotPick: boolean
+  isUndervalued: boolean
+  turnoverEstimate: number
+}
+
+export interface MarketInsight {
+  id: string
+  category: 'opportunity' | 'warning' | 'trend' | 'tip'
+  priority: 'high' | 'medium' | 'low'
+  title: string
+  description: string
+  icon: string
+  genre?: Genre
+  relatedRecordId?: string
+  action?: string
+  impactDescription: string
+}
+
+export interface MarketCenterSummary {
+  hottestGenre: Genre
+  coldestGenre: Genre
+  overallMarketIndex: number
+  overallPriceChange: number
+  rareRecordIndex: number
+  rareRecordPriceChange: number
+  bestSellingRarity: number
+  avgProfitMargin: number
+  topOpportunities: PurchaseRecommendation[]
+  marketInsights: MarketInsight[]
+}
+
+export interface PriceIndexHistoryPoint {
+  day: number
+  overallIndex: number
+  genreIndices: Map<Genre, number>
+}
+
