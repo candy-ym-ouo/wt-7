@@ -23,6 +23,7 @@ import MusicFestivalCollabView from './components/MusicFestivalCollabView.vue'
 import AchievementsView from './components/AchievementsView.vue'
 import StaffManagementView from './components/StaffManagementView.vue'
 import SubscriptionBoxView from './components/SubscriptionBoxView.vue'
+import MarketTrendsView from './components/MarketTrendsView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -41,6 +42,7 @@ const showMusicFestivalCollab = ref(false)
 const showAchievements = ref(false)
 const showStaffManagement = ref(false)
 const showSubscriptionBox = ref(false)
+const showMarketTrends = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -121,6 +123,10 @@ const toggleStaffManagement = () => {
 const toggleSubscriptionBox = () => {
   showSubscriptionBox.value = !showSubscriptionBox.value
 }
+
+const toggleMarketTrends = () => {
+  showMarketTrends.value = !showMarketTrends.value
+}
 </script>
 
 <template>
@@ -141,6 +147,7 @@ const toggleSubscriptionBox = () => {
     <AchievementsView v-if="showAchievements" @close="toggleAchievements" />
     <StaffManagementView v-if="showStaffManagement" @close="toggleStaffManagement" />
     <SubscriptionBoxView v-if="showSubscriptionBox" @close="toggleSubscriptionBox" />
+    <MarketTrendsView v-if="showMarketTrends" @close="toggleMarketTrends" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -165,6 +172,7 @@ const toggleSubscriptionBox = () => {
         @music-festival-collab="toggleMusicFestivalCollab"
         @achievements="toggleAchievements"
         @subscription-box="toggleSubscriptionBox"
+        @market-trends="toggleMarketTrends"
       />
       
       <main class="main-content">

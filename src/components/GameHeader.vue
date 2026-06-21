@@ -21,6 +21,7 @@ const emit = defineEmits<{
   achievements: []
   'staff-management': []
   'subscription-box': []
+  'market-trends': []
 }>()
 
 const gameStore = useGameStore()
@@ -123,6 +124,9 @@ const timeSlotLabel = computed(() => {
         <button class="icon-btn subscription-box-btn" @click="emit('subscription-box')">
           📦
           <span v-if="gameStore.subscriptionBoxUnreadNotifications > 0" class="badge">{{ gameStore.subscriptionBoxUnreadNotifications }}</span>
+        </button>
+        <button class="icon-btn market-trends-btn" @click="emit('market-trends')">
+          📊
         </button>
         <button class="icon-btn achievements-btn" @click="emit('achievements')">
           🏆
@@ -370,7 +374,8 @@ const timeSlotLabel = computed(() => {
 .festival-btn,
 .quest-board-btn,
 .community-btn,
-.music-festival-collab-btn {
+.music-festival-collab-btn,
+.market-trends-btn {
   position: relative;
 }
 

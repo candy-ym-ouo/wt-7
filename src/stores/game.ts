@@ -167,6 +167,17 @@ import {
   getHottestGenres,
   getColdestGenres
 } from '@/data/marketHeat'
+import {
+  calculateAllGenrePriceIndices,
+  getTopRareFluctuations,
+  generatePurchaseRecommendations,
+  generateMarketInsights,
+  calculateMarketCenterSummary
+} from '@/data/marketTrends'
+import type {
+  GenrePriceIndex,
+  MarketCenterSummary
+} from '@/types'
 import type { GenreMarketHeat, StaffState, StaffSkillType } from '@/types'
 import {
   createInitialStaffState,
@@ -562,6 +573,9 @@ export const useGameStore = defineStore('game', () => {
 
   const genreMarketHeat = ref<Map<Genre, GenreMarketHeat>>(new Map())
   const previousDayHotGenres = ref<HotGenre[]>([])
+  const genrePriceIndices = ref<Map<Genre, GenrePriceIndex>>(new Map())
+  const rareRecordPricesHistory = ref<Map<string, number>>(new Map())
+  const priceIndexHistory = ref<{ day: number; overallIndex: number; genreIndices: Map<Genre, number> }[]>([])
 
   const reservations = ref<Reservation[]>([])
   const dailyReservationFulfilledCount = ref(0)
@@ -1247,6 +1261,89 @@ export const useGameStore = defineStore('game', () => {
 
   const hottestGenresToday = computed(() => getHottestGenres(genreMarketHeat.value, 3))
   const coldestGenresToday = computed(() => getColdestGenres(genreMarketHeat.value, 3))
+
+  const genrePriceIndicesComputed = computed(() => {
+    genrePriceIndices.value = calculateAllGenrePriceIndices(
+      allRecords,
+      genreMarketHeat.value,
+      genrePriceIndices.value
+    )
+    return genrePriceIndices.value
+  })
+
+  const rareRecordFluctuations = computed(() => {
+    return getTopRareFluctuations(
+      allRecords,
+      recordPerformances.value,
+      genreMarketHeat.value,
+      currentDay.value,
+      rareRecordPricesHistory.value,
+      6
+    )
+  })
+
+  const purchaseRecommendationsForMarket = computed(() => {
+    return generatePurchaseRecommendations(
+      supplierInventory.value,
+      genreMarketHeat.value,
+      inventory.value,
+      budget.value,
+      recordPerformances.value,
+      8
+    )
+  })
+
+  const marketInsights = computed(() => {
+    return generateMarketInsights(
+      genreMarketHeat.value,
+      genrePriceIndicesComputed.value,
+      rareRecordFluctuations.value,
+      purchaseRecommendationsForMarket.value,
+      currentDay.value
+    )
+  })
+
+  const marketCenterSummary = computed((): MarketCenterSummary => {
+    return calculateMarketCenterSummary(
+      genreMarketHeat.value,
+      genrePriceIndicesComputed.value,
+      rareRecordFluctuations.value,
+      purchaseRecommendationsForMarket.value,
+      marketInsights.value,
+      recordPerformances.value
+    )
+  })
+
+  const overallMarketIndex = computed(() => {
+    const indices = Array.from(genrePriceIndicesComputed.value.values())
+    if (indices.length === 0) return 100
+    return Math.round(indices.reduce((s, p) => s + p.currentIndex, 0) / indices.length)
+  })
+
+  const overallMarketTrend = computed(() => {
+    const indices = Array.from(genrePriceIndicesComputed.value.values())
+    if (indices.length === 0) return 'stable'
+    const avgChange = indices.reduce((s, p) => s + p.changePercent, 0) / indices.length
+    if (avgChange > 1) return 'rising'
+    if (avgChange < -1) return 'falling'
+    return 'stable'
+  })
+
+  const getGenrePriceIndex = (genre: Genre): GenrePriceIndex => {
+    return genrePriceIndicesComputed.value.get(genre) || {
+      genre,
+      currentIndex: 100,
+      previousIndex: 100,
+      changePercent: 0,
+      trend: 'stable',
+      trendStrength: 0,
+      avgMarketPrice: 0,
+      avgCostPrice: 0,
+      profitMargin: 0,
+      volatility: 0.1,
+      weeklyHistory: [100]
+    }
+  }
 
   const getGenreHeat = (genre: Genre): GenreMarketHeat => {
     return getGenreMarketHeat(genreMarketHeat.value, genre)
@@ -2615,6 +2712,29 @@ export const useGameStore = defineStore('game', () => {
     
     genreMarketHeat.value = generateDailyMarketHeat(1, new Map(), [])
     previousDayHotGenres.value = []
+    genrePriceIndices.value = calculateAllGenrePriceIndices(allRecords, genreMarketHeat.value, new Map())
+    rareRecordPricesHistory.value.clear()
+    priceIndexHistory.value = []
+
+    const initialOverallIndex = 100
+    const initialGenreIndices = new Map<Genre, number>()
+    for (const [genre, index] of genrePriceIndices.value.entries()) {
+      initialGenreIndices.set(genre, index.currentIndex)
+    }
+    priceIndexHistory.value.push({
+      day: 1,
+      overallIndex: initialOverallIndex,
+      genreIndices: initialGenreIndices
+    })
+
+    const initialRareRecords = allRecords.filter(r => r.rarity >= 3)
+    initialRareRecords.forEach(record => {
+      const marketHeat = genreMarketHeat.value.get(record.genre)
+      const heatModifier = marketHeat?.priceModifier || 1
+      const rarityMultiplier = 1 + (record.rarity - 3) * 0.15
+      const currentPrice = Math.round(record.marketPrice * heatModifier * rarityMultiplier)
+      rareRecordPricesHistory.value.set(record.id, currentPrice)
+    })
     
     availableSuppliers.value = getAvailableSuppliersForLevel(levelId, shopReputation.value)
     currentSupplierId.value = availableSuppliers.value.length > 0 ? availableSuppliers.value[0].id : null
@@ -5086,6 +5206,38 @@ export const useGameStore = defineStore('game', () => {
             genreMarketHeat.value,
             previousDayHotGenres.value
           )
+
+          genrePriceIndices.value = calculateAllGenrePriceIndices(
+            allRecords,
+            genreMarketHeat.value,
+            genrePriceIndices.value
+          )
+
+          const newPriceIndex = Array.from(genrePriceIndices.value.values())
+          const overallIndex = newPriceIndex.length > 0
+            ? Math.round(newPriceIndex.reduce((s, p) => s + p.currentIndex, 0) / newPriceIndex.length)
+            : 100
+          const genreIndicesMap = new Map<Genre, number>()
+          for (const [genre, index] of genrePriceIndices.value.entries()) {
+            genreIndicesMap.set(genre, index.currentIndex)
+          }
+          priceIndexHistory.value.push({
+            day: currentDay.value,
+            overallIndex,
+            genreIndices: genreIndicesMap
+          })
+          if (priceIndexHistory.value.length > 30) {
+            priceIndexHistory.value = priceIndexHistory.value.slice(-30)
+          }
+
+          const rareRecords = allRecords.filter(r => r.rarity >= 3)
+          rareRecords.forEach(record => {
+            const marketHeat = genreMarketHeat.value.get(record.genre)
+            const heatModifier = marketHeat?.priceModifier || 1
+            const rarityMultiplier = 1 + (record.rarity - 3) * 0.15
+            const currentPrice = Math.round(record.marketPrice * heatModifier * rarityMultiplier)
+            rareRecordPricesHistory.value.set(record.id, currentPrice)
+          })
           
           availableSuppliers.value = getAvailableSuppliersForLevel(currentLevel.value, shopReputation.value)
           if (currentSupplierId.value && !availableSuppliers.value.some(s => s.id === currentSupplierId.value)) {
@@ -8926,6 +9078,14 @@ export const useGameStore = defineStore('game', () => {
     hottestGenresToday,
     coldestGenresToday,
     getGenreHeat,
+    genrePriceIndicesComputed,
+    rareRecordFluctuations,
+    purchaseRecommendationsForMarket,
+    marketInsights,
+    marketCenterSummary,
+    overallMarketIndex,
+    overallMarketTrend,
+    getGenrePriceIndex,
     currentTimeSlot,
     afternoonCompleted,
     afternoonStats,
