@@ -2267,3 +2267,180 @@ export interface QuestClaimResult {
   message: string
   reward?: QuestReward
 }
+
+export type CommunityPostType = 'review' | 'recommendation' | 'discussion' | 'event_share' | 'collection_show'
+
+export interface CommunityPost {
+  id: string
+  type: CommunityPostType
+  typeName: string
+  typeIcon: string
+  authorName: string
+  authorAvatar: string
+  authorLevel: MemberLevel | null
+  content: string
+  recordTitle?: string
+  recordArtist?: string
+  recordGenre?: Genre
+  recordCoverColor?: string
+  likes: number
+  comments: number
+  shares: number
+  isLiked: boolean
+  timestamp: number
+  dayPosted: number
+  tags: string[]
+  reputationImpact: number
+  isPinned?: boolean
+}
+
+export interface GenreTrend {
+  genre: Genre
+  rank: number
+  previousRank: number
+  trend: 'rising' | 'stable' | 'falling'
+  heatValue: number
+  heatLevel: 'cold' | 'cool' | 'warm' | 'hot' | 'scorching'
+  postCount: number
+  discussionCount: number
+  salesGrowth: number
+  icon: string
+  description: string
+}
+
+export interface WordOfMouthSpreadNode {
+  id: string
+  name: string
+  avatar: string
+  level: MemberLevel | null
+  influence: number
+  reach: number
+  spreadCount: number
+  isActive: boolean
+  lastSpreadDay: number
+}
+
+export interface WordOfMouthChannel {
+  id: string
+  name: string
+  icon: string
+  description: string
+  reachMultiplier: number
+  reputationGainMultiplier: number
+  unlockReputation: number
+  isUnlocked: boolean
+  currentReach: number
+  dailyGrowth: number
+}
+
+export type CommunityEventStatus = 'upcoming' | 'signup' | 'in_progress' | 'ended' | 'cancelled'
+export type CommunityEventType = 'listening_party' | 'swap_meet' | 'genre_night' | 'workshop' | 'artist_visit' | 'anniversary'
+
+export interface CommunityEvent {
+  id: string
+  type: CommunityEventType
+  typeName: string
+  typeIcon: string
+  title: string
+  description: string
+  bannerIcon: string
+  status: CommunityEventStatus
+  signupStartDay: number
+  signupEndDay: number
+  eventDay: number
+  maxParticipants: number
+  currentParticipants: number
+  minReputation: number
+  entryFee: number
+  rewards: {
+    reputation: number
+    budget: number
+    growthPoints: number
+    bonusRecordId?: string
+  }
+  genreFocus?: Genre[]
+  isParticipating: boolean
+  participantAvatars: string[]
+  satisfaction?: number
+}
+
+export type RewardType = 'daily_checkin' | 'post_reward' | 'spread_reward' | 'event_reward' | 'milestone_reward' | 'referral_bonus'
+
+export interface CommunityReward {
+  id: string
+  type: RewardType
+  typeName: string
+  typeIcon: string
+  title: string
+  description: string
+  icon: string
+  budgetReward: number
+  reputationReward: number
+  growthPointsReward: number
+  requirement: {
+    type: 'posts' | 'likes' | 'shares' | 'checkin_days' | 'referrals' | 'event_participation'
+    target: number
+    current: number
+  }
+  isClaimed: boolean
+  isClaimable: boolean
+  claimDay?: number
+}
+
+export interface CommunityStats {
+  totalPosts: number
+  totalLikes: number
+  totalShares: number
+  totalComments: number
+  activeUsers: number
+  dailyPosts: number
+  weeklyPosts: number
+  eventsParticipated: number
+  totalRewardsClaimed: number
+  totalBudgetRewarded: number
+  totalReputationGained: number
+  consecutiveCheckinDays: number
+  longestCheckinStreak: number
+  influenceScore: number
+  communityLevel: number
+}
+
+export interface CommunityState {
+  posts: CommunityPost[]
+  trends: GenreTrend[]
+  spreadNodes: WordOfMouthSpreadNode[]
+  channels: WordOfMouthChannel[]
+  events: CommunityEvent[]
+  rewards: CommunityReward[]
+  stats: CommunityStats
+  lastRefreshDay: number
+  selectedTab: 'posts' | 'trends' | 'spread' | 'events' | 'rewards'
+  todayCheckedIn: boolean
+  unreadNotifications: number
+}
+
+export interface PostRewardResult {
+  success: boolean
+  message: string
+  rewards: {
+    reputation: number
+    budget?: number
+  }
+  post?: CommunityPost
+}
+
+export interface EventSignupResult {
+  success: boolean
+  message: string
+  event?: CommunityEvent
+  cost?: number
+}
+
+export interface RewardClaimResult {
+  success: boolean
+  message: string
+  reward?: CommunityReward
+  budgetGained?: number
+  reputationGained?: number
+  growthPointsGained?: number
+}

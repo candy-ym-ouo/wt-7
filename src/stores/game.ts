@@ -45,7 +45,6 @@ import {
   getIdentityCollectionChanceBonus,
   getIdentityTagInfo
 } from '@/data/customers'
-import type { Genre } from '@/types'
 import {
   updateMemberAfterPurchase,
   calculateGrowthPoints,
@@ -331,6 +330,30 @@ import {
 import type {
   DailyQuestBoard, Quest, QuestProgressUpdate, QuestAcceptResult, QuestClaimResult, QuestRarity, QuestType
 } from '@/types'
+import {
+  createInitialCommunityState,
+  likePost as likePostData,
+  sharePost as sharePostData,
+  createPost as createPostData,
+  checkin as checkinData,
+  signupForEvent as signupForEventData,
+  claimReward as claimRewardData,
+  updateChannelsByReputation,
+  getTotalReach as getTotalReachData,
+  getActiveSpreadNodes as getActiveSpreadNodesData,
+  getUpcomingEvents as getUpcomingEventsData,
+  getClaimableRewardsCount as getClaimableRewardsCountData,
+  formatTimeAgo as formatTimeAgoData,
+  getTrendColor as getTrendColorData,
+  getTrendIcon as getTrendIconData,
+  getHeatLevelLabel as getHeatLevelLabelData,
+  getGenreIcon as getGenreIconData
+} from '@/data/community'
+import type {
+  CommunityState, CommunityPost, CommunityPostType,
+  PostRewardResult, EventSignupResult, RewardClaimResult,
+  Genre
+} from '@/types'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -508,6 +531,9 @@ export const useGameStore = defineStore('game', () => {
   const questBoard = ref<DailyQuestBoard>(createInitialQuestBoard())
   const maxActiveQuests = 3
   const questNotification = ref<{ show: boolean; type: 'success' | 'info' | 'warning' | 'error'; message: string } | null>(null)
+
+  const community = ref<CommunityState>(createInitialCommunityState())
+  const communityNotification = ref<{ show: boolean; type: 'success' | 'info' | 'warning' | 'error'; message: string } | null>(null)
 
   const secondHandPendingAppraisals = computed(() =>
     secondHand.value.appraisals.filter(a => a.status === 'pending_appraisal')
@@ -5042,6 +5068,168 @@ export const useGameStore = defineStore('game', () => {
     return questGetQuestTypeLabel(type)
   }
 
+  const communityPosts = computed(() => community.value.posts)
+  const communityTrends = computed(() => community.value.trends)
+  const communitySpreadNodes = computed(() => community.value.spreadNodes)
+  const communityChannels = computed(() => community.value.channels)
+  const communityEvents = computed(() => community.value.events)
+  const communityRewards = computed(() => community.value.rewards)
+  const communityStats = computed(() => community.value.stats)
+  const communitySelectedTab = computed(() => community.value.selectedTab)
+  const communityTodayCheckedIn = computed(() => community.value.todayCheckedIn)
+  const communityUnreadNotifications = computed(() => community.value.unreadNotifications)
+  const communityTotalReach = computed(() => getTotalReachData(community.value))
+  const communityActiveSpreadNodes = computed(() => getActiveSpreadNodesData(community.value))
+  const communityUpcomingEvents = computed(() => getUpcomingEventsData(community.value))
+  const communityClaimableRewardsCount = computed(() => getClaimableRewardsCountData(community.value))
+
+  const setCommunityTab = (tab: 'posts' | 'trends' | 'spread' | 'events' | 'rewards') => {
+    community.value.selectedTab = tab
+  }
+
+  const likeCommunityPost = (postId: string): { post: CommunityPost | undefined; reputationGain: number } => {
+    const result = likePostData(postId, community.value)
+    if (result.reputationGain > 0) {
+      shopReputation.value = Math.min(100, shopReputation.value + result.reputationGain)
+    }
+    return result
+  }
+
+  const shareCommunityPost = (postId: string): { post: CommunityPost | undefined; reputationGain: number } => {
+    const result = sharePostData(postId, community.value)
+    if (result.reputationGain > 0) {
+      shopReputation.value = Math.min(100, shopReputation.value + result.reputationGain)
+    }
+    return result
+  }
+
+  const createCommunityPost = (
+    type: CommunityPostType,
+    content: string,
+    recordTitle?: string,
+    recordArtist?: string,
+    recordGenre?: Genre,
+    recordCoverColor?: string,
+    tags: string[] = []
+  ): PostRewardResult => {
+    const post = createPostData(type, content, recordTitle, recordArtist, recordGenre, recordCoverColor, tags)
+    community.value.posts.unshift(post)
+    community.value.stats.totalPosts += 1
+    community.value.stats.dailyPosts += 1
+
+    const reputationGain = post.reputationImpact
+    shopReputation.value = Math.min(100, shopReputation.value + reputationGain)
+
+    const postReward = community.value.rewards.find(r => r.type === 'post_reward' && r.requirement.type === 'posts' && r.requirement.target === 1)
+    if (postReward) {
+      postReward.requirement.current = Math.min(postReward.requirement.current + 1, postReward.requirement.target)
+      if (postReward.requirement.current >= postReward.requirement.target) {
+        postReward.isClaimable = true
+      }
+    }
+
+    const postReward5 = community.value.rewards.find(r => r.type === 'post_reward' && r.requirement.type === 'posts' && r.requirement.target === 5)
+    if (postReward5) {
+      postReward5.requirement.current = Math.min(postReward5.requirement.current + 1, postReward5.requirement.target)
+      if (postReward5.requirement.current >= postReward5.requirement.target) {
+        postReward5.isClaimable = true
+      }
+    }
+
+    return {
+      success: true,
+      message: '发布成功！',
+      rewards: { reputation: reputationGain },
+      post
+    }
+  }
+
+  const communityCheckin = (): { success: boolean; message: string; budgetReward: number; reputationReward: number } => {
+    const result = checkinData(community.value)
+    if (result.success) {
+      budget.value += result.budgetReward
+      shopReputation.value = Math.min(100, shopReputation.value + result.reputationReward)
+
+      const dailyReward = community.value.rewards.find(r => r.type === 'daily_checkin')
+      if (dailyReward && dailyReward.requirement.current >= dailyReward.requirement.target) {
+        dailyReward.isClaimable = true
+      }
+    }
+    return result
+  }
+
+  const signupForCommunityEvent = (eventId: string): EventSignupResult => {
+    const result = signupForEventData(eventId, community.value, shopReputation.value, budget.value)
+    if (result.success && result.cost !== undefined) {
+      budget.value -= result.cost
+    }
+    return result
+  }
+
+  const claimCommunityReward = (rewardId: string): RewardClaimResult => {
+    const result = claimRewardData(rewardId, community.value)
+    if (result.success) {
+      if (result.budgetGained) budget.value += result.budgetGained
+      if (result.reputationGained) shopReputation.value = Math.min(100, shopReputation.value + result.reputationGained)
+    }
+    return result
+  }
+
+  const getCommunityGenreIcon = (genre: Genre): string => {
+    return getGenreIconData(genre)
+  }
+
+  const getCommunityTrendColor = (heatLevel: string): string => {
+    return getTrendColorData(heatLevel)
+  }
+
+  const getCommunityTrendIcon = (trend: 'rising' | 'stable' | 'falling'): string => {
+    return getTrendIconData(trend)
+  }
+
+  const getCommunityHeatLevelLabel = (heatLevel: string): string => {
+    return getHeatLevelLabelData(heatLevel)
+  }
+
+  const formatCommunityTimeAgo = (timestamp: number): string => {
+    return formatTimeAgoData(timestamp)
+  }
+
+  const communityCheckinStatus = computed(() => {
+    const dayNames = ['一', '二', '三', '四', '五', '六', '日']
+    const streak = community.value.stats.consecutiveCheckinDays
+    const todayIdx = (community.value.lastRefreshDay - 1) % 7
+    
+    const weeklyCheckin = dayNames.map((name, idx) => {
+      const dayNum = idx + 1
+      const isToday = idx === todayIdx
+      const checked = idx < todayIdx || (isToday && community.value.todayCheckedIn)
+      const isRewardDay = dayNum % 3 === 0 || dayNum === 7
+      const rewardType = isRewardDay ? (dayNum === 7 ? 'bonus' : 'reputation') : 'coins'
+      
+      return {
+        dayName: `周${name}`,
+        dayNum,
+        checked,
+        isToday,
+        isRewardDay,
+        rewardType
+      }
+    })
+    
+    return {
+      streakDays: streak,
+      weeklyCheckin,
+      todayCheckedIn: community.value.todayCheckedIn
+    }
+  })
+
+  const signupCommunityEvent = signupForCommunityEvent
+
+  const refreshCommunityChannels = () => {
+    updateChannelsByReputation(community.value, shopReputation.value)
+  }
+
   const createEmptyExtended = (record: Record): CollectionItem['extended'] => {
     const story = generateRecordStory({
       id: record.id,
@@ -7671,6 +7859,37 @@ export const useGameStore = defineStore('game', () => {
     formatDeadlineText,
     getQuestRarityColor,
     getQuestRarityLabel,
-    getQuestTypeLabel
+    getQuestTypeLabel,
+    community,
+    communityNotification,
+    communityPosts,
+    communityTrends,
+    communitySpreadNodes,
+    communityChannels,
+    communityEvents,
+    communityRewards,
+    communityStats,
+    communitySelectedTab,
+    communityTodayCheckedIn,
+    communityUnreadNotifications,
+    communityTotalReach,
+    communityActiveSpreadNodes,
+    communityUpcomingEvents,
+    communityClaimableRewardsCount,
+    communityCheckinStatus,
+    setCommunityTab,
+    likeCommunityPost,
+    shareCommunityPost,
+    createCommunityPost,
+    communityCheckin,
+    signupForCommunityEvent,
+    signupCommunityEvent,
+    claimCommunityReward,
+    getCommunityGenreIcon,
+    getCommunityTrendColor,
+    getCommunityTrendIcon,
+    getCommunityHeatLevelLabel,
+    formatCommunityTimeAgo,
+    refreshCommunityChannels
   }
 })
