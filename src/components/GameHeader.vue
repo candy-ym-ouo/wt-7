@@ -18,6 +18,7 @@ const emit = defineEmits<{
   'quest-board': []
   community: []
   'music-festival-collab': []
+  achievements: []
 }>()
 
 const gameStore = useGameStore()
@@ -113,6 +114,10 @@ const timeSlotLabel = computed(() => {
           🎸
           <span v-if="gameStore.musicFestivalCollab.isCollabActive" class="badge active-dot">●</span>
           <span v-if="gameStore.musicFestivalCollab.hasUnclaimedRewards" class="badge">🎁</span>
+        </button>
+        <button class="icon-btn achievements-btn" @click="emit('achievements')">
+          🏆
+          <span v-if="gameStore.getUnclaimedAchievementRewardCount > 0" class="badge">{{ gameStore.getUnclaimedAchievementRewardCount }}</span>
         </button>
       </div>
     </div>

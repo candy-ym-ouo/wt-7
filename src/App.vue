@@ -20,6 +20,7 @@ import SecondHandView from './components/SecondHandView.vue'
 import QuestBoard from './components/QuestBoard.vue'
 import CommunityView from './components/CommunityView.vue'
 import MusicFestivalCollabView from './components/MusicFestivalCollabView.vue'
+import AchievementsView from './components/AchievementsView.vue'
 
 const gameStore = useGameStore()
 const showCollection = ref(false)
@@ -35,6 +36,7 @@ const showSecondHand = ref(false)
 const showQuestBoard = ref(false)
 const showCommunity = ref(false)
 const showMusicFestivalCollab = ref(false)
+const showAchievements = ref(false)
 const currentView = ref<'menu' | 'game'>('menu')
 
 const startGame = (levelId: number) => {
@@ -100,6 +102,13 @@ const toggleCommunity = () => {
 const toggleMusicFestivalCollab = () => {
   showMusicFestivalCollab.value = !showMusicFestivalCollab.value
 }
+
+const toggleAchievements = () => {
+  showAchievements.value = !showAchievements.value
+  if (!showAchievements.value) {
+    gameStore.clearAchievementNotifications()
+  }
+}
 </script>
 
 <template>
@@ -117,6 +126,7 @@ const toggleMusicFestivalCollab = () => {
     <QuestBoard v-if="showQuestBoard" @close="toggleQuestBoard" />
     <CommunityView v-if="showCommunity" @close="toggleCommunity" />
     <MusicFestivalCollabView v-if="showMusicFestivalCollab" @close="toggleMusicFestivalCollab" />
+    <AchievementsView v-if="showAchievements" @close="toggleAchievements" />
     
     <template v-if="currentView === 'menu'">
       <LevelSelect @start="startGame" />
@@ -138,6 +148,7 @@ const toggleMusicFestivalCollab = () => {
         @quest-board="toggleQuestBoard"
         @community="toggleCommunity"
         @music-festival-collab="toggleMusicFestivalCollab"
+        @achievements="toggleAchievements"
       />
       
       <main class="main-content">

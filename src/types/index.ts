@@ -2607,3 +2607,95 @@ export interface MusicFestivalCollabPurchaseResult {
   record?: MusicFestivalLimitedRecord
   cost?: number
 }
+
+export type BusinessAchievementCategory = 
+  | 'sales' 
+  | 'profit' 
+  | 'collection' 
+  | 'satisfaction' 
+  | 'level' 
+  | 'special'
+
+export type BusinessAchievementRarity = 'common' | 'rare' | 'epic' | 'legendary'
+
+export interface BusinessAchievementConfig {
+  id: string
+  name: string
+  icon: string
+  description: string
+  category: BusinessAchievementCategory
+  rarity: BusinessAchievementRarity
+  target: number
+  progressType: 'count' | 'value' | 'percent' | 'boolean'
+  reward: {
+    budget?: number
+    reputation?: number
+    growthPoints?: number
+    bonusRecordId?: string
+  }
+  unlockCondition?: string
+  isUnlocked: boolean
+  unlockedDate: number | null
+  progress: number
+  rewardClaimed: boolean
+  rewardClaimedDate: number | null
+}
+
+export type BusinessTitleType = 
+  | 'novice_merchant'
+  | 'shrewd_businessman'
+  | 'music_connoisseur'
+  | 'collection_master'
+  | 'customer_favorite'
+  | 'industry_legend'
+
+export interface BusinessTitleConfig {
+  id: string
+  name: string
+  icon: string
+  description: string
+  type: BusinessTitleType
+  tier: number
+  requiredAchievementIds: string[]
+  bonusEffect: string
+  bonusValue: number
+  isUnlocked: boolean
+  unlockedDate: number | null
+  isEquipped: boolean
+}
+
+export interface BusinessAchievementStats {
+  totalAchievements: number
+  unlockedAchievements: number
+  totalTitles: number
+  unlockedTitles: number
+  achievementPoints: number
+  currentTitleId: string | null
+  newlyUnlocked: string[]
+  newlyClaimableRewards: string[]
+}
+
+export interface BusinessAchievementState {
+  achievements: BusinessAchievementConfig[]
+  titles: BusinessTitleConfig[]
+  stats: BusinessAchievementStats
+  lastCheckDay: number
+}
+
+export type AchievementProgressUpdateType =
+  | 'total_sales'
+  | 'total_profit'
+  | 'daily_profit'
+  | 'collection_count'
+  | 'collection_value'
+  | 'avg_satisfaction'
+  | 'customer_satisfaction'
+  | 'levels_cleared'
+  | 's_grade_levels'
+  | 'genre_sales'
+  | 'rare_records'
+  | 'perfect_records'
+  | 'member_count'
+  | 'consecutive_days'
+  | 'single_sale_price'
+  | 'bargain_success'

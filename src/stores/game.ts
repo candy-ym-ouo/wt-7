@@ -371,8 +371,24 @@ import {
 import type {
   CommunityState, CommunityPost, CommunityPostType,
   PostRewardResult, EventSignupResult, RewardClaimResult,
-  Genre
+  Genre,
+  BusinessAchievementState,
+  AchievementProgressUpdateType,
+  BusinessTitleConfig
 } from '@/types'
+import {
+  createInitialAchievementState,
+  updateAchievementProgress,
+  claimAchievementReward as claimAchievementRewardData,
+  equipTitle as equipTitleData,
+  getCurrentEquippedTitle,
+  getUnclaimedRewardCount,
+  clearNewAchievementNotifications,
+  getRarityLabel as getAchievementRarityLabel,
+  getRarityColor as getAchievementRarityColor,
+  getRarityBgColor as getAchievementRarityBgColor,
+  achievementCategories
+} from '@/data/achievements'
 
 export const useGameStore = defineStore('game', () => {
   const currentLevel = ref(1)
@@ -555,6 +571,9 @@ export const useGameStore = defineStore('game', () => {
 
   const community = ref<CommunityState>(createInitialCommunityState())
   const communityNotification = ref<{ show: boolean; type: 'success' | 'info' | 'warning' | 'error'; message: string } | null>(null)
+
+  const achievements = ref<BusinessAchievementState>(createInitialAchievementState())
+  const achievementNotification = ref<{ show: boolean; type: 'unlock' | 'reward' | 'title'; name: string; icon: string } | null>(null)
 
   const secondHandPendingAppraisals = computed(() =>
     secondHand.value.appraisals.filter(a => a.status === 'pending_appraisal')
@@ -2438,6 +2457,15 @@ export const useGameStore = defineStore('game', () => {
     )
     updateAllCollectionStoryProgress()
 
+    updateAchievementProgressAction('levels_cleared', completedLevels.value.length)
+    
+    if (grade === 'S') {
+      const sGradeCount = collection.value.filter(c => 
+        c.extended.clearHistory.some(h => h.grade === 'S')
+      ).length
+      updateAchievementProgressAction('s_grade_levels', sGradeCount + 1)
+    }
+
     return reward
   }
 
@@ -4087,6 +4115,19 @@ export const useGameStore = defineStore('game', () => {
         updateCollabTaskProgress('collection', Math.round(totalCollectionValue.value))
       }
 
+      updateAchievementProgressAction('total_sales', salesHistory.value.length)
+      updateAchievementProgressAction('single_sale_price', salePrice)
+      
+      if (wasBargained) {
+        const bargainCount = salesHistory.value.filter(s => s.wasBargained).length + 1
+        updateAchievementProgressAction('bargain_success', bargainCount)
+      }
+      
+      if (satisfaction >= 80) {
+        const satisfiedCount = salesHistory.value.filter(s => s.customerSatisfaction >= 80).length + 1
+        updateAchievementProgressAction('customer_satisfaction', satisfiedCount)
+      }
+
       const conditionLabel = getConditionLabel(slotConditionScore)
       const slotLabel = currentTimeSlot.value === 'afternoon' ? '午后' : '夜场'
       const bargainNote = wasBargained ? `（砍价成交，初始报价¥${initialAskPrice}）` : ''
@@ -4872,6 +4913,13 @@ export const useGameStore = defineStore('game', () => {
     }
     dailyStats.value.push(stats)
 
+    const dailyProfit = dailyRevenue.value - dailyCost.value
+    updateAchievementProgressAction('daily_profit', dailyProfit)
+    updateAchievementProgressAction('total_profit', totalProfit.value)
+    updateAchievementProgressAction('avg_satisfaction', Math.round(avgSatisfaction))
+    updateAchievementProgressAction('consecutive_days', currentDay.value)
+    updateAchievementProgressAction('member_count', members.value.length)
+
     phase.value = 'settlement'
   }
 
@@ -5428,6 +5476,16 @@ export const useGameStore = defineStore('game', () => {
     collectionItem.extended.source = source
     
     collection.value.push(collectionItem)
+
+    updateAchievementProgressAction('collection_count', collection.value.length)
+    updateAchievementProgressAction('collection_value', totalCollectionValue.value)
+    
+    if (record.rarity >= 4) {
+      const rareCount = collection.value.filter(c => 
+        c.record.rarity >= 4
+      ).length
+      updateAchievementProgressAction('rare_records', rareCount)
+    }
 
     updateQuestProgressAction({
       type: 'collect_record',
@@ -7973,6 +8031,102 @@ export const useGameStore = defineStore('game', () => {
   const getCollabTaskStatusColor = getTaskStatusColor
   const getCollabThemeConfig = getThemeConfig
 
+  const getUnclaimedAchievementRewardCount = computed(() => {
+    return getUnclaimedRewardCount(achievements.value)
+  })
+
+  const getCurrentTitle = computed((): BusinessTitleConfig | null => {
+    return getCurrentEquippedTitle(achievements.value)
+  })
+
+  const updateAchievementProgressAction = (type: AchievementProgressUpdateType, value: number) => {
+    const result = updateAchievementProgress(achievements.value, type, value)
+    achievements.value = result.state
+
+    if (result.newlyUnlocked.length > 0) {
+      const firstUnlocked = result.newlyUnlocked[0]
+      const ach = achievements.value.achievements.find(a => a.id === firstUnlocked)
+      if (ach) {
+        showAchievementNotification('unlock', ach.name, ach.icon)
+      }
+    }
+  }
+
+  const showAchievementNotification = (type: 'unlock' | 'reward' | 'title', name: string, icon: string) => {
+    achievementNotification.value = { show: true, type, name, icon }
+    setTimeout(() => {
+      achievementNotification.value = null
+    }, 3000)
+  }
+
+  const claimAchievementRewardAction = (achievementId: string): { success: boolean; message: string } => {
+    const result = claimAchievementRewardData(achievements.value, achievementId)
+    
+    if (!result.success) {
+      return { success: false, message: '无法领取奖励' }
+    }
+
+    achievements.value = result.state
+
+    if (result.reward.budget) {
+      budget.value += result.reward.budget
+    }
+    if (result.reward.reputation) {
+      shopReputation.value = Math.min(100, shopReputation.value + result.reward.reputation)
+    }
+
+    const ach = achievements.value.achievements.find(a => a.id === achievementId)
+    if (ach) {
+      showAchievementNotification('reward', ach.name, ach.icon)
+    }
+
+    return {
+      success: true,
+      message: `成功领取奖励！${result.reward.budget ? `资金 +¥${result.reward.budget}` : ''} ${result.reward.reputation ? `声望 +${result.reward.reputation}` : ''}`
+    }
+  }
+
+  const equipTitleAction = (titleId: string): { success: boolean; message: string } => {
+    const result = equipTitleData(achievements.value, titleId)
+    
+    if (!result.success) {
+      return { success: false, message: '无法装备该称号' }
+    }
+
+    achievements.value = result.state
+    const title = achievements.value.titles.find(t => t.id === titleId)
+    if (title) {
+      showAchievementNotification('title', title.name, title.icon)
+    }
+
+    return { success: true, message: `已装备称号：${title?.name || ''}` }
+  }
+
+  const clearAchievementNotifications = () => {
+    achievements.value = clearNewAchievementNotifications(achievements.value)
+  }
+
+  const checkDailyAchievements = () => {
+    updateAchievementProgressAction('total_sales', salesHistory.value.length)
+    updateAchievementProgressAction('total_profit', totalProfit.value)
+    updateAchievementProgressAction('collection_count', collection.value.length)
+    
+    const rareRecords = collection.value.filter(c => c.record.rarity >= 4).length
+    updateAchievementProgressAction('rare_records', rareRecords)
+    
+    const perfectRecords = collection.value.filter(c => c.conditionScore >= 90).length
+    updateAchievementProgressAction('perfect_records', perfectRecords)
+    
+    updateAchievementProgressAction('levels_cleared', completedLevels.value.length)
+    updateAchievementProgressAction('member_count', members.value.length)
+    updateAchievementProgressAction('consecutive_days', currentDay.value)
+
+    if (currentLevelSatisfactionCount.value > 0) {
+      const avgSatisfaction = currentLevelSatisfactionSum.value / currentLevelSatisfactionCount.value
+      updateAchievementProgressAction('avg_satisfaction', Math.round(avgSatisfaction))
+    }
+  }
+
   return {
     currentLevel,
     currentDay,
@@ -8443,6 +8597,19 @@ export const useGameStore = defineStore('game', () => {
     getCollabTaskTypeLabel,
     getCollabTaskStatusLabel,
     getCollabTaskStatusColor,
-    getCollabThemeConfig
+    getCollabThemeConfig,
+    achievements,
+    achievementNotification,
+    getUnclaimedAchievementRewardCount,
+    getCurrentTitle,
+    updateAchievementProgressAction,
+    claimAchievementRewardAction,
+    equipTitleAction,
+    clearAchievementNotifications,
+    checkDailyAchievements,
+    achievementCategories,
+    getAchievementRarityLabel,
+    getAchievementRarityColor,
+    getAchievementRarityBgColor
   }
 })
