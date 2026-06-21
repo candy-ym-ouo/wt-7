@@ -422,31 +422,33 @@ export const getHeatLevelLabel = (heatLevel: string): string => {
   return labels[heatLevel] || '未知'
 }
 
-export const likePost = (postId: string, state: CommunityState): { post: CommunityPost | undefined; reputationGain: number } => {
+export const likePost = (postId: string, state: CommunityState): { post: CommunityPost | undefined; reputationGain: number; growthPoints: number } => {
   const post = state.posts.find(p => p.id === postId)
-  if (!post) return { post: undefined, reputationGain: 0 }
+  if (!post) return { post: undefined, reputationGain: 0, growthPoints: 0 }
 
   if (post.isLiked) {
     post.likes = Math.max(0, post.likes - 1)
     post.isLiked = false
-    return { post: { ...post }, reputationGain: 0 }
+    return { post: { ...post }, reputationGain: 0, growthPoints: 0 }
   } else {
     post.likes += 1
     post.isLiked = true
     state.stats.totalLikes += 1
     const reputationGain = 1
-    return { post: { ...post }, reputationGain }
+    const growthPoints = updateRewardProgress(state, 'likes', 1)
+    return { post: { ...post }, reputationGain, growthPoints }
   }
 }
 
-export const sharePost = (postId: string, state: CommunityState): { post: CommunityPost | undefined; reputationGain: number } => {
+export const sharePost = (postId: string, state: CommunityState): { post: CommunityPost | undefined; reputationGain: number; growthPoints: number } => {
   const post = state.posts.find(p => p.id === postId)
-  if (!post) return { post: undefined, reputationGain: 0 }
+  if (!post) return { post: undefined, reputationGain: 0, growthPoints: 0 }
 
   post.shares += 1
   state.stats.totalShares += 1
   const reputationGain = 2
-  return { post: { ...post }, reputationGain }
+  const growthPoints = updateRewardProgress(state, 'shares', 1)
+  return { post: { ...post }, reputationGain, growthPoints }
 }
 
 export const createPost = (
@@ -543,12 +545,17 @@ export const signupForEvent = (eventId: string, state: CommunityState, reputatio
   event.currentParticipants += 1
   state.stats.eventsParticipated += 1
 
+  updateRewardProgress(state, 'event_participation', 1)
+
   const eventReward = state.rewards.find(r => r.type === 'event_reward')
   if (eventReward) {
     eventReward.requirement.current = Math.min(
       eventReward.requirement.current + 1,
       eventReward.requirement.target
     )
+    if (eventReward.requirement.current >= eventReward.requirement.target) {
+      eventReward.isClaimable = true
+    }
   }
 
   return {
@@ -625,4 +632,63 @@ export const formatTimeAgo = (timestamp: number): string => {
   if (minutes < 60) return `${minutes}分钟前`
   if (hours < 24) return `${hours}小时前`
   return `${days}天前`
+}
+
+export const refreshCommunityDaily = (state: CommunityState, currentDay: number) => {
+  if (state.lastRefreshDay >= currentDay) return
+
+  state.todayCheckedIn = false
+  state.lastRefreshDay = currentDay
+
+  state.stats.dailyPosts = 0
+
+  state.channels.forEach(channel => {
+    if (channel.isUnlocked) {
+      channel.currentReach += channel.dailyGrowth
+    }
+  })
+
+  state.events.forEach(event => {
+    if (currentDay >= event.signupStartDay && currentDay <= event.signupEndDay && event.status === 'upcoming') {
+      event.status = 'signup'
+    }
+    if (currentDay > event.signupEndDay && event.status === 'signup') {
+      event.status = 'upcoming'
+    }
+    if (currentDay === event.eventDay && (event.status === 'signup' || event.status === 'upcoming')) {
+      event.status = 'in_progress'
+    }
+    if (currentDay > event.eventDay && event.status === 'in_progress') {
+      event.status = 'ended'
+      event.satisfaction = 4 + Math.random() * 1.5
+    }
+  })
+
+  state.rewards.forEach(reward => {
+    if (!reward.isClaimed && reward.requirement.current >= reward.requirement.target) {
+      reward.isClaimable = true
+    }
+  })
+}
+
+export const updateRewardProgress = (
+  state: CommunityState,
+  requirementType: 'posts' | 'likes' | 'shares' | 'checkin_days' | 'referrals' | 'event_participation',
+  increment: number = 1
+): number => {
+  let totalGrowthPoints = 0
+
+  state.rewards.forEach(reward => {
+    if (!reward.isClaimed && reward.requirement.type === requirementType) {
+      reward.requirement.current = Math.min(
+        reward.requirement.current + increment,
+        reward.requirement.target
+      )
+      if (reward.requirement.current >= reward.requirement.target) {
+        reward.isClaimable = true
+      }
+    }
+  })
+
+  return totalGrowthPoints
 }

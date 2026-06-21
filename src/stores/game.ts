@@ -347,7 +347,8 @@ import {
   getTrendColor as getTrendColorData,
   getTrendIcon as getTrendIconData,
   getHeatLevelLabel as getHeatLevelLabelData,
-  getGenreIcon as getGenreIconData
+  getGenreIcon as getGenreIconData,
+  refreshCommunityDaily
 } from '@/data/community'
 import type {
   CommunityState, CommunityPost, CommunityPostType,
@@ -4858,6 +4859,7 @@ export const useGameStore = defineStore('game', () => {
           currentDay.value++
           advanceFestivalDay()
           resetDailyStats()
+          refreshCommunityDailyState()
           dailyPurchaseAmountPerSupplier.value.clear()
           phase.value = 'purchase'
           stopPlaying()
@@ -5087,18 +5089,24 @@ export const useGameStore = defineStore('game', () => {
     community.value.selectedTab = tab
   }
 
-  const likeCommunityPost = (postId: string): { post: CommunityPost | undefined; reputationGain: number } => {
+  const likeCommunityPost = (postId: string): { post: CommunityPost | undefined; reputationGain: number; growthPoints: number } => {
     const result = likePostData(postId, community.value)
     if (result.reputationGain > 0) {
       shopReputation.value = Math.min(100, shopReputation.value + result.reputationGain)
     }
+    if (result.growthPoints > 0) {
+      dailyGrowthPointsEarned.value += result.growthPoints
+    }
     return result
   }
 
-  const shareCommunityPost = (postId: string): { post: CommunityPost | undefined; reputationGain: number } => {
+  const shareCommunityPost = (postId: string): { post: CommunityPost | undefined; reputationGain: number; growthPoints: number } => {
     const result = sharePostData(postId, community.value)
     if (result.reputationGain > 0) {
       shopReputation.value = Math.min(100, shopReputation.value + result.reputationGain)
+    }
+    if (result.growthPoints > 0) {
+      dailyGrowthPointsEarned.value += result.growthPoints
     }
     return result
   }
@@ -5171,6 +5179,7 @@ export const useGameStore = defineStore('game', () => {
     if (result.success) {
       if (result.budgetGained) budget.value += result.budgetGained
       if (result.reputationGained) shopReputation.value = Math.min(100, shopReputation.value + result.reputationGained)
+      if (result.growthPointsGained) dailyGrowthPointsEarned.value += result.growthPointsGained
     }
     return result
   }
@@ -5227,6 +5236,11 @@ export const useGameStore = defineStore('game', () => {
   const signupCommunityEvent = signupForCommunityEvent
 
   const refreshCommunityChannels = () => {
+    updateChannelsByReputation(community.value, shopReputation.value)
+  }
+
+  const refreshCommunityDailyState = () => {
+    refreshCommunityDaily(community.value, currentDay.value)
     updateChannelsByReputation(community.value, shopReputation.value)
   }
 
@@ -7890,6 +7904,7 @@ export const useGameStore = defineStore('game', () => {
     getCommunityTrendIcon,
     getCommunityHeatLevelLabel,
     formatCommunityTimeAgo,
-    refreshCommunityChannels
+    refreshCommunityChannels,
+    refreshCommunityDailyState
   }
 })
